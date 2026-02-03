@@ -1,0 +1,8 @@
+UserID,UserName,JournalFile,Rank
+1,Rich,journal.csv,1
+2,Dev,journal_dev.csv,3
+3,TragicGurl,journal_tragicgurl.csv,2
+4,Stem,journal_stem.csv,4
+5,Meds,journal_meds.csv,6
+6,Chris,journal_chris.csv,7
+7,Al,journal_al.csv,5
