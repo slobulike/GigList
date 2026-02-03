@@ -551,8 +551,12 @@ async function openModal(journalKey) {
 
     const dateParts = entry.Date.split('/');
     const formattedDate = `${dateParts[2]}-${dateParts[1]}-${dateParts[0]}`;
-    const cleanVenue = entry.OfficialVenue.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-]/g, '');
-    const imagePath = `assets/scrapbook/${formattedDate}-${cleanVenue}.jpg`;
+    const cleanVenue = entry.OfficialVenue
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '-') // Replace anything not a letter or number with a dash
+        .replace(/-+/g, '-');        // Collapse multiple dashes into one
+    const filename = `${formattedDate}-${cleanVenue}.jpg`;
+    const imagePath = `assets/scrapbook/${filename}`;
 
     const companion = entry['Went With'] && entry['Went With'] !== "Alone" ? 
         `<span class="flex items-center gap-1.5 bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full text-[10px] font-bold">
