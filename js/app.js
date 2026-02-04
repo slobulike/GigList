@@ -39,7 +39,7 @@ async function loadData() {
         journalData = journal.sort((a, b) => {
             const dateA = a.Date.split('/').reverse().join('');
             const dateB = b.Date.split('/').reverse().join('');
-            return dateB.localeCompare(dateA); 
+            return dateB.localeCompare(dateA);
         });
 
         const fullUser = users.find(u => u.UserID === currentUser.UserID);
@@ -49,8 +49,8 @@ async function loadData() {
         }
 
         updateDashboardStats();
-        initMap(); 
-        
+        initMap();
+
         const searchInput = document.getElementById('searchInput');
         if (searchInput) searchInput.addEventListener('input', refreshUI);
 
@@ -126,7 +126,7 @@ function refreshUI() {
         const journalKey = row['Journal Key'];
 
         // Logic for specialized matches
-        const hasSongMatch = query.length > 2 && performanceData.some(p => 
+        const hasSongMatch = query.length > 2 && performanceData.some(p =>
             p['Journal Key'] === journalKey && (p['Setlist'] || "").toLowerCase().includes(query)
         );
         const isFestivalMatch = query.length > 2 && !band.includes(query) && lineup.includes(query);
@@ -146,7 +146,7 @@ function refreshUI() {
     if (typeof renderCharts === "function") renderCharts(filtered);
     if (window.leafletMap && typeof updateMap === "function") updateMap(filtered, venueData);
     if (typeof window.loadThrowback === "function") window.loadThrowback(journalData);
-    
+
     if (window.lucide) lucide.createIcons();
 }
 
@@ -155,11 +155,11 @@ function renderTable(data, query) {
     if (!tbody) return;
 
     tbody.innerHTML = data.map(row => {
-        const photos = row.Photos && row.Photos !== "nan" && row.Photos !== "" ? 
+        const photos = row.Photos && row.Photos !== "nan" && row.Photos !== "" ?
             `<a href="${row.Photos}" target="_blank" onclick="event.stopPropagation()" aria-label="View photo album">
                 <i data-lucide="camera" class="w-4 h-4"></i>
             </a>` : '';
-        
+
         const safeKey = row['Journal Key'].replace(/'/g, "\\'");
 
         // Build Badge Labels
@@ -174,7 +174,7 @@ function renderTable(data, query) {
         }
 
         return `
-            <tr class="hover:bg-slate-50 cursor-pointer border-b border-slate-50 transition-colors" 
+            <tr class="hover:bg-slate-50 cursor-pointer border-b border-slate-50 transition-colors"
                 onclick="openModal('${safeKey}')" role="button" tabindex="0"
                 aria-label="View details for ${row.Band} at ${row.OfficialVenue}">
                 <td class="px-4 py-4 text-[10px] font-bold text-slate-500 font-mono w-24">${row.Date}</td>
@@ -204,7 +204,7 @@ function renderBadges() {
     const totalGigs = journalData.length;
     const artistCounts = {};
     const venueCounts = {};
-    
+
     journalData.forEach(entry => {
         artistCounts[entry.Band] = (artistCounts[entry.Band] || 0) + 1;
         venueCounts[entry.OfficialVenue] = (venueCounts[entry.OfficialVenue] || 0) + 1;
@@ -223,15 +223,15 @@ function renderBadges() {
         { id: 'explorer', name: 'Venue Explorer', desc: 'Visited 10+ different venues', icon: 'map-pin', earned: uniqueVenues >= 10, sub: `${uniqueVenues} venues found` },
         { id: 'obsessed', name: 'Officially Obsessed', desc: 'Seen the same artist 25+ times', icon: 'crown', earned: maxArtistShows >= 25, sub: maxArtistShows > 0 ? `Max: ${maxArtistShows} shows` : '' },
         { id: 'monthly-resident', name: 'Local Hero', desc: 'Attended a gig in 3 consecutive months', icon: 'calendar-days', earned: checkConsecutiveMonths(journalData) >= 3 },
-        { 
-            id: 'festival-pro', 
-            name: 'Mud & Music', 
-            desc: 'Attended 3+ Festivals', 
-            icon: 'tent', 
+        {
+            id: 'festival-pro',
+            name: 'Mud & Music',
+            desc: 'Attended 3+ Festivals',
+            icon: 'tent',
             earned: journalData.filter(g => {
                 const festValue = g['Festival?'] || g['Festival? Y/N'] || "";
                 return festValue.trim().toUpperCase() === 'Y';
-            }).length >= 3 
+            }).length >= 3
         }
     ];
 
@@ -298,18 +298,18 @@ function renderCharts(filtered) {
         type: 'bar',
         data: {
             labels: fullTimelineLabels,
-            datasets: [{ 
-                data: fullTimelineLabels.map(y => filteredCounts[y] || 0), 
-                backgroundColor: '#4f46e5', 
-                borderRadius: 4 
+            datasets: [{
+                data: fullTimelineLabels.map(y => filteredCounts[y] || 0),
+                backgroundColor: '#4f46e5',
+                borderRadius: 4
             }]
         },
         options: {
             maintainAspectRatio: false,
             plugins: { legend: { display: false } },
-            scales: { 
-                y: { display: false }, 
-                x: { grid: { display: false }, ticks: { font: { size: 8 }, autoSkip: true } } 
+            scales: {
+                y: { display: false },
+                x: { grid: { display: false }, ticks: { font: { size: 8 }, autoSkip: true } }
             },
             onClick: (e, el) => {
                 if(el.length) {
@@ -338,10 +338,10 @@ function renderCharts(filtered) {
         type: 'doughnut',
         data: {
             labels: topComps.map(c => c[0]),
-            datasets: [{ 
-                data: topComps.map(c => c[1]), 
-                backgroundColor: ['#4f46e5', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#3b82f6', '#06b6d4', '#84cc16', '#ef4444', '#f97316'], 
-                borderWeight: 0 
+            datasets: [{
+                data: topComps.map(c => c[1]),
+                backgroundColor: ['#4f46e5', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#3b82f6', '#06b6d4', '#84cc16', '#ef4444', '#f97316'],
+                borderWeight: 0
             }]
         },
         options: {
@@ -364,7 +364,7 @@ window.switchView = function(viewId) {
 
 	if (viewId === 'home') {
         renderCarouselItem(0); // Always reset to the first card when returning home
-    }    
+    }
 
     // This creates 'view-achievements', 'view-home', etc.
     const targetView = document.getElementById(`view-${viewId}`);
@@ -374,7 +374,7 @@ window.switchView = function(viewId) {
         n.classList.remove('active', 'text-indigo-600');
         n.classList.add('text-slate-400');
     });
-    
+
     const activeNav = document.getElementById(`nav-${viewId}`);
     if (activeNav) activeNav.classList.add('active', 'text-indigo-600');
 
@@ -382,7 +382,7 @@ window.switchView = function(viewId) {
         setTimeout(() => {
             window.leafletMap.invalidateSize();
             window.leafletMap.eachLayer(layer => { if (layer._url) layer.redraw(); });
-        }, 400); 
+        }, 400);
     }
 
     // FIX: viewId is just 'achievements', so check for that
@@ -397,7 +397,7 @@ window.loadThrowback = function(gigs) {
     const today = new Date();
     const currentMonth = today.getMonth() + 1;
     const currentDay = today.getDate();
-    
+
     // Anniversary Filter
     const anniversaryGigs = gigs.filter(g => {
         const [d, m, y] = g.Date.split('/').map(Number);
@@ -463,39 +463,39 @@ function renderCarouselItem(index) {
     const displayImage = getOptimizedUrl(item.image);
 
     // 2. ACCESSIBILITY LABEL
-    const a11yLabel = item.isCTA 
-        ? "Ready for more? Tap right for Data Lab, tap left for previous memory." 
+    const a11yLabel = item.isCTA
+        ? "Ready for more? Tap right for Data Lab, tap left for previous memory."
         : `${item.badge}: ${item.band}. Tap right for next, left for previous.`;
 
     // 3. SINGLE RENDER BLOCK
     card.innerHTML = `
-        <div class="relative h-full w-full overflow-hidden rounded-[2.5rem] bg-slate-900" 
+        <div class="relative h-full w-full overflow-hidden rounded-[2.5rem] bg-slate-900"
              role="region" aria-label="Gig Memories">
-            
-            <img src="${displayImage}" 
-                 class="absolute inset-0 w-full h-full object-cover shadow-inner" 
+
+            <img src="${displayImage}"
+                 class="absolute inset-0 w-full h-full object-cover shadow-inner"
                  loading="lazy"
                  alt="" aria-hidden="true"
                  onerror="this.src='${fallbackImage}'">
-            
+
             <div class="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-slate-950/40 to-transparent" aria-hidden="true"></div>
 
             <div class="absolute inset-0 z-20 flex">
-                <div onclick="event.stopPropagation(); rotateCarousel(-1)" 
-                     class="h-full w-1/2 cursor-w-resize" 
+                <div onclick="event.stopPropagation(); rotateCarousel(-1)"
+                     class="h-full w-1/2 cursor-w-resize"
                      role="button" aria-label="Previous card"></div>
-                
-                <div onclick="event.stopPropagation(); rotateCarousel(1)" 
-                     class="h-full w-1/2 cursor-e-resize" 
+
+                <div onclick="event.stopPropagation(); rotateCarousel(1)"
+                     class="h-full w-1/2 cursor-e-resize"
                      role="button" aria-label="Next card"></div>
             </div>
 
             <div class="absolute inset-0 z-30 p-8 flex flex-col justify-end pointer-events-none">
                 <div class="pointer-events-auto max-w-[80%]">
-                    <div onclick="event.stopPropagation(); ${item.isCTA ? "switchView('data')" : "openModalFromCarousel('" + index + "')"}" 
+                    <div onclick="event.stopPropagation(); ${item.isCTA ? "switchView('data')" : "openModalFromCarousel('" + index + "')"}"
                          class="cursor-pointer group"
                          role="button" tabindex="0" aria-label="${a11yLabel}">
-                        
+
                         <span class="inline-block bg-indigo-600 text-white text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full mb-3">
                             ${item.badge}
                         </span>
@@ -509,7 +509,7 @@ function renderCarouselItem(index) {
 
                     <div class="flex gap-1.5 mt-6">
                         ${homeCarousel.map((_, i) => `
-                            <div onclick="event.stopPropagation(); renderCarouselItem(${i})" 
+                            <div onclick="event.stopPropagation(); renderCarouselItem(${i})"
                                  class="h-1 rounded-full transition-all duration-300 ${i === index ? 'w-8 bg-indigo-500' : 'w-2 bg-white/30 hover:bg-white/50'}"
                                  role="button" aria-label="Slide ${i + 1}">
                             </div>
@@ -537,7 +537,7 @@ function rotateCarousel(direction) {
 
     // 3. Normal Step
     const nextIndex = currentCarouselIndex + direction;
-    
+
     // Safety check to ensure we stay within the 4 cards
     if (nextIndex >= 0 && nextIndex < homeCarousel.length) {
         renderCarouselItem(nextIndex);
@@ -558,14 +558,14 @@ async function openModal(journalKey) {
     const filename = `${formattedDate}-${cleanVenue}.jpg`;
     const imagePath = `assets/scrapbook/${filename}`;
 
-    const companion = entry['Went With'] && entry['Went With'] !== "Alone" ? 
+    const companion = entry['Went With'] && entry['Went With'] !== "Alone" ?
         `<span class="flex items-center gap-1.5 bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full text-[10px] font-bold">
             <i data-lucide="users" class="w-3 h-3"></i> ${entry['Went With']}
         </span>` : '';
 
-const comments = entry.Comments && entry.Comments !== "nan" ? 
-    `<div class="mt-6 p-5 bg-slate-50 rounded-[2rem] border border-slate-100 relative" 
-          role="complementary" 
+const comments = entry.Comments && entry.Comments !== "nan" ?
+    `<div class="mt-6 p-5 bg-slate-50 rounded-[2rem] border border-slate-100 relative"
+          role="complementary"
           aria-label="Gig notes">
         <span class="absolute -top-3 left-6 bg-slate-900 text-[10px] text-white font-black uppercase tracking-widest px-3 py-1 rounded-full underline decoration-indigo-500 underline-offset-2">
             Notes
@@ -613,7 +613,7 @@ const comments = entry.Comments && entry.Comments !== "nan" ?
     } catch (e) {}
 
     const gridClass = imageHTML ? "grid grid-cols-1 md:grid-cols-[300px_1fr] gap-10" : "grid grid-cols-1 gap-6";
-    
+
     document.getElementById('mSetlists').innerHTML = `
         <div class="${gridClass}">
             ${imageHTML}
@@ -658,7 +658,7 @@ if (identityEl) {
 
 function checkConsecutiveMonths(data) {
     if (!data || data.length === 0) return 0;
-    
+
     // Get unique year-month strings (e.g., "2024-05")
     const activeMonths = [...new Set(data.map(g => {
         const parts = g.Date.split('/');

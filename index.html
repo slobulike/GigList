@@ -4,107 +4,122 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gig List - Profile Selection</title>
-    
-    <link rel="icon" type="image/png" href="favicon.png">
-    
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎸</text></svg>">
+    <link rel="icon" type="image/png" href="assets/icon-512.png">
+
+    <link rel="manifest" href="manifest.json">
+
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="GigVault">
+    <link rel="apple-touch-icon" href="assets/icon-512.png">
+
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
-    
+
     <style>
         body { font-family: 'Inter', sans-serif; }
         .user-card:active { transform: scale(0.98); }
         /* Ensure focus states are visible for keyboard users */
-        .user-card:focus-visible { 
-            outline: 3px solid #4f46e5; 
+        .user-card:focus-visible {
+            outline: 3px solid #4f46e5;
             outline-offset: 4px;
         }
     </style>
 </head>
+
 <body class="bg-slate-50 flex flex-col items-center justify-center min-h-screen p-6">
 
-    <main class="w-full max-w-sm space-y-8" role="main">
-        
-        <header class="text-center space-y-2">
-            <div class="inline-flex items-center justify-center w-20 h-20 bg-indigo-600 rounded-[2rem] shadow-xl shadow-indigo-200 mb-4 rotate-3" aria-hidden="true">
-                <span class="text-4xl">🎸</span>
-            </div>
-            <h1 class="text-5xl font-black italic tracking-tighter text-slate-900">GIG LIST</h1>
-            <p id="instruction" class="text-slate-400 font-bold text-sm uppercase tracking-widest">Select Profile to Enter</p>
-        </header>
+<main class="w-full max-w-sm space-y-8" role="main">
 
-        <div id="userList" 
-             class="space-y-3" 
-             role="list" 
-             aria-labelledby="instruction" 
-             aria-live="polite">
-            
-            <div class="animate-pulse space-y-3" aria-hidden="true">
-                <div class="h-20 bg-slate-200 rounded-3xl w-full"></div>
-                <div class="h-20 bg-slate-200 rounded-3xl w-full"></div>
-            </div>
+    <header class="text-center space-y-2">
+        <div class="inline-flex items-center justify-center w-20 h-20 bg-indigo-600 rounded-[2rem] shadow-xl shadow-indigo-200 mb-4 rotate-3" aria-hidden="true">
+            <span class="text-4xl">🎸</span>
         </div>
+        <h1 class="text-5xl font-black italic tracking-tighter text-slate-900">GIG LIST</h1>
+        <p id="instruction" class="text-slate-400 font-bold text-sm uppercase tracking-widest">Select Profile to Enter</p>
+    </header>
 
-        <footer class="pt-8">
-            <p class="text-center text-[10px] text-slate-300 font-black uppercase tracking-widest">
-                &copy; 2026 Archive Engine
-            </p>
-        </footer>
-    </main>
+    <div id="userList"
+         class="space-y-3"
+         role="list"
+         aria-labelledby="instruction"
+         aria-live="polite">
 
-    <script>
-        const csvPath = `data/users.csv?v=${new Date().getTime()}`;
+        <div class="animate-pulse space-y-3" aria-hidden="true">
+            <div class="h-20 bg-slate-200 rounded-3xl w-full"></div>
+            <div class="h-20 bg-slate-200 rounded-3xl w-full"></div>
+        </div>
+    </div>
 
-        Papa.parse(csvPath, {
-            download: true,
-            header: true,
-            skipEmptyLines: true,
-            complete: function(results) {
-                const container = document.getElementById('userList');
-                container.innerHTML = '';
-                
-                if (results.data.length === 0) {
-                    container.innerHTML = '<p class="text-center text-slate-400 py-4" role="status">No profiles found.</p>';
-                    return;
-                }
+    <footer class="pt-8">
+        <p class="text-center text-[10px] text-slate-300 font-black uppercase tracking-widest">
+            &copy; 2026 Archive Engine
+        </p>
+    </footer>
+</main>
 
-                results.data.forEach(user => {
-                    const name = user.UserName || user.user_name;
-                    if(!name) return;
+<script>
+    const csvPath = `data/users.csv?v=${new Date().getTime()}`;
 
-                    // Each user button is wrapped in a listitem role
-                    const wrapper = document.createElement('div');
-                    wrapper.setAttribute('role', 'listitem');
+    Papa.parse(csvPath, {
+        download: true,
+        header: true,
+        skipEmptyLines: true,
+        complete: function(results) {
+            const container = document.getElementById('userList');
+            container.innerHTML = '';
 
-                    const btn = document.createElement('button');
-                    btn.className = "user-card w-full p-6 bg-white border-2 border-white hover:border-indigo-100 shadow-sm hover:shadow-xl hover:shadow-indigo-50 transition-all duration-300 rounded-[2rem] flex justify-between items-center group overflow-hidden relative";
-                    
-                    // Provides the screen reader with the action and the specific name
-                    btn.setAttribute('aria-label', `Enter vault as ${name}`);
-
-                    btn.innerHTML = `
-                        <div class="flex flex-col items-start text-left relative z-10" aria-hidden="true">
-                            <span class="text-xs text-slate-400 font-black uppercase tracking-widest mb-1 group-hover:text-indigo-500 transition-colors">User Profile</span>
-                            <span class="text-2xl font-black text-slate-900 tracking-tighter">${name}</span>
-                        </div>
-                        <div class="bg-slate-50 group-hover:bg-indigo-600 w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-300 relative z-10" aria-hidden="true">
-                            <span class="text-slate-400 group-hover:text-white font-black">→</span>
-                        </div>
-                        <div class="absolute -right-4 -bottom-4 w-24 h-24 bg-indigo-50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" aria-hidden="true"></div>
-                    `;
-
-                    btn.onclick = () => {
-                        localStorage.setItem('gv_user', JSON.stringify(user));
-                        window.location.href = 'vault.html';
-                    };
-                    
-                    wrapper.appendChild(btn);
-                    container.appendChild(wrapper);
-                });
+            if (results.data.length === 0) {
+                container.innerHTML = '<p class="text-center text-slate-400 py-4" role="status">No profiles found.</p>';
+                return;
             }
-        });
-    </script>
+
+            results.data.forEach(user => {
+                const name = user.UserName || user.user_name;
+                if(!name) return;
+
+                // Each user button is wrapped in a listitem role
+                const wrapper = document.createElement('div');
+                wrapper.setAttribute('role', 'listitem');
+
+                const btn = document.createElement('button');
+                btn.className = "user-card w-full p-6 bg-white border-2 border-white hover:border-indigo-100 shadow-sm hover:shadow-xl hover:shadow-indigo-50 transition-all duration-300 rounded-[2rem] flex justify-between items-center group overflow-hidden relative";
+
+                // Provides the screen reader with the action and the specific name
+                btn.setAttribute('aria-label', `Enter vault as ${name}`);
+
+                btn.innerHTML = `
+                    <div class="flex flex-col items-start text-left relative z-10" aria-hidden="true">
+                        <span class="text-xs text-slate-400 font-black uppercase tracking-widest mb-1 group-hover:text-indigo-500 transition-colors">User Profile</span>
+                        <span class="text-2xl font-black text-slate-900 tracking-tighter">${name}</span>
+                    </div>
+                    <div class="bg-slate-50 group-hover:bg-indigo-600 w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-300 relative z-10" aria-hidden="true">
+                        <span class="text-slate-400 group-hover:text-white font-black">→</span>
+                    </div>
+                    <div class="absolute -right-4 -bottom-4 w-24 h-24 bg-indigo-50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" aria-hidden="true"></div>
+                `;
+
+                btn.onclick = () => {
+                    localStorage.setItem('gv_user', JSON.stringify(user));
+                    window.location.href = 'vault.html';
+                };
+
+                wrapper.appendChild(btn);
+                container.appendChild(wrapper);
+            });
+        }
+    });
+</script>
+<script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js')
+        .then(() => console.log("Service Worker Registered"))
+        .catch((err) => console.log("Service Worker Failed", err));
+    }
+</script>
 </body>
 </html>
