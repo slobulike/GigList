@@ -55,3 +55,82 @@
     white-space: nowrap;
     border-width: 0;
 }
+
+/* The Ticket Container */
+.mock-ticket {
+    background: #fefcf0; /* Aged paper color */
+    color: #1a1a1a;
+    font-family: 'Courier New', Courier, monospace;
+    padding: 20px;
+    position: relative;
+    border: 1px solid #d1d1d1;
+    box-shadow: 2px 5px 15px rgba(0,0,0,0.1);
+    filter: url(#crinkle-effect); /* This applies the mosh-pit texture */
+    max-width: 400px;
+    margin: 0 auto;
+}
+
+/* Perforation line */
+.ticket-perf {
+    border-top: 2px dashed #ccc;
+    margin: 15px 0;
+}
+
+/* Thermal Printer Style */
+.thermal-text {
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: bold;
+}
+
+<link href="https://fonts.googleapis.com/css2?family=Reenie+Beanie&display=swap" rel="stylesheet">
+
+<style>
+/* The Base Ticket */
+.mock-ticket {
+    background: #fdfaf0;
+    color: #222;
+    font-family: 'Courier New', Courier, monospace;
+    padding: 24px;
+    width: 320px;
+    position: relative;
+    box-shadow: 10px 10px 25px rgba(0,0,0,0.2);
+    filter: url(#crinkle-effect); /* The secret sauce */
+    border: 1px solid #e0ddd0;
+    overflow: hidden;
+}
+
+/* Subtle Paper Texture */
+.mock-ticket::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    opacity: 0.05;
+    pointer-events: none;
+    background-image: url("https://www.transparenttextures.com/patterns/felt.png");
+}
+
+.ticket-header {
+    border-bottom: 2px solid #333;
+    padding-bottom: 8px;
+    margin-bottom: 12px;
+}
+
+.ticket-perf {
+    border-top: 2px dashed #bbb;
+    margin: 20px 0;
+    position: relative;
+}
+
+/* The "Mosh Pit" crinkle filter */
+#crinkle-effect {
+    display: none;
+}
+
+.handwritten {
+    font-family: 'Reenie Beanie', cursive;
+    font-size: 2rem;
+    color: #1d4ed8; /* Blue pen ink */
+    line-height: 1;
+}
+</style>

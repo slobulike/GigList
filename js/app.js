@@ -1,6 +1,15 @@
 /**
- * Gig List Core Engine - Updated 2026-02-03
+ * Gig List Core Engine
+
+ V1.1.0 - Release Date 2026-02-05
+ Feature: "Mosh-Pit" Ticket Generation (Automatic fallback for missing photos).
+ Feature: High-Res Chart Overlays (Interactive full-screen analytics).
+ Feature: YouTube "Watch Clips" integration (Contextual live video search).
+ Logic: Enhanced Festival Mode layout for multi-band days.
+ Bugfix: Standardized "Festival?" field detection and chart legend labels.
+
  */
+const APP_VERSION = "1.1.0";
 
 let currentUser = JSON.parse(localStorage.getItem('gv_user'));
 let journalData = [], performanceData = [], venueData = [];
@@ -547,86 +556,149 @@ function rotateCarousel(direction) {
 async function openModal(journalKey) {
     const entry = journalData.find(j => j['Journal Key'] === journalKey);
     const sets = performanceData.filter(p => p['Journal Key'] === journalKey);
-    if (!entry) return;
 
+
+    // 1. FESTIVAL DETECTION
+    // Check the dedicated field. We'll check for "Y" or "Yes" just in case.
+    const isFestival = entry['Festival?'] && entry['Festival?'].trim().toUpperCase().startsWith('Y');
+
+    // 2. COMPANIONS
+    const companionList = entry['Went With'] && entry['Went With'] !== "nan" && entry['Went With'] !== "Alone"
+        ? entry['Went With'].split(/[,\/&]/).map(n =>
+            `<span class="bg-indigo-500/20 text-white text-[9px] px-2 py-1 rounded-md font-bold uppercase tracking-wider">${n.trim()}</span>`
+          ).join('')
+        : `<span class="text-[9px] opacity-60 italic text-indigo-200">Solo Mission</span>`;
+
+// 3. HEADER & BUTTONS
+const ytQuery = encodeURIComponent(`${entry.Band} live ${entry.OfficialVenue} ${entry.Date}`);
+const youtubeLink = `https://www.youtube.com/results?search_query=${ytQuery}`;
+
+// Define the buttons/badges area
+const headerActions = `
+    <div class="flex items-center gap-2 mb-2">
+        <a href="${youtubeLink}" target="_blank" class="flex items-center gap-1.5 bg-red-600 hover:bg-red-700 text-white text-[9px] font-black px-3 py-1.5 rounded-full transition-all transform hover:scale-105 shadow-md">
+             <i data-lucide="play-circle" class="w-3"></i> WATCH CLIPS
+        </a>
+        ${isFestival ? '<span class="bg-amber-400 text-black text-[8px] font-black px-2 py-1 rounded uppercase tracking-widest animate-pulse">Festival Mode</span>' : ''}
+    </div>
+`;
+
+document.getElementById('mTitleArea').innerHTML = `
+    ${headerActions}
+
+    <h2 class="text-3xl font-black italic uppercase leading-tight pr-8">${entry.Band}</h2>
+
+    <div class="flex flex-wrap items-center gap-3 mt-3">
+        <div class="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest opacity-70">
+            <i data-lucide="calendar" class="w-3 text-indigo-400"></i> ${entry.Date}
+        </div>
+        <div class="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest opacity-70">
+            <i data-lucide="map-pin" class="w-3 text-indigo-400"></i> ${entry.OfficialVenue}
+        </div>
+    </div>
+
+    <div class="flex flex-wrap items-center gap-2 mt-4 pt-4 border-t border-white/10">
+        <i data-lucide="users" class="w-3 text-indigo-300"></i>
+        ${companionList}
+    </div>
+`;
+
+    // 4. SCRAPBOOK PHOTO (Lower-case & Dash-safe logic)
     const dateParts = entry.Date.split('/');
     const formattedDate = `${dateParts[2]}-${dateParts[1]}-${dateParts[0]}`;
-    const cleanVenue = entry.OfficialVenue
-        .toLowerCase()
-        .replace(/[^a-z0-9]/g, '-') // Replace anything not a letter or number with a dash
-        .replace(/-+/g, '-');        // Collapse multiple dashes into one
-    const filename = `${formattedDate}-${cleanVenue}.jpg`;
-    const imagePath = `assets/scrapbook/${filename}`;
+    const cleanVenue = entry.OfficialVenue.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-');
+    const imagePath = `assets/scrapbook/${formattedDate}-${cleanVenue}.jpg`;
 
-    const companion = entry['Went With'] && entry['Went With'] !== "Alone" ?
-        `<span class="flex items-center gap-1.5 bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full text-[10px] font-bold">
-            <i data-lucide="users" class="w-3 h-3"></i> ${entry['Went With']}
-        </span>` : '';
+    let imageHTML = '';
+    try {
+        const response = await fetch(imagePath, { method: 'HEAD' });
+        if (response.ok) {
+            imageHTML = `
+                <div class="md:col-span-full flex justify-center py-6">
+                    <div class="polaroid">
+                        <img src="${imagePath}" alt="Gig Memorabilia">
+                        <p class="mt-4 font-handwriting text-slate-500 text-center text-2xl">${entry.Band}</p>
+                    </div>
+                </div>`;
+} else {
+    // 1. Get Support Acts (Explicitly exclude the main Band to prevent duplication)
+    const supportActs = sets
+        .filter(s => s.Artist.toLowerCase() !== entry.Band.toLowerCase())
+        .map(s => s.Artist)
+        .join(' + ');
 
-const comments = entry.Comments && entry.Comments !== "nan" ?
-    `<div class="mt-6 p-5 bg-slate-50 rounded-[2rem] border border-slate-100 relative"
-          role="complementary"
-          aria-label="Gig notes">
-        <span class="absolute -top-3 left-6 bg-slate-900 text-[10px] text-white font-black uppercase tracking-widest px-3 py-1 rounded-full underline decoration-indigo-500 underline-offset-2">
-            Notes
-        </span>
-        <p class="text-slate-700 text-sm font-medium leading-normal pt-1">
-            ${entry.Comments}
-        </p>
-    </div>` : '';
+    // 2. Data logic for Price (Printed style)
+    const displayPrice = entry.Price && entry.Price !== "nan" ? entry.Price : `£${(Math.random() * (15 - 8) + 8).toFixed(2)}`;
 
-    document.getElementById('mTitleArea').innerHTML = `
-        <div class="flex flex-wrap items-center gap-3 mb-2">
-            <h2 class="text-3xl font-black italic uppercase leading-none">${entry.Band}</h2>
-            ${companion}
-        </div>
-        <p class="text-[10px] font-bold uppercase tracking-widest opacity-80">${entry.Date} • ${entry.OfficialVenue}</p>
-        ${comments}
-    `;
+    // 3. TICKET FALLBACK (Unified Thermal Style)
+    imageHTML = `
+        <div class="md:col-span-full flex justify-center py-6 px-4">
+            <div class="mock-ticket transform -rotate-1 shadow-2xl">
+                <div class="flex justify-between items-start mb-4">
+                    <span class="text-[10px] font-black border border-black px-1 uppercase">General Admission</span>
+                    <span class="text-[10px] font-black italic uppercase tracking-widest">GigList Live</span>
+                </div>
+
+                <div class="thermal-text text-2xl mb-0.5 leading-none">${entry.Band}</div>
+
+                ${supportActs ? `<div class="text-[10px] font-bold text-slate-600 mb-2 uppercase tracking-tight">+ ${supportActs}</div>` : '<div class="mb-2"></div>'}
+
+                <div class="thermal-text text-sm mb-4 opacity-90">${entry.OfficialVenue}</div>
+
+                <div class="flex justify-between text-[11px] font-bold mb-2">
+                    <span>DATE: ${entry.Date}</span>
+                    <span>DOORS: 19:30</span>
+                </div>
+
+                <div class="ticket-perf"></div>
+
+                <div class="flex justify-between items-end">
+                    <div class="text-[8px] thermal-text leading-tight opacity-60">
+                        NO REFUNDS / NO EXCHANGES<br>
+                        MOSH AT YOUR OWN RISK
+                    </div>
+                    <div class="thermal-text text-xl font-black">
+                        ${displayPrice}
+                    </div>
+                </div>
+
+                <div class="mt-4 h-8 bg-black w-full" style="background: repeating-linear-gradient(90deg, #000, #000 2px, #fff 2px, #fff 4px);"></div>
+            </div>
+        </div>`;
+}
+    } catch (e) { /* Error handling */ }
+
+    // 5. NOTES
+    const notesHTML = entry.Comments && entry.Comments !== "nan" ?
+        `<div class="md:col-span-full p-6 bg-amber-50 border-l-4 border-amber-400 italic text-slate-700 text-sm rounded-r-2xl shadow-sm mb-4">"${entry.Comments}"</div>` : '';
+
+    // 6. SETLIST GRID
+    const gridClass = isFestival ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4' : 'flex flex-col gap-6';
 
     const setlistHTML = sets.map(s => `
-        <div class="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm mb-4">
-            <div class="flex justify-between items-center mb-4 border-b pb-3">
-                <div class="font-black text-indigo-600 uppercase text-sm">${s.Artist}</div>
-                <span class="text-[8px] font-black px-2 py-1 bg-slate-100 rounded-lg uppercase">${s.Role}</span>
+        <div class="bg-white ${isFestival ? 'p-5' : 'p-8'} rounded-[2rem] border border-slate-100 shadow-sm">
+            <div class="flex justify-between items-center mb-3 border-b border-slate-50 pb-3">
+                <div class="font-black text-indigo-600 ${isFestival ? 'text-sm' : 'text-lg'}">${s.Artist}</div>
+                <span class="text-[7px] font-black px-2 py-0.5 bg-slate-100 rounded-lg uppercase text-slate-400">${s.Role}</span>
             </div>
-            <div class="text-xs text-slate-500 leading-relaxed font-medium">
-                ${(s.Setlist && s.Setlist !== 'NOT_FOUND') ? s.Setlist.replace(/\|/g, '<br>') : "Setlist unavailable"}
+            <div class="${isFestival ? 'text-[10px]' : 'text-xs'} text-slate-500 leading-relaxed font-medium">
+                ${(s.Setlist || "No setlist found").replace(/\|/g, '<br>')}
             </div>
         </div>
     `).join('');
 
-    let imageHTML = '';
-    try {
-        const check = await fetch(imagePath, { method: 'HEAD' });
-        if (check.ok) {
-            imageHTML = `
-                <div class="flex justify-center items-start">
-                    <div class="bg-white p-3 pb-10 shadow-xl border border-slate-200 rotate-[-2deg] max-w-[280px]">
-                        <img src="${imagePath}" alt="Memorabilia" class="w-full h-auto">
-                        <p class="mt-4 font-handwriting text-slate-400 text-center text-lg" style="font-family: 'Permanent Marker', cursive;">
-                            ${entry.Band}
-                        </p>
-                    </div>
-                </div>`;
-        }
-    } catch (e) {}
-
-    const gridClass = imageHTML ? "grid grid-cols-1 md:grid-cols-[300px_1fr] gap-10" : "grid grid-cols-1 gap-6";
-
+    // 7. RENDER
     document.getElementById('mSetlists').innerHTML = `
-        <div class="${gridClass}">
-            ${imageHTML}
-            <div class="space-y-4">
-                ${setlistHTML || '<p class="text-center py-10 text-slate-400">No setlist data.</p>'}
-            </div>
+        ${notesHTML}
+        ${imageHTML}
+        <div class="${gridClass} md:col-span-full">
+            ${setlistHTML || '<p class="text-center py-10 text-slate-300 font-bold uppercase">No setlist data</p>'}
         </div>
     `;
 
     document.getElementById('modal').classList.remove('hidden');
-    if (window.lucide) lucide.createIcons();
+    lucide.createIcons();
 }
-
 function closeModal() {
     document.getElementById('modal').classList.add('hidden');
 }
@@ -654,6 +726,72 @@ if (identityEl) {
     identityEl.innerText = currentUser.UserName;
     identityEl.style.cursor = 'pointer';
     identityEl.onclick = openSettings;
+}
+
+let modalChartInstance = null;
+
+function expandChart(chartId, title) {
+    const modal = document.getElementById('chartModal');
+    const modalCanvas = document.getElementById('modalChartCanvas');
+    const originalChart = Chart.getChart(chartId); // Find the existing chart instance
+
+    if (!originalChart) return;
+
+    // Set the title
+    document.getElementById('modalChartTitle').innerText = title;
+
+    // Destroy previous modal chart if it exists
+    if (modalChartInstance) modalChartInstance.destroy();
+
+    // Show modal
+    modal.classList.remove('hidden');
+    document.body.style.overflow = 'hidden'; // Prevent scrolling
+
+    // Create a new chart in the modal using a copy of the original data/options
+modalChartInstance = new Chart(modalCanvas, {
+        type: originalChart.config.type,
+        data: {
+            ...JSON.parse(JSON.stringify(originalChart.config.data)),
+            datasets: originalChart.config.data.datasets.map(ds => ({
+                ...ds,
+                label: ds.label || 'Gigs' // Fixes the "undefined" bug
+            }))
+        },
+        options: {
+    ...originalChart.config.options,
+    maintainAspectRatio: false,
+    plugins: {
+        ...originalChart.config.options.plugins,
+        legend: {
+            display: true,
+            position: 'bottom',
+            labels: {
+                color: '#64748b', // Slate-500
+                font: { weight: 'bold', size: 12 },
+                padding: 20
+            }
+        }
+    },
+    scales: originalChart.config.options.scales ? {
+        x: {
+            ticks: { color: '#64748b', font: { weight: '600' } },
+            grid: { display: false }
+        },
+        y: {
+            ticks: { color: '#64748b', font: { weight: '600' } },
+            grid: { color: '#f1f5f9' }
+        }
+    } : {}
+}
+    });
+
+    lucide.createIcons();
+}
+
+function closeChartModal() {
+    document.getElementById('chartModal').classList.add('hidden');
+    document.body.style.overflow = 'auto';
+    if (modalChartInstance) modalChartInstance.destroy();
 }
 
 function checkConsecutiveMonths(data) {
