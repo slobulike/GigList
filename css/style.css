@@ -134,3 +134,34 @@
     line-height: 1;
 }
 </style>
+
+.custom-scrollbar::-webkit-scrollbar {
+    width: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 10px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #fbbf24; /* Amber-400 */
+    border-radius: 10px;
+}
+
+.mock-ticket {
+    font-family: 'Courier New', Courier, monospace;
+    position: relative;
+    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+/* Add a jagged edge effect to the bottom of the ticket */
+.mock-ticket::after {
+    content: "";
+    position: absolute;
+    bottom: -5px;
+    left: 0;
+    right: 0;
+    height: 10px;
+    background-image: radial-gradient(circle, transparent, transparent 50%, white 50%, white);
+    background-size: 10px 10px;
+    background-repeat: repeat-x;
+}

@@ -1,7 +1,25 @@
 /**
  * Gig List Core Engine
 
+ V1.1.1 - Release Date 2026-02-07
+ * -------------------------------------------------------------------
+ * [FEATURE] Calendar Drill-Down: Interactive month detail "flip" cards
+ * added to the year view, enabling direct modal access.
+ * [FEATURE] Dynamic Ticket Variants: Implemented deterministic pastel
+ * color-ways (Pink, Green, Yellow) and portrait/landscape
+ * layouts for the "Mosh-Pit" ticket generator.
+ * [A11Y]    Accessibility Gold Standard: Managed focus on modal open,
+ * ARIA roles for charts/tickets, and screen-reader labels
+ * for the calendar grid.
+ * [FIX]     Cumulative Search: Search and companion-chart filters
+ * now correctly query "Went With" data.
+ * [FIX]     Home Page Baseline: Restored "Throwback" memory triggers
+ * within the UI refresh router.
+ * [CORE]    Automated Versioning: Linked UI build number to APP_VERSION
+ * variable to eliminate hardcoding.
+
  V1.1.0 - Release Date 2026-02-05
+ * -------------------------------------------------------------------
  Feature: "Mosh-Pit" Ticket Generation (Automatic fallback for missing photos).
  Feature: High-Res Chart Overlays (Interactive full-screen analytics).
  Feature: YouTube "Watch Clips" integration (Contextual live video search).
@@ -9,13 +27,16 @@
  Bugfix: Standardized "Festival?" field detection and chart legend labels.
 
  */
-const APP_VERSION = "1.1.0";
+
+const APP_VERSION = "1.1.1";
 
 let currentUser = JSON.parse(localStorage.getItem('gv_user'));
 let journalData = [], performanceData = [], venueData = [];
 let activeArtist = null, activeYear = null;
 let yearChart, companionChart;
 let homeCarousel = [];
+let filteredResults = [];
+let currentView = 'list';
 let currentCarouselIndex = 0;
 
 async function loadData() {
@@ -29,6 +50,8 @@ async function loadData() {
     const identityEl = document.getElementById('userIdentity');
     if (identityEl) {
         identityEl.innerText = currentUser.UserName;
+        const versionDisplay = document.getElementById('app-version-display');
+        if (versionDisplay) versionDisplay.innerText = APP_VERSION;
         identityEl.style.cursor = 'pointer';
         identityEl.onclick = openSettings;
     }
@@ -131,31 +154,39 @@ function refreshUI() {
         const band = (row['Band'] || "").toLowerCase();
         const venue = (row['OfficialVenue'] || "").toLowerCase();
         const lineup = (row['Festival Lineups'] || "").toLowerCase();
+        const companion = (row['Went With'] || "").toLowerCase();
         const year = (row['Date'] || "").split('/')[2];
         const journalKey = row['Journal Key'];
 
-        // Logic for specialized matches
         const hasSongMatch = query.length > 2 && performanceData.some(p =>
             p['Journal Key'] === journalKey && (p['Setlist'] || "").toLowerCase().includes(query)
         );
         const isFestivalMatch = query.length > 2 && !band.includes(query) && lineup.includes(query);
 
-        // Visibility Match
-        const matchSearch = `${band} ${venue} ${lineup}`.includes(query) || hasSongMatch;
+        const matchSearch = `${band} ${venue} ${lineup} ${companion}`.includes(query) || hasSongMatch;
         const matchArtist = !activeArtist || row['Band'] === activeArtist || lineup.includes(activeArtist.toLowerCase());
         const matchYear = !activeYear || year === activeYear;
 
-        // Attach match flags to the object for the renderer
         return { ...row, _isSongMatch: hasSongMatch, _isFestMatch: isFestivalMatch, _visible: matchSearch && matchArtist && matchYear };
     }).filter(r => r._visible);
 
+    filteredResults = filtered;
     updateDataCentreStats(filtered);
 
-    if (document.getElementById('gigTable')) renderTable(filtered, query);
+    // ROUTING
+    if (currentView === 'list') {
+        if (document.getElementById('gigTable')) renderTable(filtered, query);
+    } else {
+        renderCalendarView();
+    }
+
+    // BASELINE: Restore Home Page Memories
+    if (typeof window.loadThrowback === "function") {
+        window.loadThrowback(journalData);
+    }
+
     if (typeof renderCharts === "function") renderCharts(filtered);
     if (window.leafletMap && typeof updateMap === "function") updateMap(filtered, venueData);
-    if (typeof window.loadThrowback === "function") window.loadThrowback(journalData);
-
     if (window.lucide) lucide.createIcons();
 }
 
@@ -387,12 +418,21 @@ window.switchView = function(viewId) {
     const activeNav = document.getElementById(`nav-${viewId}`);
     if (activeNav) activeNav.classList.add('active', 'text-indigo-600');
 
-    if(viewId === 'map' && window.leafletMap) {
-        setTimeout(() => {
-            window.leafletMap.invalidateSize();
-            window.leafletMap.eachLayer(layer => { if (layer._url) layer.redraw(); });
-        }, 400);
-    }
+if (viewId === 'map' && window.leafletMap) {
+    // 1. Immediate invalidation to snap to the current container size
+    window.leafletMap.invalidateSize({ animate: false });
+
+    // 2. Short-delay follow-up to catch any CSS transition completion
+    setTimeout(() => {
+        window.leafletMap.invalidateSize();
+        // Force tiles to reload correctly into the new space
+        window.leafletMap.eachLayer(layer => {
+            if (layer.options && layer.options.layers || layer._url) {
+                layer.redraw();
+            }
+        });
+    }, 100); // Reduced from 400ms for a snappier response
+}
 
     // FIX: viewId is just 'achievements', so check for that
     if (viewId === 'achievements') {
@@ -579,7 +619,7 @@ const headerActions = `
         <a href="${youtubeLink}" target="_blank" class="flex items-center gap-1.5 bg-red-600 hover:bg-red-700 text-white text-[9px] font-black px-3 py-1.5 rounded-full transition-all transform hover:scale-105 shadow-md">
              <i data-lucide="play-circle" class="w-3"></i> WATCH CLIPS
         </a>
-        ${isFestival ? '<span class="bg-amber-400 text-black text-[8px] font-black px-2 py-1 rounded uppercase tracking-widest animate-pulse">Festival Mode</span>' : ''}
+        ${isFestival ? '<span class="bg-amber-400 text-black text-[8px] font-black px-2 py-1 rounded uppercase tracking-widest">Festival</span>' : ''}
     </div>
 `;
 
@@ -589,12 +629,8 @@ document.getElementById('mTitleArea').innerHTML = `
     <h2 class="text-3xl font-black italic uppercase leading-tight pr-8">${entry.Band}</h2>
 
     <div class="flex flex-wrap items-center gap-3 mt-3">
-        <div class="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest opacity-70">
-            <i data-lucide="calendar" class="w-3 text-indigo-400"></i> ${entry.Date}
-        </div>
-        <div class="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest opacity-70">
-            <i data-lucide="map-pin" class="w-3 text-indigo-400"></i> ${entry.OfficialVenue}
-        </div>
+        <div class="text-[10px] font-bold uppercase tracking-widest opacity-70" aria-label="Show Date"><i data-lucide="calendar" class="w-3 inline mr-1"></i>${entry.Date}</div>
+        <div class="text-[10px] font-bold uppercase tracking-widest opacity-70" aria-label="Venue"><i data-lucide="map-pin" class="w-3 inline mr-1"></i>${entry.OfficialVenue}</div>
     </div>
 
     <div class="flex flex-wrap items-center gap-2 mt-4 pt-4 border-t border-white/10">
@@ -603,70 +639,56 @@ document.getElementById('mTitleArea').innerHTML = `
     </div>
 `;
 
-    // 4. SCRAPBOOK PHOTO (Lower-case & Dash-safe logic)
+// 4. PHOTO & TICKET LOGIC
     const dateParts = entry.Date.split('/');
     const formattedDate = `${dateParts[2]}-${dateParts[1]}-${dateParts[0]}`;
     const cleanVenue = entry.OfficialVenue.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-');
     const imagePath = `assets/scrapbook/${formattedDate}-${cleanVenue}.jpg`;
 
     let imageHTML = '';
+
     try {
         const response = await fetch(imagePath, { method: 'HEAD' });
         if (response.ok) {
             imageHTML = `
-                <div class="md:col-span-full flex justify-center py-6">
+                <div class="md:col-span-full flex justify-center py-6" role="img" aria-label="Photo of memorabilia from ${entry.Band}">
                     <div class="polaroid">
                         <img src="${imagePath}" alt="Gig Memorabilia">
-                        <p class="mt-4 font-handwriting text-slate-500 text-center text-2xl">${entry.Band}</p>
+                        <p class="mt-4 font-handwriting text-slate-500 text-center text-2xl" aria-hidden="true">${entry.Band}</p>
                     </div>
                 </div>`;
-} else {
-    // 1. Get Support Acts (Explicitly exclude the main Band to prevent duplication)
-    const supportActs = sets
-        .filter(s => s.Artist.toLowerCase() !== entry.Band.toLowerCase())
-        .map(s => s.Artist)
-        .join(' + ');
+        } else {
+            // Get Support Acts and Style
+            const supportActs = sets
+                .filter(s => s.Artist.toLowerCase() !== entry.Band.toLowerCase())
+                .map(s => s.Artist)
+                .join(' + ');
 
-    // 2. Data logic for Price (Printed style)
-    const displayPrice = entry.Price && entry.Price !== "nan" ? entry.Price : `£${(Math.random() * (15 - 8) + 8).toFixed(2)}`;
+            const displayPrice = entry.Price && entry.Price !== "nan" ? entry.Price : `£${(Math.random() * (15 - 8) + 8).toFixed(2)}`;
+            const style = getTicketStyle(entry['Journal Key']);
+            const isLandscape = style.type === 'landscape';
 
-    // 3. TICKET FALLBACK (Unified Thermal Style)
-    imageHTML = `
-        <div class="md:col-span-full flex justify-center py-6 px-4">
-            <div class="mock-ticket transform -rotate-1 shadow-2xl">
-                <div class="flex justify-between items-start mb-4">
-                    <span class="text-[10px] font-black border border-black px-1 uppercase">General Admission</span>
-                    <span class="text-[10px] font-black italic uppercase tracking-widest">GigList Live</span>
-                </div>
-
-                <div class="thermal-text text-2xl mb-0.5 leading-none">${entry.Band}</div>
-
-                ${supportActs ? `<div class="text-[10px] font-bold text-slate-600 mb-2 uppercase tracking-tight">+ ${supportActs}</div>` : '<div class="mb-2"></div>'}
-
-                <div class="thermal-text text-sm mb-4 opacity-90">${entry.OfficialVenue}</div>
-
-                <div class="flex justify-between text-[11px] font-bold mb-2">
-                    <span>DATE: ${entry.Date}</span>
-                    <span>DOORS: 19:30</span>
-                </div>
-
-                <div class="ticket-perf"></div>
-
-                <div class="flex justify-between items-end">
-                    <div class="text-[8px] thermal-text leading-tight opacity-60">
-                        NO REFUNDS / NO EXCHANGES<br>
-                        MOSH AT YOUR OWN RISK
+imageHTML = `
+            <div class="md:col-span-full flex justify-center py-6 px-4" role="region" aria-label="Digital Souvenir Ticket">
+                <div class="mock-ticket transform ${isLandscape ? 'max-w-md w-full' : 'w-64'} -rotate-1 shadow-2xl ${style.color} ${style.border} border-2 p-6 transition-all hover:rotate-0">
+                    <div class="flex justify-between items-start mb-4">
+                        <span class="text-[9px] font-black border border-current px-1 uppercase ${style.accent}">General Admission</span>
+                        <span class="text-[9px] font-black italic uppercase tracking-widest ${style.accent} opacity-40">Gig List</span>
                     </div>
-                    <div class="thermal-text text-xl font-black">
-                        ${displayPrice}
+                    <div class="thermal-text text-2xl mb-0.5 leading-none ${style.accent}">${entry.Band}</div>
+                    ${supportActs ? `<div class="text-[10px] font-bold mb-2 uppercase tracking-tight opacity-70 ${style.accent}">+ ${supportActs}</div>` : '<div class="mb-2"></div>'}
+                    <div class="thermal-text text-sm mb-4 opacity-80 ${style.accent}">${entry.OfficialVenue}</div>
+                    <div class="flex justify-between text-[11px] font-bold mb-2 border-t border-b border-black/10 py-2 ${style.accent}">
+                        <span>DATE: ${entry.Date}</span>
+                        <span>PRICE: ${displayPrice}</span>
                     </div>
+                    <div class="mt-4 ${isLandscape ? 'h-10' : 'h-8'} bg-black w-full" style="background: repeating-linear-gradient(90deg, #000, #000 2px, transparent 2px, transparent 4px); opacity: 0.15;"></div>
                 </div>
-
-                <div class="mt-4 h-8 bg-black w-full" style="background: repeating-linear-gradient(90deg, #000, #000 2px, #fff 2px, #fff 4px);"></div>
-            </div>
-        </div>`;
-}
-    } catch (e) { /* Error handling */ }
+            </div>`;
+    }
+    } catch (e) {
+        console.error("Ticket generation failed", e);
+    }
 
     // 5. NOTES
     const notesHTML = entry.Comments && entry.Comments !== "nan" ?
@@ -675,13 +697,13 @@ document.getElementById('mTitleArea').innerHTML = `
     // 6. SETLIST GRID
     const gridClass = isFestival ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4' : 'flex flex-col gap-6';
 
-    const setlistHTML = sets.map(s => `
-        <div class="bg-white ${isFestival ? 'p-5' : 'p-8'} rounded-[2rem] border border-slate-100 shadow-sm">
+const setlistHTML = sets.map(s => `
+        <div class="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm" role="article" aria-label="Setlist for ${s.Artist}">
             <div class="flex justify-between items-center mb-3 border-b border-slate-50 pb-3">
-                <div class="font-black text-indigo-600 ${isFestival ? 'text-sm' : 'text-lg'}">${s.Artist}</div>
+                <div class="font-black text-indigo-600 text-sm">${s.Artist}</div>
                 <span class="text-[7px] font-black px-2 py-0.5 bg-slate-100 rounded-lg uppercase text-slate-400">${s.Role}</span>
             </div>
-            <div class="${isFestival ? 'text-[10px]' : 'text-xs'} text-slate-500 leading-relaxed font-medium">
+            <div class="text-[10px] text-slate-500 leading-relaxed font-medium">
                 ${(s.Setlist || "No setlist found").replace(/\|/g, '<br>')}
             </div>
         </div>
@@ -696,12 +718,22 @@ document.getElementById('mTitleArea').innerHTML = `
         </div>
     `;
 
+// UI & Accessibility: Show modal and move focus
     document.getElementById('modal').classList.remove('hidden');
-    lucide.createIcons();
+    document.body.style.overflow = 'hidden';
+
+    // Move focus to the Band Name for screen readers
+    const title = document.querySelector('#mTitleArea h2');
+    if (title) title.focus();
+
+    if (window.lucide) lucide.createIcons();
 }
-function closeModal() {
+
+window.closeModal = function() {
     document.getElementById('modal').classList.add('hidden');
-}
+    // RESTORE SCROLLING HERE:
+    document.body.style.overflow = 'auto';
+};
 
 window.onload = loadData;
 
@@ -794,34 +826,331 @@ function closeChartModal() {
     if (modalChartInstance) modalChartInstance.destroy();
 }
 
-function checkConsecutiveMonths(data) {
-    if (!data || data.length === 0) return 0;
+/**
+ * CALENDAR & WRAPPED MODULE
+ */
+window.toggleView = function(view) {
+    currentView = view;
+    const isList = view === 'list';
 
-    // Get unique year-month strings (e.g., "2024-05")
-    const activeMonths = [...new Set(data.map(g => {
-        const parts = g.Date.split('/');
-        return `${parts[2]}-${parts[1].padStart(2, '0')}`;
-    }))].sort();
+    // Toggle container visibility
+    document.getElementById('tableView').classList.toggle('hidden', !isList);
+    const calView = document.getElementById('calendarView');
+    calView.classList.toggle('hidden', isList);
 
-    let maxStreak = 0;
-    let currentStreak = 0;
-    let lastMonth = null;
+    // Accessibility: Announce view change to screen readers
+    calView.setAttribute('aria-live', 'polite');
 
-    activeMonths.forEach(monthStr => {
-        const current = new Date(monthStr + "-01");
-        if (lastMonth) {
-            const diff = (current.getFullYear() - lastMonth.getFullYear()) * 12 + (current.getMonth() - lastMonth.getMonth());
-            if (diff === 1) {
-                currentStreak++;
-            } else {
-                currentStreak = 1;
-            }
-        } else {
-            currentStreak = 1;
+    // Update Button Styling and ARIA states
+    const listBtn = document.getElementById('listViewBtn');
+    const calBtn = document.getElementById('calendarViewBtn');
+
+    if (listBtn && calBtn) {
+        listBtn.setAttribute('aria-pressed', isList);
+        calBtn.setAttribute('aria-pressed', !isList);
+
+        listBtn.className = isList ? 'px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all bg-white shadow-sm text-indigo-600' : 'px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all text-slate-400';
+        calBtn.className = !isList ? 'px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all bg-white shadow-sm text-indigo-600' : 'px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all text-slate-400';
+    }
+    refreshUI();
+};
+
+function renderCalendarView() {
+    const container = document.getElementById('calendarView');
+    if (!container) return;
+    container.innerHTML = '';
+
+    const years = {};
+    filteredResults.forEach(entry => {
+        const year = entry.Date.split('/')[2];
+        if (year) {
+            if (!years[year]) years[year] = [];
+            years[year].push(entry);
         }
-        lastMonth = current;
-        maxStreak = Math.max(maxStreak, currentStreak);
     });
 
-    return maxStreak;
+    const sortedYears = Object.keys(years).sort((a, b) => b - a);
+    if (sortedYears.length === 0) {
+        container.innerHTML = `<div class="py-20 text-center font-bold text-slate-400 uppercase tracking-widest text-xs">No gigs found</div>`;
+        return;
+    }
+
+    sortedYears.forEach(year => {
+        const totalGigs = years[year].length;
+        const topArtist = getTopStat(years[year], 'Band');
+        const topVenue = getTopStat(years[year], 'OfficialVenue');
+
+        const div = document.createElement('div');
+        div.className = "bg-white rounded-[2.5rem] p-6 shadow-sm border border-slate-100 overflow-hidden relative mb-4";
+        div.innerHTML = `
+            <div id="calendar-side-${year}" class="transition-all duration-500">
+                <div class="flex justify-between items-center mb-6">
+                    <h3 class="text-3xl font-black italic tracking-tighter text-slate-800">${year}</h3>
+                    <button onclick="toggleWrapped('${year}')" class="bg-amber-400 hover:bg-amber-500 text-[9px] font-black uppercase px-4 py-2 rounded-full shadow-sm"> ✨ View Summary </button>
+                </div>
+                <div class="grid grid-cols-4 md:grid-cols-6 gap-3 mb-2">${generateMiniMonths(years[year])}</div>
+            </div>
+            <div id="wrapped-side-${year}" class="hidden opacity-0 transition-all duration-500 bg-indigo-600 text-white p-8 rounded-[2rem] -m-2">
+                <div class="flex justify-between items-center mb-6">
+                    <h3 class="text-2xl font-black italic uppercase tracking-tighter">${year}  Summary</h3>
+                    <button onclick="toggleWrapped('${year}')" class="text-white/60 hover:text-white"><i data-lucide="x" class="w-6 h-6"></i></button>
+                </div>
+                <div class="space-y-4">
+                    <div class="bg-white/10 p-4 rounded-2xl"><p class="text-[9px] font-bold uppercase opacity-60">Total Gigs</p><p class="text-3xl font-black">${totalGigs}</p></div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="bg-white/10 p-4 rounded-2xl"><p class="text-[9px] font-bold uppercase opacity-60">MVP Artist</p><p class="text-xs font-black truncate">${topArtist}</p></div>
+                        <div class="bg-white/10 p-4 rounded-2xl"><p class="text-[9px] font-bold uppercase opacity-60">Home Base</p><p class="text-xs font-black truncate">${topVenue}</p></div>
+                    </div>
+                </div>
+            </div>`;
+        container.appendChild(div);
+    });
+    if (window.lucide) lucide.createIcons();
+}
+
+function toggleWrapped(year) {
+    const cal = document.getElementById(`calendar-side-${year}`);
+    const wrap = document.getElementById(`wrapped-side-${year}`);
+    if (wrap.classList.contains('hidden')) {
+        cal.classList.add('opacity-0', 'scale-95');
+        setTimeout(() => { cal.classList.add('hidden'); wrap.classList.remove('hidden'); setTimeout(() => wrap.classList.replace('opacity-0', 'opacity-100'), 10); }, 300);
+    } else {
+        wrap.classList.replace('opacity-100', 'opacity-0');
+        setTimeout(() => { wrap.classList.add('hidden'); cal.classList.remove('hidden'); setTimeout(() => cal.classList.remove('opacity-0', 'scale-95'), 10); }, 300);
+    }
+}
+
+function generateMiniMonths(entries, year) {
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    return months.map((month, idx) => {
+        const monthNum = (idx + 1).toString().padStart(2, '0');
+        const monthGigs = entries.filter(e => e.Date.split('/')[1] === monthNum);
+        const count = monthGigs.length;
+
+        // Only make clickable if there are gigs
+        const clickAttr = count > 0 ? `onclick="showMonthDetail('${year}', '${monthNum}', '${month}')" style="cursor:pointer;"` : "";
+
+        return `<div class="flex flex-col items-center p-2 rounded-xl transition-all hover:bg-indigo-100/50 ${count > 0 ? 'bg-indigo-50 border border-indigo-100' : 'opacity-20'}"
+                     ${clickAttr} role="gridcell" aria-label="${count} gigs in ${month} ${year}">
+                <span class="text-[8px] font-black uppercase text-slate-400 mb-1" aria-hidden="true">${month}</span>
+                <div class="flex gap-0.5 flex-wrap justify-center">
+                    ${Array(Math.min(count, 5)).fill(0).map(() => `<div class="w-1.5 h-1.5 bg-indigo-500 rounded-full"></div>`).join('')}
+                </div>
+        </div>`;
+    }).join('');
+}
+
+function getTopStat(entries, key) {
+    const counts = {};
+    entries.forEach(e => counts[e[key]] = (counts[e[key]] || 0) + 1);
+    return Object.entries(counts).sort((a,b) => b[1]-a[1])[0]?.[0] || 'N/A';
+}
+
+window.showMonthDetail = function(year, monthNum, monthName) {
+    const monthGigs = filteredResults.filter(e => {
+        const parts = e.Date.split('/');
+        return parts[2] === year && parts[1] === monthNum;
+    });
+
+    const listContainer = document.getElementById(`month-list-${year}`);
+    const titleContainer = document.getElementById(`month-title-${year}`);
+
+    titleContainer.innerText = `${monthName} ${year}`;
+
+    listContainer.innerHTML = monthGigs.map(g => `
+        <div onclick="openModal('${g['Journal Key']}')" class="group cursor-pointer border-b border-white/10 pb-2 hover:border-amber-400 transition-colors">
+            <div class="text-[10px] font-black text-amber-400 uppercase mb-0.5">${g.Date}</div>
+            <div class="text-sm font-bold truncate group-hover:text-amber-200">${g.Band}</div>
+            <div class="text-[10px] opacity-60 truncate">${g.OfficialVenue}</div>
+        </div>
+    `).join('');
+
+    // Flip Animation
+    const cal = document.getElementById(`calendar-side-${year}`);
+    const monthSide = document.getElementById(`month-side-${year}`);
+
+    cal.classList.add('opacity-0', 'scale-95');
+    setTimeout(() => {
+        cal.classList.add('hidden');
+        monthSide.classList.remove('hidden');
+        setTimeout(() => monthSide.classList.replace('opacity-0', 'opacity-100'), 10);
+    }, 300);
+
+    if (window.lucide) lucide.createIcons();
+};
+
+window.closeMonthDetail = function(year) {
+    const cal = document.getElementById(`calendar-side-${year}`);
+    const monthSide = document.getElementById(`month-side-${year}`);
+
+    monthSide.classList.replace('opacity-100', 'opacity-0');
+    setTimeout(() => {
+        monthSide.classList.add('hidden');
+        cal.classList.remove('hidden');
+        setTimeout(() => cal.classList.remove('opacity-0', 'scale-95'), 10);
+    }, 300);
+};
+
+/**
+ * GIG LIST CALENDAR MODULE
+ * Includes: Calendar Grid, Year Wrapped, and Month Detail Flip
+ */
+
+window.toggleView = function(view) {
+    currentView = view;
+    const isList = view === 'list';
+    document.getElementById('tableView').classList.toggle('hidden', !isList);
+    const calView = document.getElementById('calendarView');
+    calView.classList.toggle('hidden', isList);
+    calView.setAttribute('aria-live', 'polite');
+
+    const listBtn = document.getElementById('listViewBtn');
+    const calBtn = document.getElementById('calendarViewBtn');
+    if (listBtn && calBtn) {
+        listBtn.setAttribute('aria-pressed', isList);
+        calBtn.setAttribute('aria-pressed', !isList);
+        listBtn.className = isList ? 'px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all bg-white shadow-sm text-indigo-600' : 'px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all text-slate-400';
+        calBtn.className = !isList ? 'px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all bg-white shadow-sm text-indigo-600' : 'px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all text-slate-400';
+    }
+    refreshUI();
+};
+
+function renderCalendarView() {
+    const container = document.getElementById('calendarView');
+    if (!container) return;
+    container.innerHTML = '';
+
+    const years = {};
+    filteredResults.forEach(entry => {
+        const year = entry.Date.split('/')[2];
+        if (year) {
+            if (!years[year]) years[year] = [];
+            years[year].push(entry);
+        }
+    });
+
+    const sortedYears = Object.keys(years).sort((a, b) => b - a);
+    sortedYears.forEach(year => {
+        const div = document.createElement('div');
+        div.className = "bg-white rounded-[2.5rem] p-6 shadow-sm border border-slate-100 overflow-hidden relative mb-4";
+
+        // Stats for Side 2 (Wrapped)
+        const totalGigs = years[year].length;
+        const topArtist = getTopStat(years[year], 'Band');
+        const topVenue = getTopStat(years[year], 'OfficialVenue');
+
+        div.innerHTML = `
+            <div id="calendar-side-${year}" class="transition-all duration-500">
+                <div class="flex justify-between items-center mb-6">
+                    <h3 class="text-3xl font-black italic tracking-tighter text-slate-800">${year}</h3>
+                    <button onclick="toggleWrapped('${year}')" class="bg-amber-400 hover:bg-amber-500 text-[9px] font-black uppercase px-4 py-2 rounded-full shadow-sm"> ✨ View Summary </button>
+                </div>
+                <div class="grid grid-cols-4 md:grid-cols-6 gap-3 mb-2">${generateMiniMonths(years[year], year)}</div>
+            </div>
+
+            <div id="wrapped-side-${year}" class="hidden opacity-0 transition-all duration-500 bg-indigo-600 text-white p-8 rounded-[2rem] -m-2">
+                <div class="flex justify-between items-center mb-6">
+                    <h3 class="text-2xl font-black italic uppercase tracking-tighter">${year}  Summary</h3>
+                    <button onclick="toggleWrapped('${year}')" class="text-white/60 hover:text-white"><i data-lucide="x" class="w-6 h-6"></i></button>
+                </div>
+                <div class="space-y-4">
+                    <div class="bg-white/10 p-4 rounded-2xl"><p class="text-[9px] font-bold uppercase opacity-60">Total Gigs</p><p class="text-3xl font-black">${totalGigs}</p></div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="bg-white/10 p-4 rounded-2xl"><p class="text-[9px] font-bold uppercase opacity-60">MVP Artist</p><p class="text-xs font-black truncate">${topArtist}</p></div>
+                        <div class="bg-white/10 p-4 rounded-2xl"><p class="text-[9px] font-bold uppercase opacity-60">Home Base</p><p class="text-xs font-black truncate">${topVenue}</p></div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="month-side-${year}" class="hidden opacity-0 transition-all duration-500 bg-slate-900 text-white p-8 rounded-[2rem] -m-2">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 id="month-title-${year}" class="text-xl font-black italic uppercase tracking-tighter text-amber-400">Month Detail</h3>
+                    <button onclick="closeMonthDetail('${year}')" class="text-white/40 hover:text-white"><i data-lucide="chevron-left" class="w-6 h-6"></i></button>
+                </div>
+                <div id="month-list-${year}" class="space-y-3 max-h-[220px] overflow-y-auto pr-2 custom-scrollbar"></div>
+            </div>`;
+        container.appendChild(div);
+    });
+    if (window.lucide) lucide.createIcons();
+}
+
+function generateMiniMonths(entries, year) {
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    return months.map((month, idx) => {
+        const monthNum = (idx + 1).toString().padStart(2, '0');
+        const count = entries.filter(e => e.Date.split('/')[1] === monthNum).length;
+        const clickAttr = count > 0 ? `onclick="showMonthDetail('${year}', '${monthNum}', '${month}')" style="cursor:pointer;"` : "";
+        return `<div class="flex flex-col items-center p-2 rounded-xl transition-all hover:bg-indigo-100/50 ${count > 0 ? 'bg-indigo-50 border border-indigo-100' : 'opacity-20'}"
+                     ${clickAttr} role="gridcell" aria-label="${count} gigs in ${month} ${year}">
+                <span class="text-[8px] font-black uppercase text-slate-400 mb-1" aria-hidden="true">${month}</span>
+                <div class="flex gap-0.5 flex-wrap justify-center">
+                    ${Array(Math.min(count, 5)).fill(0).map(() => `<div class="w-1.5 h-1.5 bg-indigo-500 rounded-full"></div>`).join('')}
+                </div>
+        </div>`;
+    }).join('');
+}
+
+window.showMonthDetail = function(year, monthNum, monthName) {
+    const monthGigs = filteredResults.filter(e => {
+        const parts = e.Date.split('/');
+        return parts[2] === year && parts[1] === monthNum;
+    });
+
+    document.getElementById(`month-title-${year}`).innerText = `${monthName} ${year}`;
+    document.getElementById(`month-list-${year}`).innerHTML = monthGigs.map(g => `
+        <div onclick="openModal('${g['Journal Key'].replace(/'/g, "\\'")}')" class="group cursor-pointer border-b border-white/10 pb-2 hover:border-amber-400 transition-colors">
+            <div class="text-[10px] font-black text-amber-400 uppercase mb-0.5">${g.Date}</div>
+            <div class="text-sm font-bold truncate group-hover:text-amber-200">${g.Band}</div>
+            <div class="text-[10px] opacity-60 truncate">${g.OfficialVenue}</div>
+        </div>
+    `).join('');
+
+    const cal = document.getElementById(`calendar-side-${year}`);
+    const monthSide = document.getElementById(`month-side-${year}`);
+    cal.classList.add('opacity-0', 'scale-95');
+    setTimeout(() => {
+        cal.classList.add('hidden');
+        monthSide.classList.remove('hidden');
+        setTimeout(() => monthSide.classList.replace('opacity-0', 'opacity-100'), 10);
+    }, 300);
+};
+
+window.closeMonthDetail = function(year) {
+    const cal = document.getElementById(`calendar-side-${year}`);
+    const monthSide = document.getElementById(`month-side-${year}`);
+    monthSide.classList.replace('opacity-100', 'opacity-0');
+    setTimeout(() => {
+        monthSide.classList.add('hidden');
+        cal.classList.remove('hidden');
+        setTimeout(() => cal.classList.remove('opacity-0', 'scale-95'), 10);
+    }, 300);
+};
+
+function toggleWrapped(year) {
+    const cal = document.getElementById(`calendar-side-${year}`);
+    const wrap = document.getElementById(`wrapped-side-${year}`);
+    if (wrap.classList.contains('hidden')) {
+        cal.classList.add('opacity-0', 'scale-95');
+        setTimeout(() => { cal.classList.add('hidden'); wrap.classList.remove('hidden'); setTimeout(() => wrap.classList.replace('opacity-0', 'opacity-100'), 10); }, 300);
+    } else {
+        wrap.classList.replace('opacity-100', 'opacity-0');
+        setTimeout(() => { wrap.classList.add('hidden'); cal.classList.remove('hidden'); setTimeout(() => cal.classList.remove('opacity-0', 'scale-95'), 10); }, 300);
+    }
+}
+
+function getTopStat(entries, key) {
+    const counts = {};
+    entries.forEach(e => counts[e[key]] = (counts[e[key]] || 0) + 1);
+    return Object.entries(counts).sort((a,b) => b[1]-a[1])[0]?.[0] || 'N/A';
+}
+
+function getTicketStyle(key) {
+    const styles = [
+        { color: 'bg-[#ffd1dc]', border: 'border-pink-400', accent: 'text-pink-950', type: 'portrait' },
+        { color: 'bg-[#d1ffd6]', border: 'border-green-400', accent: 'text-green-950', type: 'landscape' },
+        { color: 'bg-[#fffcd1]', border: 'border-yellow-400', accent: 'text-yellow-950', type: 'portrait' }
+    ];
+    // Create a stable index based on the key
+    const index = key.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    return styles[index % styles.length];
 }
