@@ -61,8 +61,16 @@
             </div>
         </div>
 
+        <div class="w-full px-6 mb-4">
+            <div id="global-ticker"
+                 class="w-full bg-slate-100 py-5 px-4 rounded-[2rem] flex items-center justify-center text-center font-black italic uppercase tracking-tighter border border-slate-200/50 shadow-sm"
+                 style="font-size: 1.4rem;">
+                LOADING...
+            </div>
+        </div>
+
         <div id="now-card" class="relative overflow-hidden bg-slate-900 rounded-[3rem] aspect-[4/5] shadow-2xl shadow-indigo-100 transition-all duration-500">
-            <img id="hero-img" src="" class="absolute inset-0 w-full h-full object-cover opacity-50 transition-opacity duration-700">
+            <img id="hero-img" src="" alt="" aria-hidden="true" class="absolute inset-0 w-full h-full object-cover opacity-50 transition-opacity duration-700">
             <div class="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-transparent"></div>
 
             <div class="absolute bottom-0 left-0 p-10 space-y-4 w-full">
@@ -143,37 +151,45 @@
             </div>
         </div>
 
-        <div class="space-y-4">
-            <div class="flex items-center justify-between">
-                <div class="flex bg-slate-100 p-1 rounded-2xl w-fit" role="tablist" aria-label="View selection">
-                    <button id="listViewBtn" onclick="toggleView('list')"
-                            role="tab" aria-selected="true" aria-controls="tableView"
-                            class="px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all bg-white shadow-sm text-indigo-600">
-                        <i data-lucide="list" class="w-3 h-3 inline mr-1"></i> List
+        <div class="px-6 space-y-4 mb-6">
+            <div class="relative w-full">
+                <i data-lucide="search" class="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"></i>
+                <label for="searchInput" class="sr-only">Search</label>
+                <input type="text" id="searchInput"
+                       placeholder="Search artists, venues, or songs..."
+                       class="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all shadow-sm">
+            </div>
+
+            <div class="flex justify-between items-center">
+                <div class="flex bg-slate-100 p-1 rounded-xl border border-slate-200 shadow-sm" role="tablist">
+                    <button onclick="toggleView('list')" id="btn-list" role="tab" aria-selected="true"
+                            class="px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all">
+                        List
                     </button>
-                    <button id="calendarViewBtn" onclick="toggleView('calendar')"
-                            role="tab" aria-selected="false" aria-controls="calendarView"
-                            class="px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all text-slate-400">
-                        <i data-lucide="calendar-days" class="w-3 h-3 inline mr-1"></i> Calendar
+                    <button onclick="toggleView('calendar')" id="btn-calendar" role="tab" aria-selected="false"
+                            class="px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all">
+                        Calendar
                     </button>
                 </div>
 
-                <div class="relative flex-1 max-w-[200px] ml-4">
-                    <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 text-slate-400"></i>
-                    <input type="text" id="searchInput" placeholder="Search..."
-                           aria-label="Search gig data"
-                           class="w-full pl-10 pr-4 py-2 rounded-xl bg-white shadow-sm text-xs font-bold border-none focus:ring-2 focus:ring-indigo-500">
+                <div class="flex items-center gap-3 cursor-pointer bg-white px-4 py-2 rounded-xl border border-slate-200 shadow-sm transition-all" id="toggleLabel">
+                    <span id="toggleText" class="text-[10px] font-black uppercase text-slate-500 tracking-wider">Upcoming shows</span>
+                    <div class="relative">
+                        <input type="checkbox" id="toggleFuture" class="hidden" onchange="refreshUI()" role="switch" aria-checked="false">
+                        <div class="toggle-bg w-10 h-5 bg-slate-200 rounded-full transition-colors duration-300"></div>
+                        <div class="toggle-dot absolute top-1 left-1 w-3 h-3 bg-white rounded-full transition-transform duration-300 shadow-sm"></div>
+                    </div>
                 </div>
             </div>
+        </div>
 
-            <div id="tableView" role="tabpanel" aria-labelledby="listViewBtn">
-                <div class="bg-white rounded-[2rem] shadow-sm border border-slate-100 overflow-hidden">
-                    <table class="w-full text-left" id="gigTable"></table>
-                </div>
+        <div id="tableView" role="tabpanel">
+            <div class="bg-white rounded-[2rem] shadow-sm border border-slate-100 overflow-hidden">
+                <table class="w-full text-left" id="gigTable"></table>
             </div>
+        </div>
 
-            <div id="calendarView" class="hidden space-y-6" role="tabpanel" aria-labelledby="calendarViewBtn">
-            </div>
+        <div id="calendarView" class="hidden space-y-6" role="tabpanel">
         </div>
     </section>
 
@@ -242,6 +258,8 @@
             <div class="bg-slate-50 p-6 rounded-[2rem] border border-slate-100">
                 <label class="block text-[10px] font-black uppercase text-indigo-500 mb-3">Sync Setlist.fm</label>
                 <div class="flex gap-2">
+                    <label for="setlistIdInput" class="block text-[10px] font-black uppercase text-indigo-500 mb-3">Sync Setlist.fm</label>
+                    <div class="flex gap-2">
                     <input type="text" id="setlistIdInput" placeholder="Enter Username (e.g. Tragicgurl)"
                            class="flex-1 bg-white px-4 py-3 rounded-xl text-sm font-bold border-none shadow-sm outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800">
                     <button onclick="syncComingSoon()" class="bg-indigo-600 text-white px-4 py-3 rounded-xl hover:bg-indigo-700 transition-colors">

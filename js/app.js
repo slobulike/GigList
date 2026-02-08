@@ -1,6 +1,17 @@
 /**
  * Gig List Core Engine
 
+ V1.1.2 - Release Date 2026-02-08
+ * -------------------------------------------------------------------
+  * [FEATURE] Intelligent Countdown: Dynamic ticker with last or next gig logic
+  * [FEATURE] Data Lab Expansion: Enable view of upcoming shows in data tab
+  * [FEATURE] Home Carousel Update: New cards added for upcoming shows and festivals
+  * [FIX] Seen Count: Ensures that all appearances across headline, support and festivals are included
+  * [FIX] Scroll-Lock Fix: Resolved issue where scroll on data tab was not enabled after viewing details
+  * [FIX] Leaflet (Map) initial load: Improvement to page load for map to improve load time and first load
+  * [A11Y] ARIA labels: Future Toggle and Carousel cards
+
+
  V1.1.1 - Release Date 2026-02-07
  * -------------------------------------------------------------------
  * [FEATURE] Calendar Drill-Down: Interactive month detail "flip" cards
@@ -28,7 +39,7 @@
 
  */
 
-const APP_VERSION = "1.1.1";
+const APP_VERSION = "1.1.2";
 
 let currentUser = JSON.parse(localStorage.getItem('gv_user'));
 let journalData = [], performanceData = [], venueData = [];
@@ -38,6 +49,31 @@ let homeCarousel = [];
 let filteredResults = [];
 let currentView = 'list';
 let currentCarouselIndex = 0;
+
+function getGlobalSeenCount(artistName) {
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    const searchName = artistName.toLowerCase();
+
+    // 1. Check Journal (Headlines + Festival Lineups)
+    const journalMatches = journalData.filter(g => {
+        const isPast = parseDate(g.Date) < today;
+        const isHeadline = g.Band.toLowerCase() === searchName;
+        const isFest = g['Festival Lineups'] && g['Festival Lineups'].toLowerCase().includes(searchName);
+        return isPast && (isHeadline || isFest);
+    });
+
+    // 2. Check Performance Data (Support slots / Notable Roles)
+    // We filter for the artist name but exclude shows already counted as headliners
+    const supportMatches = performanceData.filter(p => {
+        const isPast = parseDate(p.Date) < today; // Assuming Date is in performanceData too
+        const nameMatch = p.Artist.toLowerCase() === searchName;
+        const alreadyCounted = journalMatches.some(j => j['Journal Key'] === p['Journal Key']);
+        return isPast && nameMatch && !alreadyCounted;
+    });
+
+    return journalMatches.length + supportMatches.length;
+}
 
 async function loadData() {
     if (!currentUser) {
@@ -147,30 +183,95 @@ function updateDataCentreStats(filteredData) {
 }
 
 function refreshUI() {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const toggleEl = document.getElementById('toggleFuture');
+    const includeFuture = toggleEl?.checked || false;
     const searchInput = document.getElementById('searchInput');
     const query = searchInput ? searchInput.value.toLowerCase().trim() : "";
 
-    const filtered = journalData.map(row => {
+    // 1. Accessibility
+    if (toggleEl) toggleEl.setAttribute('aria-checked', includeFuture);
+
+    // 2. Filter Logic
+const filtered = journalData.map(row => {
         const band = (row['Band'] || "").toLowerCase();
         const venue = (row['OfficialVenue'] || "").toLowerCase();
         const lineup = (row['Festival Lineups'] || "").toLowerCase();
-        const companion = (row['Went With'] || "").toLowerCase();
-        const year = (row['Date'] || "").split('/')[2];
         const journalKey = row['Journal Key'];
 
-        const hasSongMatch = query.length > 2 && performanceData.some(p =>
-            p['Journal Key'] === journalKey && (p['Setlist'] || "").toLowerCase().includes(query)
-        );
-        const isFestivalMatch = query.length > 2 && !band.includes(query) && lineup.includes(query);
+// 1. FESTIVAL MATCH (Check the lineup column first)
+const isFestivalMatch = query.length > 2 && !band.includes(query) && lineup.includes(query);
 
-        const matchSearch = `${band} ${venue} ${lineup} ${companion}`.includes(query) || hasSongMatch;
-        const matchArtist = !activeArtist || row['Band'] === activeArtist || lineup.includes(activeArtist.toLowerCase());
-        const matchYear = !activeYear || year === activeYear;
+// 2. SUPPORT MATCH (Only if it's NOT already a Festival Match)
+const isSupportMatch = query.length > 2 && !isFestivalMatch && performanceData.some(p =>
+    p['Journal Key'] === journalKey &&
+    p.Artist.toLowerCase().includes(query) &&
+    band !== p.Artist.toLowerCase()
+);
 
-        return { ...row, _isSongMatch: hasSongMatch, _isFestMatch: isFestivalMatch, _visible: matchSearch && matchArtist && matchYear };
+// 3. SONG MATCH (Independent of the others)
+const hasSongMatch = query.length > 2 && performanceData.some(p =>
+    p['Journal Key'] === journalKey && (p['Setlist'] || "").toLowerCase().includes(query)
+);
+
+        const matchSearch = `${band} ${venue} ${lineup} ${row['Went With'] || ""}`.includes(query) || hasSongMatch || isSupportMatch;
+        const matchArtist = !activeArtist || band === activeArtist.toLowerCase() || lineup.includes(activeArtist.toLowerCase()) || isSupportMatch;
+        const matchYear = !activeYear || row.Date.endsWith(activeYear);
+
+        const gigDate = parseDate(row.Date);
+        const matchFuture = includeFuture ? true : gigDate < today;
+
+        return {
+            ...row,
+            _isSongMatch: hasSongMatch,
+            _isFestMatch: isFestivalMatch,
+            _isSupportMatch: isSupportMatch, // New flag for the renderer
+            _visible: matchSearch && matchArtist && matchYear && matchFuture
+        };
     }).filter(r => r._visible);
 
+    // 3. Visual Styling for Toggles
+    // Future Toggle Style
+    const toggleBg = document.querySelector('.toggle-bg');
+    const toggleDot = document.querySelector('.toggle-dot');
+    const toggleText = document.getElementById('toggleText');
+
+    if (toggleBg && toggleDot) {
+        if (includeFuture) {
+            toggleBg.className = 'toggle-bg w-10 h-5 rounded-full transition-colors duration-300 bg-emerald-500';
+            toggleDot.style.transform = 'translateX(20px)';
+            if (toggleText) {
+                toggleText.innerText = "Future Included";
+                toggleText.className = "text-[10px] font-black uppercase tracking-wider text-emerald-600";
+            }
+        } else {
+            toggleBg.className = 'toggle-bg w-10 h-5 rounded-full transition-colors duration-300 bg-slate-200';
+            toggleDot.style.transform = 'translateX(0px)';
+            if (toggleText) {
+                toggleText.innerText = "Include Future";
+                toggleText.className = "text-[10px] font-black uppercase tracking-wider text-slate-500";
+            }
+        }
+    }
+
+    // View Switcher Style (List vs Calendar)
+    const btnList = document.getElementById('btn-list');
+    const btnCal = document.getElementById('btn-calendar');
+    if (btnList && btnCal) {
+        if (currentView === 'list') {
+            btnList.className = "px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider bg-white text-indigo-600 shadow-sm";
+            btnCal.className = "px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider text-slate-400";
+        } else {
+            btnCal.className = "px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider bg-white text-indigo-600 shadow-sm";
+            btnList.className = "px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider text-slate-400";
+        }
+    }
+
     filteredResults = filtered;
+    filteredResults.sort((a, b) => parseDate(b.Date) - parseDate(a.Date));
+
     updateDataCentreStats(filtered);
 
     // ROUTING
@@ -180,11 +281,7 @@ function refreshUI() {
         renderCalendarView();
     }
 
-    // BASELINE: Restore Home Page Memories
-    if (typeof window.loadThrowback === "function") {
-        window.loadThrowback(journalData);
-    }
-
+    if (typeof window.loadThrowback === "function") window.loadThrowback(journalData);
     if (typeof renderCharts === "function") renderCharts(filtered);
     if (window.leafletMap && typeof updateMap === "function") updateMap(filtered, venueData);
     if (window.lucide) lucide.createIcons();
@@ -203,14 +300,31 @@ function renderTable(data, query) {
         const safeKey = row['Journal Key'].replace(/'/g, "\\'");
 
         // Build Badge Labels
+// Build Badge Labels
         let matchLabels = '';
-        if (row._isFestMatch) {
-            matchLabels += `<span class="inline-flex items-center gap-1 text-[9px] bg-amber-500/10 text-amber-600 font-black uppercase px-2 py-0.5 rounded-full" role="note" aria-label="Matches festival lineup">
-                <i data-lucide="users" class="w-2.5 h-2.5"></i> Lineup Match</span>`;
+
+        // SUPPORT MATCH (Blue)
+        if (row._isSupportMatch) {
+            matchLabels += `
+                <span class="inline-flex items-center gap-1 text-[9px] bg-blue-500/10 text-blue-600 font-black uppercase px-2 py-0.5 rounded-full" role="note" aria-label="Matches support artist">
+                    <i data-lucide="mic-2" class="w-2.5 h-2.5"></i> Support Match
+                </span>`;
         }
+
+        // FESTIVAL LINEUP MATCH (Amber)
+        if (row._isFestMatch) {
+            matchLabels += `
+                <span class="inline-flex items-center gap-1 text-[9px] bg-amber-500/10 text-amber-600 font-black uppercase px-2 py-0.5 rounded-full" role="note" aria-label="Matches festival lineup">
+                    <i data-lucide="users" class="w-2.5 h-2.5"></i> Lineup Match
+                </span>`;
+        }
+
+        // SONG/SETLIST MATCH (Emerald)
         if (row._isSongMatch) {
-            matchLabels += `<span class="inline-flex items-center gap-1 text-[9px] bg-emerald-500/10 text-emerald-600 font-black uppercase px-2 py-0.5 rounded-full" role="note" aria-label="Matches song in setlist">
-                <i data-lucide="music" class="w-2.5 h-2.5"></i> Setlist Match</span>`;
+            matchLabels += `
+                <span class="inline-flex items-center gap-1 text-[9px] bg-emerald-500/10 text-emerald-600 font-black uppercase px-2 py-0.5 rounded-full" role="note" aria-label="Matches song in setlist">
+                    <i data-lucide="music" class="w-2.5 h-2.5"></i> Setlist Match
+                </span>`;
         }
 
         return `
@@ -400,6 +514,7 @@ function renderCharts(filtered) {
 }
 
 window.switchView = function(viewId) {
+    window.scrollTo({ top: 0, behavior: 'instant' });
     document.querySelectorAll('.view-section').forEach(s => s.classList.add('hidden'));
 
 	if (viewId === 'home') {
@@ -441,49 +556,109 @@ if (viewId === 'map' && window.leafletMap) {
 };
 
 window.loadThrowback = function(gigs) {
-    if (homeCarousel.length > 0) return; // Prevent re-loading on refreshUI
+    if (homeCarousel.length > 0) return;
 
     const today = new Date();
+    today.setHours(0, 0, 0, 0);
     const currentMonth = today.getMonth() + 1;
     const currentDay = today.getDate();
 
-    // Anniversary Filter
-    const anniversaryGigs = gigs.filter(g => {
+    // 1. DEFINE BASE DATA ARRAYS (Used for Ticker AND Carousel)
+    const upcomingGigs = gigs.filter(g => parseDate(g.Date) >= today)
+                         .sort((a, b) => parseDate(a.Date) - parseDate(b.Date));
+
+    const pastGigs = gigs.filter(g => parseDate(g.Date) < today)
+                         .sort((a, b) => parseDate(b.Date) - parseDate(a.Date)); // Newest first
+
+    // 2. TICKER LOGIC (Now using the arrays defined above)
+const tickerEl = document.getElementById('global-ticker');
+    if (tickerEl) {
+        if (upcomingGigs.length > 0) {
+            const next = upcomingGigs[0];
+            const diff = parseDate(next.Date) - today;
+            const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
+            tickerEl.innerHTML = `
+                <div class="flex flex-col items-center w-full">
+                    <div class="flex items-center text-[12px] tracking-[0.2em] mb-1 opacity-70">
+                        <span class="text-emerald-500 animate-pulse mr-2 text-xs">●</span>
+                        ${days} ${days === 1 ? 'DAY' : 'DAYS'} UNTIL
+                    </div>
+                    <div class="text-slate-900 leading-tight break-words px-4">
+                        ${next.Band.toUpperCase()}
+                    </div>
+                </div>
+            `;
+        } else if (pastGigs.length > 0) {
+            const last = pastGigs[0];
+            const diff = today - parseDate(last.Date);
+            const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+            tickerEl.innerHTML = `
+                <div class="flex flex-col items-center w-full">
+                    <div class="flex items-center text-[12px] tracking-[0.2em] mb-1 opacity-70">
+                        <span class="text-slate-300 mr-2 text-xs">○</span>
+                        ${days} ${days === 1 ? 'DAY' : 'DAYS'} SINCE
+                    </div>
+                    <div class="text-slate-600 leading-tight break-words px-4">
+                        ${last.Band.toUpperCase()}
+                    </div>
+                </div>
+            `;
+        }
+    }
+
+    // 3. CAROUSEL: FUTURE GIGS
+    const futureItems = upcomingGigs.map(g => ({ ...g, type: 'upcoming' }));
+
+    // 4. CAROUSEL: ANNIVERSARY GIGS
+    const anniversaries = pastGigs.filter(g => {
         const [d, m, y] = g.Date.split('/').map(Number);
         return d === currentDay && m === currentMonth;
-    }).sort((a,b) => b.Date.split('/')[2] - a.Date.split('/')[2]);
+    }).map(g => ({ ...g, type: 'anniversary' }));
 
-    // Random Month Filter
-    const otherMonthGigs = gigs.filter(g => {
+    // 5. CAROUSEL: MONTH MEMORIES
+    const monthMemories = pastGigs.filter(g => {
         const [d, m, y] = g.Date.split('/').map(Number);
         return m === currentMonth && d !== currentDay;
-    }).sort(() => Math.random() - 0.5);
+    }).sort(() => Math.random() - 0.5).map(g => ({ ...g, type: 'memory' }));
 
-    // Build the 4-item list
-    const memories = [...anniversaryGigs, ...otherMonthGigs].slice(0, 3).map(g => {
+    // 6. COMBINE (All Upcoming + 3 Historical)
+    const historicalPool = [...anniversaries, ...monthMemories].slice(0, 3);
+    const combined = [...futureItems, ...historicalPool].map(g => {
         const [d, m, y] = g.Date.split('/').map(Number);
         const yearsAgo = today.getFullYear() - y;
+
+        let badge = "";
+        if (g.type === 'upcoming') badge = "Upcoming Show";
+        else if (g.type === 'anniversary') badge = `${yearsAgo} Year Anniversary`;
+        else badge = `Memory from ${today.toLocaleString('default', { month: 'long' })}`;
+
+        const cleanVenue = g.OfficialVenue.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-');
+        const formattedDate = `${y}-${m < 10 ? '0'+m : m}-${d < 10 ? '0'+d : d}`;
+
         return {
+            ...g,
             band: g.Band,
             details: `${g.OfficialVenue} • ${g.Date}`,
-            badge: d === currentDay ? `${yearsAgo} Year Anniversary` : `Memory from ${today.toLocaleString('default', { month: 'long' })}`,
-            image: `assets/scrapbook/${y}-${m < 10 ? '0'+m : m}-${d < 10 ? '0'+d : d}-${g.OfficialVenue.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-]/g, '')}.jpg`,
-            isCTA: false
+            badge: badge,
+            image: g.type === 'upcoming' ? `https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?auto=format&fit=crop&q=80` : `assets/scrapbook/${formattedDate}-${cleanVenue}.jpg`,
+            isCTA: false,
+            isFuture: g.type === 'upcoming'
         };
     });
 
-    memories.push({
+    // 7. THE CTA CARD
+    combined.push({
         band: "Ready for more?",
         details: "Tap here to delve deeper into the Data Lab.",
         badge: "Next Step",
         image: "https://images.unsplash.com/photo-1514525253361-b83f859b73c0?auto=format&fit=crop&q=80",
-        isCTA: true
+        isCTA: true,
+        isFuture: false
     });
 
-    homeCarousel = memories;
+    homeCarousel = combined;
     renderCarouselItem(0);
 };
-
 // --- NEW: Default Image Pool ---
 const defaultImages = [
     "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?auto=format&fit=crop&q=75&w=800", // Stage Lights
@@ -499,35 +674,51 @@ function renderCarouselItem(index) {
     currentCarouselIndex = index;
     const fallbackImage = defaultImages[index % defaultImages.length];
 
-    // 1. HELPER: Force small sizes on Unsplash links
     const getOptimizedUrl = (url) => {
         if (!url) return '';
         if (url.includes('unsplash.com')) {
             const baseUrl = url.split('?')[0];
             return `${baseUrl}?auto=format&fit=crop&w=800&q=75`;
         }
-        return url; // Local files remain unchanged as they lack an API
+        return url;
     };
 
     const displayImage = getOptimizedUrl(item.image);
 
+    // 1. DYNAMIC COLOR & STATS FOR FUTURE GIGS
+    const accentClass = item.isFuture ? 'bg-emerald-600' : 'bg-indigo-600';
+    const hoverClass = item.isFuture ? 'group-hover:text-emerald-400' : 'group-hover:text-indigo-400';
+
+let historicalSubtext = item.details;
+if (item.isFuture) {
+        // Use the new global helper
+        const count = getGlobalSeenCount(item.band);
+
+        const isFest = item['Festival?'] && item['Festival?'].trim().toUpperCase().startsWith('Y');
+        const verb = isFest ? "Been" : "Seen";
+
+        historicalSubtext = count > 0
+            ? `🔥 ${verb} ${count} times before`
+            : `✨ First time ${isFest ? 'going' : 'seeing them'}!`;
+    }
+
     // 2. ACCESSIBILITY LABEL
     const a11yLabel = item.isCTA
         ? "Ready for more? Tap right for Data Lab, tap left for previous memory."
-        : `${item.badge}: ${item.band}. Tap right for next, left for previous.`;
+        : `${item.badge}: ${item.band}. ${item.isFuture ? 'Upcoming show.' : ''} Tap right for next, left for previous.`;
 
-    // 3. SINGLE RENDER BLOCK
+    // 3. RENDER BLOCK
     card.innerHTML = `
         <div class="relative h-full w-full overflow-hidden rounded-[2.5rem] bg-slate-900"
-             role="region" aria-label="Gig Memories">
+             role="region" aria-label="Gig Carousel">
 
             <img src="${displayImage}"
-                 class="absolute inset-0 w-full h-full object-cover shadow-inner"
+                 class="absolute inset-0 w-full h-full object-cover shadow-inner opacity-60"
                  loading="lazy"
                  alt="" aria-hidden="true"
                  onerror="this.src='${fallbackImage}'">
 
-            <div class="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-slate-950/40 to-transparent" aria-hidden="true"></div>
+            <div class="absolute inset-0 bg-gradient-to-t from-slate-950/95 via-slate-950/40 to-transparent" aria-hidden="true"></div>
 
             <div class="absolute inset-0 z-20 flex">
                 <div onclick="event.stopPropagation(); rotateCarousel(-1)"
@@ -540,26 +731,30 @@ function renderCarouselItem(index) {
             </div>
 
             <div class="absolute inset-0 z-30 p-8 flex flex-col justify-end pointer-events-none">
-                <div class="pointer-events-auto max-w-[80%]">
-                    <div onclick="event.stopPropagation(); ${item.isCTA ? "switchView('data')" : "openModalFromCarousel('" + index + "')"}"
+                <div class="pointer-events-auto max-w-[85%]">
+                    <div onclick="event.stopPropagation(); ${item.isCTA ? "toggleView('list')" : (item.isFuture ? "" : "openModal('" + item['Journal Key'] + "')")}"
                          class="cursor-pointer group"
                          role="button" tabindex="0" aria-label="${a11yLabel}">
 
-                        <span class="inline-block bg-indigo-600 text-white text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full mb-3">
+                        <span class="inline-block ${accentClass} text-white text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full mb-3">
                             ${item.badge}
                         </span>
-                        <h3 class="text-3xl font-black text-white italic tracking-tighter leading-none mb-1 group-hover:text-indigo-400 transition-colors">
+
+                        <h3 class="text-3xl font-black text-white italic tracking-tighter leading-none mb-1 ${hoverClass} transition-colors">
                             ${item.band}
                         </h3>
+
                         <p class="text-slate-300 font-bold text-sm">
                             ${item.details}
                         </p>
+
+                        ${item.isFuture ? `<p class="text-emerald-400 font-black text-[10px] uppercase mt-2 tracking-widest">${historicalSubtext}</p>` : ''}
                     </div>
 
                     <div class="flex gap-1.5 mt-6">
                         ${homeCarousel.map((_, i) => `
                             <div onclick="event.stopPropagation(); renderCarouselItem(${i})"
-                                 class="h-1 rounded-full transition-all duration-300 ${i === index ? 'w-8 bg-indigo-500' : 'w-2 bg-white/30 hover:bg-white/50'}"
+                                 class="h-1 rounded-full transition-all duration-300 ${i === index ? 'w-8 ' + (item.isFuture ? 'bg-emerald-500' : 'bg-indigo-500') : 'w-2 bg-white/30 hover:bg-white/50'}"
                                  role="button" aria-label="Slide ${i + 1}">
                             </div>
                         `).join('')}
@@ -1153,4 +1348,10 @@ function getTicketStyle(key) {
     // Create a stable index based on the key
     const index = key.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
     return styles[index % styles.length];
+}
+
+function parseDate(dateStr) {
+    if (!dateStr) return new Date(0);
+    const [d, m, y] = dateStr.split('/').map(Number);
+    return new Date(y, m - 1, d);
 }
