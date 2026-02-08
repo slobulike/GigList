@@ -183,6 +183,12 @@ function updateDataCentreStats(filteredData) {
 }
 
 function refreshUI() {
+    // --- START SCROLL FIX ---
+    // If we are in 'list' view, we almost certainly want to be able to scroll
+    if (currentView === 'list' || currentView === 'home') {
+        document.body.style.overflow = 'auto';
+        document.body.style.height = 'auto';
+    }
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -199,27 +205,32 @@ const filtered = journalData.map(row => {
         const band = (row['Band'] || "").toLowerCase();
         const venue = (row['OfficialVenue'] || "").toLowerCase();
         const lineup = (row['Festival Lineups'] || "").toLowerCase();
+        // Ensure we grab the companion column - typically 'Went With' in your CSV
+        const companion = (row['Went With'] || "").toLowerCase();
         const journalKey = row['Journal Key'];
 
-// 1. FESTIVAL MATCH (Check the lineup column first)
-const isFestivalMatch = query.length > 2 && !band.includes(query) && lineup.includes(query);
+        // 1. Existing Match Logics
+        const hasSongMatch = query.length > 2 && performanceData.some(p =>
+            p['Journal Key'] === journalKey && (p['Setlist'] || "").toLowerCase().includes(query)
+        );
 
-// 2. SUPPORT MATCH (Only if it's NOT already a Festival Match)
-const isSupportMatch = query.length > 2 && !isFestivalMatch && performanceData.some(p =>
-    p['Journal Key'] === journalKey &&
-    p.Artist.toLowerCase().includes(query) &&
-    band !== p.Artist.toLowerCase()
-);
+        const isFestivalMatch = query.length > 2 && !band.includes(query) && lineup.includes(query);
 
-// 3. SONG MATCH (Independent of the others)
-const hasSongMatch = query.length > 2 && performanceData.some(p =>
-    p['Journal Key'] === journalKey && (p['Setlist'] || "").toLowerCase().includes(query)
-);
+        const isSupportMatch = query.length > 2 && !isFestivalMatch && performanceData.some(p =>
+            p['Journal Key'] === journalKey &&
+            p.Artist.toLowerCase().includes(query) &&
+            band !== p.Artist.toLowerCase()
+        );
 
-        const matchSearch = `${band} ${venue} ${lineup} ${row['Went With'] || ""}`.includes(query) || hasSongMatch || isSupportMatch;
+        // 2. RE-FIX: The Master Search Match
+        // We combine all searchable text fields into one string for the query to check
+        const matchSearch = `${band} ${venue} ${lineup} ${companion}`.includes(query) ||
+                            hasSongMatch ||
+                            isSupportMatch;
+
+        // 3. Keep existing Artist/Year/Future filters
         const matchArtist = !activeArtist || band === activeArtist.toLowerCase() || lineup.includes(activeArtist.toLowerCase()) || isSupportMatch;
         const matchYear = !activeYear || row.Date.endsWith(activeYear);
-
         const gigDate = parseDate(row.Date);
         const matchFuture = includeFuture ? true : gigDate < today;
 
@@ -227,7 +238,7 @@ const hasSongMatch = query.length > 2 && performanceData.some(p =>
             ...row,
             _isSongMatch: hasSongMatch,
             _isFestMatch: isFestivalMatch,
-            _isSupportMatch: isSupportMatch, // New flag for the renderer
+            _isSupportMatch: isSupportMatch,
             _visible: matchSearch && matchArtist && matchYear && matchFuture
         };
     }).filter(r => r._visible);
@@ -270,6 +281,7 @@ const hasSongMatch = query.length > 2 && performanceData.some(p =>
     }
 
     filteredResults = filtered;
+    if (typeof renderCharts === "function") renderCharts(filtered);
     filteredResults.sort((a, b) => parseDate(b.Date) - parseDate(a.Date));
 
     updateDataCentreStats(filtered);
@@ -285,6 +297,162 @@ const hasSongMatch = query.length > 2 && performanceData.some(p =>
     if (typeof renderCharts === "function") renderCharts(filtered);
     if (window.leafletMap && typeof updateMap === "function") updateMap(filtered, venueData);
     if (window.lucide) lucide.createIcons();
+}
+
+window.openChartModal = function(chartType) {
+    const modal = document.getElementById('chartModal');
+    const canvas = document.getElementById('modalChartCanvas');
+    if (!modal || !canvas) return;
+
+    // 1. Open the UI and lock scroll
+    modal.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+
+    // 2. Kill any old chart sitting in the modal
+    if (window.modalChartInstance) window.modalChartInstance.destroy();
+
+    // 3. Get the data currently visible in your table
+    const data = (typeof filteredResults !== 'undefined' && filteredResults.length > 0)
+                 ? filteredResults
+                 : journalData;
+
+    // 4. Draw the high-res version
+    const ctx = canvas.getContext('2d');
+
+    // Logic branches based on your two specific charts
+    if (chartType === 'companion') {
+        renderCompanionChart(data, 'modalChartCanvas', true);
+        document.getElementById('modalChartTitle').innerText = "Companion Analysis";
+    } else if (chartType === 'year') {
+        renderYearChart(data, 'modalChartCanvas', true);
+        document.getElementById('modalChartTitle').innerText = "Yearly Breakdown";
+    }
+
+    if (window.lucide) lucide.createIcons();
+};
+
+window.closeChartModal = function() {
+    document.getElementById('chartModal').classList.add('hidden');
+    document.body.style.overflow = 'auto'; // Unlock scroll
+    if (window.modalChartInstance) window.modalChartInstance.destroy();
+};
+
+window.renderCompanionChart = function(data, canvasId = 'companionChart', isModal = false) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+
+    // Process Data
+    const companionCounts = {};
+    data.forEach(row => {
+        const friends = (row['Went With'] || "").split(/[,\/&]/).map(f => f.trim()).filter(f => f && f !== "Alone" && f !== "nan");
+        friends.forEach(f => { companionCounts[f] = (companionCounts[f] || 0) + 1; });
+    });
+
+    const sorted = Object.entries(companionCounts).sort((a, b) => b[1] - a[1]).slice(0, 7);
+
+    const chart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: sorted.map(x => x[0]),
+            datasets: [{
+                data: sorted.map(x => x[1]),
+                backgroundColor: ['#6366f1', '#8b5cf6', '#ec4899', '#f43f5e', '#f59e0b', '#10b981', '#06b6d4'],
+                borderWidth: 0
+            }]
+        },
+        options: {
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: isModal, // Legend only shows in the big modal
+                    position: 'bottom'
+                }
+            }
+        }
+    });
+
+    // If this is for the modal, save it so we can destroy it later
+    if (isModal) window.modalChartInstance = chart;
+};
+
+window.renderYearChart = function(data, canvasId = 'yearChart', isModal = false) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+
+    // 1. Group gigs by year
+    const yearCounts = {};
+    data.forEach(row => {
+        if (row.Date) {
+            const year = row.Date.split('/').pop();
+            yearCounts[year] = (yearCounts[year] || 0) + 1;
+        }
+    });
+
+    const sortedYears = Object.keys(yearCounts).sort();
+
+    // 2. Create the Chart
+    const chart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: sortedYears,
+            datasets: [{
+                label: 'Gigs',
+                data: sortedYears.map(y => yearCounts[y]),
+                backgroundColor: '#6366f1',
+                borderRadius: 6
+            }]
+        },
+        options: {
+            maintainAspectRatio: false,
+            scales: {
+                y: { beginAtZero: true, grid: { display: false }, ticks: { font: { weight: 'bold' } } },
+                x: { grid: { display: false }, ticks: { font: { weight: 'bold' } } }
+            },
+            plugins: {
+                legend: { display: false } // We don't need a legend for a single-bar chart
+            }
+        }
+    });
+
+    if (isModal) window.modalChartInstance = chart;
+};
+
+function renderYearChart(data, canvasId = 'yearChart', isModal = false) {
+    const ctx = document.getElementById(canvasId).getContext('2d');
+
+    // If we are drawing in the modal, we save the instance to a specific variable
+    const chart = new Chart(ctx, {
+        // ... your existing chart config
+        options: {
+            maintainAspectRatio: false,
+            // You can use isModal to make text bigger for the expanded view
+            plugins: {
+                legend: { display: isModal ? true : false }
+            }
+        }
+    });
+
+    if (isModal) window.modalChartInstance = chart;
+}
+
+function renderArtistChart(data, canvasId, isModal = false) {
+    // ... logic to count artists ...
+
+    const ctx = document.getElementById(canvasId).getContext('2d');
+    window.modalChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: { /* ... */ },
+        options: {
+            maintainAspectRatio: false,
+            responsive: true,
+            // Increase font size if isModal is true
+            scales: {
+                x: { ticks: { font: { size: isModal ? 14 : 10 } } }
+            }
+        }
+    });
 }
 
 function renderTable(data, query) {
@@ -514,17 +682,24 @@ function renderCharts(filtered) {
 }
 
 window.switchView = function(viewId) {
-    window.scrollTo({ top: 0, behavior: 'instant' });
+    // 1. SCROLL FIX: Wrap in setTimeout to ensure it happens AFTER the DOM update
+    setTimeout(() => {
+        window.scrollTo(0, 0);
+        document.body.scrollTop = 0; // For Safari
+        document.documentElement.scrollTop = 0; // For Chrome, Firefox, IE and Opera
+    }, 0);
+
+    // 2. VIEW TOGGLING
     document.querySelectorAll('.view-section').forEach(s => s.classList.add('hidden'));
 
-	if (viewId === 'home') {
-        renderCarouselItem(0); // Always reset to the first card when returning home
+    if (viewId === 'home') {
+        renderCarouselItem(0);
     }
 
-    // This creates 'view-achievements', 'view-home', etc.
     const targetView = document.getElementById(`view-${viewId}`);
     if (targetView) targetView.classList.remove('hidden');
 
+    // 3. NAV HIGHLIGHTING
     document.querySelectorAll('.nav-item').forEach(n => {
         n.classList.remove('active', 'text-indigo-600');
         n.classList.add('text-slate-400');
@@ -533,23 +708,20 @@ window.switchView = function(viewId) {
     const activeNav = document.getElementById(`nav-${viewId}`);
     if (activeNav) activeNav.classList.add('active', 'text-indigo-600');
 
-if (viewId === 'map' && window.leafletMap) {
-    // 1. Immediate invalidation to snap to the current container size
-    window.leafletMap.invalidateSize({ animate: false });
+    // 4. MAP FIXES
+    if (viewId === 'map' && window.leafletMap) {
+        window.leafletMap.invalidateSize({ animate: false });
+        setTimeout(() => {
+            window.leafletMap.invalidateSize();
+            window.leafletMap.eachLayer(layer => {
+                if (layer.options && layer.options.layers || layer._url) {
+                    layer.redraw();
+                }
+            });
+        }, 100);
+    }
 
-    // 2. Short-delay follow-up to catch any CSS transition completion
-    setTimeout(() => {
-        window.leafletMap.invalidateSize();
-        // Force tiles to reload correctly into the new space
-        window.leafletMap.eachLayer(layer => {
-            if (layer.options && layer.options.layers || layer._url) {
-                layer.redraw();
-            }
-        });
-    }, 100); // Reduced from 400ms for a snappier response
-}
-
-    // FIX: viewId is just 'achievements', so check for that
+    // 5. ACHIEVEMENTS
     if (viewId === 'achievements') {
         renderBadges();
     }
@@ -789,9 +961,11 @@ function rotateCarousel(direction) {
 }
 
 async function openModal(journalKey) {
+// RESET MODAL SCROLL FIRST
+    const modalBody = document.querySelector('#gigModal .overflow-y-auto');
+    if (modalBody) modalBody.scrollTop = 0;
     const entry = journalData.find(j => j['Journal Key'] === journalKey);
     const sets = performanceData.filter(p => p['Journal Key'] === journalKey);
-
 
     // 1. FESTIVAL DETECTION
     // Check the dedicated field. We'll check for "Y" or "Yes" just in case.
@@ -1355,3 +1529,61 @@ function parseDate(dateStr) {
     const [d, m, y] = dateStr.split('/').map(Number);
     return new Date(y, m - 1, d);
 }
+
+window.openChartModal = function(chartType) {
+    console.log("Button clicked! Type:", chartType);
+
+    const modal = document.getElementById('chartModal');
+    if (!modal) {
+        console.error("CRITICAL: Could not find 'chartModal'");
+        return;
+    }
+
+    // FORCE VISIBILITY: Remove the 'hidden' class which has !important
+    modal.classList.remove('hidden');
+    // Ensure the display is flex so it centers correctly
+    modal.style.setProperty('display', 'flex', 'important');
+
+    console.log("Modal class list after change:", modal.classList);
+
+    document.body.style.overflow = 'hidden';
+
+    if (window.modalChartInstance) window.modalChartInstance.destroy();
+
+    const dataToUse = (typeof filteredResults !== 'undefined' && filteredResults.length > 0)
+                      ? filteredResults
+                      : journalData;
+
+    if (chartType === 'companion') {
+        renderCompanionChart(dataToUse, 'modalChartCanvas', true);
+        const titleEl = document.getElementById('modalChartTitle');
+        if (titleEl) titleEl.innerText = "Companion Analysis";
+    }
+    else if (chartType === 'year') {
+        renderYearChart(dataToUse, 'modalChartCanvas', true);
+        document.getElementById('modalChartTitle').innerText = "Yearly Breakdown";
+    }
+    if (window.lucide) lucide.createIcons();
+};
+
+window.closeChartModal = function() {
+    const modal = document.getElementById('chartModal');
+    if (!modal) return;
+
+    // 1. COMPLETELY HIDE THE MODAL
+    // We must use 'none !important' to override the 'flex !important' we used to open it
+    modal.style.setProperty('display', 'none', 'important');
+    modal.classList.add('hidden');
+
+    // 2. UNLOCK THE APP SCROLL
+    document.body.style.overflow = 'auto';
+    document.body.style.height = 'auto';
+
+    // 3. CLEAN UP THE CHART
+    if (window.modalChartInstance) {
+        window.modalChartInstance.destroy();
+        window.modalChartInstance = null;
+    }
+
+    console.log("Modal closed and app unlocked.");
+};
