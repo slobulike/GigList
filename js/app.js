@@ -1,6 +1,10 @@
 /**
  * Gig List Core Engine
 
+ V1.1.3 - Release Date 2026-02-09 PM
+ * -------------------------------------------------------------------
+   * [FEATURE] Year chart expanded modal: Added monthly drill down
+
  V1.1.3 - Release Date 2026-02-09
  * -------------------------------------------------------------------
   * [FIX] Companion chart modal: Updated large view with correct labels and count
@@ -54,6 +58,26 @@ let homeCarousel = [];
 let filteredResults = [];
 let currentView = 'list';
 let currentCarouselIndex = 0;
+
+window.handleImageError = function(imgElement, bandName, fallbackStock) {
+    // 1. Prevent infinite loops if the fallback also fails
+    if (imgElement.dataset.attempted === 'unsplash') {
+        imgElement.src = fallbackStock;
+        imgElement.onerror = null;
+        return;
+    }
+
+    // 2. If it's a specific band (not the CTA), try the Unsplash Artist search
+    if (bandName && bandName !== "Ready for More?") {
+        console.warn(`🕵️ Photo missing for ${bandName}. Trying Artist-specific fallback...`);
+        imgElement.dataset.attempted = 'unsplash';
+        const artistQuery = encodeURIComponent(`${bandName} concert`);
+        // We use a high-quality base photo and a 'sig' to ensure a unique result for this artist
+        imgElement.src = "https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?auto=format&fit=crop&w=800&q=75&sig=${artistQuery}";
+    } else {
+        imgElement.src = fallbackStock;
+    }
+};
 
 function getGlobalSeenCount(artistName) {
     const today = new Date();
@@ -405,43 +429,108 @@ window.renderYearChart = function(data, canvasId = 'yearChart', isModal = false)
     const canvas = document.getElementById(canvasId);
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
+    const currentYear = new Date().getFullYear();
+    const vault = window.journalData || data;
 
-    // 1. Group gigs by year
-    const yearCounts = {};
+    const allYears = vault.map(row => parseInt(row.Date?.split('/').pop())).filter(y => !isNaN(y));
+    const startYear = allYears.length > 0 ? Math.min(...allYears) : currentYear - 5;
+
+    const counts = {};
     data.forEach(row => {
         if (row.Date) {
-            const year = row.Date.split('/').pop();
-            yearCounts[year] = (yearCounts[year] || 0) + 1;
+            const y = row.Date.split('/').pop();
+            counts[y] = (counts[y] || 0) + 1;
         }
     });
 
-    const sortedYears = Object.keys(yearCounts).sort();
+    const labels = [];
+    const values = [];
+    for (let i = startYear; i <= currentYear; i++) {
+        labels.push(i.toString());
+        values.push(counts[i.toString()] || 0);
+    }
 
-    // 2. Create the Chart
     const chart = new Chart(ctx, {
         type: 'bar',
         data: {
-            labels: sortedYears,
+            labels: labels,
             datasets: [{
                 label: 'Gigs',
-                data: sortedYears.map(y => yearCounts[y]),
+                data: values,
                 backgroundColor: '#6366f1',
-                borderRadius: 6
+                borderRadius: isModal ? 8 : 4,
+                hoverBackgroundColor: '#f43f5e' // Changes color on hover to signal it's clickable
             }]
         },
         options: {
             maintainAspectRatio: false,
+            // ONLY enable drilling if we are in the Modal
+            onClick: (event, elements) => {
+                if (isModal && elements.length > 0) {
+                    const index = elements[0].index;
+                    const selectedYear = labels[index];
+                    renderMonthChart(data, selectedYear);
+                }
+            },
             scales: {
-                y: { beginAtZero: true, grid: { display: false }, ticks: { font: { weight: 'bold' } } },
-                x: { grid: { display: false }, ticks: { font: { weight: 'bold' } } }
+                y: { beginAtZero: true, ticks: { stepSize: 1 } },
+                x: { grid: { display: false } }
             },
             plugins: {
-                legend: { display: false } // We don't need a legend for a single-bar chart
+                legend: { display: false },
+                tooltip: { enabled: true }
             }
         }
     });
 
     if (isModal) window.modalChartInstance = chart;
+};
+
+window.renderMonthChart = function(data, year) {
+    const canvas = document.getElementById('modalChartCanvas');
+    if (!canvas) return;
+
+    // 1. Destroy the year chart
+    if (window.modalChartInstance) window.modalChartInstance.destroy();
+
+    // 2. Update Titles & UI
+    document.getElementById('modalChartTitle').innerText = `Gigs in ${year}`;
+    const subtitle = document.querySelector('#chartModal p.text-slate-400');
+    subtitle.innerHTML = `<button onclick="openChartModal('year')" class="text-indigo-500 hover:underline font-black cursor-pointer uppercase tracking-widest">← Back to Yearly View</button>`;
+
+    // 3. Process Monthly Data
+    const monthCounts = Array(12).fill(0);
+    const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+    data.forEach(row => {
+        if (row.Date && row.Date.endsWith(year)) {
+            const month = parseInt(row.Date.split('/')[1]) - 1; // Assuming DD/MM/YYYY
+            if (month >= 0 && month <= 11) monthCounts[month]++;
+        }
+    });
+
+    // 4. Render Month Chart
+    const ctx = canvas.getContext('2d');
+    window.modalChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: monthNames,
+            datasets: [{
+                label: 'Gigs',
+                data: monthCounts,
+                backgroundColor: '#ec4899', // Different color for month view
+                borderRadius: 8
+            }]
+        },
+        options: {
+            maintainAspectRatio: false,
+            scales: {
+                y: { beginAtZero: true, ticks: { stepSize: 1 } },
+                x: { grid: { display: false } }
+            },
+            plugins: { legend: { display: false } }
+        }
+    });
 };
 
 function renderYearChart(data, canvasId = 'yearChart', isModal = false) {
@@ -492,7 +581,6 @@ function renderTable(data, query) {
 
         const safeKey = row['Journal Key'].replace(/'/g, "\\'");
 
-        // Build Badge Labels
 // Build Badge Labels
         let matchLabels = '';
 
@@ -833,14 +921,17 @@ const tickerEl = document.getElementById('global-ticker');
         const formattedDate = `${y}-${m < 10 ? '0'+m : m}-${d < 10 ? '0'+d : d}`;
 
         return {
-            ...g,
-            band: g.Band,
-            details: `${g.OfficialVenue} • ${g.Date}`,
-            badge: badge,
-            image: g.type === 'upcoming' ? `https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?auto=format&fit=crop&q=80` : `assets/scrapbook/${formattedDate}-${cleanVenue}.jpg`,
-            isCTA: false,
-            isFuture: g.type === 'upcoming'
-        };
+                ...g,
+                band: g.Band,
+                details: `${g.OfficialVenue} • ${g.Date}`,
+                badge: badge,
+                // Upcoming gigs go straight to 'null' to trigger the default fallback immediately
+                image: g.type === 'upcoming'
+                    ? null
+                    : `assets/scrapbook/${formattedDate}-${cleanVenue}.jpg`,
+                isCTA: false,
+                isFuture: g.type === 'upcoming'
+            };
     });
 
     // 7. THE CTA CARD
@@ -848,7 +939,7 @@ const tickerEl = document.getElementById('global-ticker');
         band: "Ready for more?",
         details: "Tap here to delve deeper into the Data Lab.",
         badge: "Next Step",
-        image: "https://images.unsplash.com/photo-1514525253361-b83f859b73c0?auto=format&fit=crop&q=80",
+        image: "https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?auto=format&fit=crop&q=80",
         isCTA: true,
         isFuture: false
     });
@@ -869,18 +960,38 @@ function renderCarouselItem(index) {
 
     const item = homeCarousel[index];
     currentCarouselIndex = index;
+
+    // 1. IMPROVED IMAGE LOGIC
     const fallbackImage = defaultImages[index % defaultImages.length];
 
-    const getOptimizedUrl = (url) => {
-        if (!url) return '';
-        if (url.includes('unsplash.com')) {
-            const baseUrl = url.split('?')[0];
-            return `${baseUrl}?auto=format&fit=crop&w=800&q=75`;
+const getDisplayImage = (item) => {
+        if (item.isCTA) {
+            console.log("🎨 Carousel: Using CTA Fallback");
+            return fallbackImage;
         }
-        return url;
+
+        // 1. Check for Scrapbook Image
+        if (item.image && item.image.trim() !== '') {
+            console.log(`📸 Carousel: Using Scrapbook image for ${item.band}`);
+            const url = item.image;
+            if (url.includes('unsplash.com')) {
+                const baseUrl = url.split('?')[0];
+                return `${baseUrl}?auto=format&fit=crop&w=800&q=75`;
+            }
+            return url;
+        }
+
+        // 2. Artist Specific Fallback (Dynamic Search)
+        const artistQuery = encodeURIComponent(`${item.band}`);
+        // We use a specific high-quality concert photo as the base
+        // and use the 'sig' parameter to create a unique instance for this artist
+        const dynamicUrl = "https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?auto=format&fit=crop&w=800&q=75&sig=${artistQuery}";
+
+        console.log(`🔍 Carousel: No photo found for ${item.band}. Attempting dynamic fetch: ${dynamicUrl}`);
+        return dynamicUrl;
     };
 
-    const displayImage = getOptimizedUrl(item.image);
+        const displayImage = getDisplayImage(item);
 
     // 1. DYNAMIC COLOR & STATS FOR FUTURE GIGS
     const accentClass = item.isFuture ? 'bg-emerald-600' : 'bg-indigo-600';
@@ -909,12 +1020,11 @@ if (item.isFuture) {
         <div class="relative h-full w-full overflow-hidden rounded-[2.5rem] bg-slate-900"
              role="region" aria-label="Gig Carousel">
 
-            <img src="${displayImage}"
+            <img src="${displayImage || fallbackImage}"
                  class="absolute inset-0 w-full h-full object-cover shadow-inner opacity-60"
                  loading="lazy"
                  alt="" aria-hidden="true"
                  onerror="this.src='${fallbackImage}'">
-
             <div class="absolute inset-0 bg-gradient-to-t from-slate-950/95 via-slate-950/40 to-transparent" aria-hidden="true"></div>
 
             <div class="absolute inset-0 z-20 flex">
@@ -1585,9 +1695,12 @@ window.openChartModal = function(chartType) {
         if (titleEl) titleEl.innerText = "Companion Analysis";
     }
     else if (chartType === 'year') {
-        renderYearChart(dataToUse, 'modalChartCanvas', true);
-        document.getElementById('modalChartTitle').innerText = "Yearly Breakdown";
-    }
+            renderYearChart(dataToUse, 'modalChartCanvas', true);
+            document.getElementById('modalChartTitle').innerText = "Yearly Breakdown";
+            // RESET SUBTITLE (Removes the Back button)
+            const subtitle = document.querySelector('#chartModal p.text-slate-400');
+            if (subtitle) subtitle.innerText = "Interactive Data View";
+        }
     if (window.lucide) lucide.createIcons();
 };
 
