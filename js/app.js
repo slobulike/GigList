@@ -1,6 +1,11 @@
 /**
  * Gig List Core Engine
 
+ V1.1.3 - Release Date 2026-02-09
+ * -------------------------------------------------------------------
+  * [FIX] Companion chart modal: Updated large view with correct labels and count
+  * [FIX] User Settings modal: Updated format to fix layout
+
  V1.1.2 - Release Date 2026-02-08
  * -------------------------------------------------------------------
   * [FEATURE] Intelligent Countdown: Dynamic ticker with last or next gig logic
@@ -39,7 +44,7 @@
 
  */
 
-const APP_VERSION = "1.1.2";
+const APP_VERSION = "1.1.3";
 
 let currentUser = JSON.parse(localStorage.getItem('gv_user'));
 let journalData = [], performanceData = [], venueData = [];
@@ -342,22 +347,29 @@ window.renderCompanionChart = function(data, canvasId = 'companionChart', isModa
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
 
-    // Process Data
+    // 1. SET THE LIMIT: 7 for the small dashboard, 12 (or more) for the modal
+    const limit = isModal ? 12 : 7;
+
     const companionCounts = {};
     data.forEach(row => {
         const friends = (row['Went With'] || "").split(/[,\/&]/).map(f => f.trim()).filter(f => f && f !== "Alone" && f !== "nan");
         friends.forEach(f => { companionCounts[f] = (companionCounts[f] || 0) + 1; });
     });
 
-    const sorted = Object.entries(companionCounts).sort((a, b) => b[1] - a[1]).slice(0, 7);
+    // 2. Apply the dynamic limit here
+    const sorted = Object.entries(companionCounts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, limit);
 
-    const chart = new Chart(ctx, {
+    // ... rest of the Chart.js code remains the same
+const chart = new Chart(ctx, {
         type: 'doughnut',
         data: {
             labels: sorted.map(x => x[0]),
             datasets: [{
+                label: 'Companions', // <--- ADD THIS LINE to fix the "Laura" label
                 data: sorted.map(x => x[1]),
-                backgroundColor: ['#6366f1', '#8b5cf6', '#ec4899', '#f43f5e', '#f59e0b', '#10b981', '#06b6d4'],
+                backgroundColor: ['#6366f1', '#8b5cf6', '#ec4899', '#f43f5e', '#f59e0b', '#10b981', '#06b6d4', '#94a3b8', '#cbd5e1', '#e2e8f0', '#f1f5f9', '#f8fafc'],
                 borderWidth: 0
             }]
         },
@@ -365,14 +377,27 @@ window.renderCompanionChart = function(data, canvasId = 'companionChart', isModa
             maintainAspectRatio: false,
             plugins: {
                 legend: {
-                    display: isModal, // Legend only shows in the big modal
-                    position: 'bottom'
+                    display: isModal,
+                    position: 'bottom',
+                    labels: {
+                        padding: 20,
+                        font: { size: 11, weight: 'bold' },
+                        // This ensures the legend items themselves use the person's name
+                        usePointStyle: true
+                    }
+                },
+                // Extra safety: tooltips will now also say "Companions: Name"
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return ` ${context.label}: ${context.raw} Gigs`;
+                        }
+                    }
                 }
             }
         }
     });
 
-    // If this is for the modal, save it so we can destroy it later
     if (isModal) window.modalChartInstance = chart;
 };
 

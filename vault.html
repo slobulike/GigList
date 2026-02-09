@@ -260,16 +260,19 @@
 
         <div class="space-y-6">
             <div class="bg-slate-50 p-6 rounded-[2rem] border border-slate-100">
-                <label class="block text-[10px] font-black uppercase text-indigo-500 mb-3">Sync Setlist.fm</label>
+                <label for="setlistIdInput" class="block text-[10px] font-black uppercase text-indigo-500 mb-3">Sync Setlist.fm</label>
+
                 <div class="flex gap-2">
-                    <label for="setlistIdInput" class="block text-[10px] font-black uppercase text-indigo-500 mb-3">Sync Setlist.fm</label>
-                    <div class="flex gap-2">
-                    <input type="text" id="setlistIdInput" placeholder="Enter Username (e.g. Tragicgurl)"
+                    <input type="text" id="setlistIdInput"
+                           placeholder="Enter Username (e.g. Tragicgurl)"
                            class="flex-1 bg-white px-4 py-3 rounded-xl text-sm font-bold border-none shadow-sm outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800">
-                    <button onclick="syncComingSoon()" class="bg-indigo-600 text-white px-4 py-3 rounded-xl hover:bg-indigo-700 transition-colors">
-                        <i data-lucide="refresh-cw" class="w-5"></i>
+
+                    <button onclick="syncComingSoon()"
+                            class="bg-indigo-600 text-white px-4 py-3 rounded-xl hover:bg-indigo-700 transition-colors">
+                        <i data-lucide="refresh-cw" class="w-5 h-5"></i>
                     </button>
                 </div>
+
                 <p class="text-[10px] text-slate-400 mt-3 italic">This will pull your history, venues, and setlists.</p>
             </div>
 
