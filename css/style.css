@@ -165,3 +165,40 @@
     background-size: 10px 10px;
     background-repeat: repeat-x;
 }
+
+.backface-hidden { backface-visibility: hidden; }
+.month-card.is-flipped { transform: rotateY(180deg); }
+
+/* Vanishing Grey Scrollbar */
+.custom-modal-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+    transition: scrollbar-color 0.3s ease;
+}
+
+.custom-modal-scroll:hover {
+    scrollbar-color: #cbd5e1 transparent; /* Slate-300 */
+}
+
+/* Webkit version (Chrome/Safari/Edge) */
+.custom-modal-scroll::-webkit-scrollbar {
+    width: 6px;
+}
+.custom-modal-scroll::-webkit-scrollbar-track {
+    background: transparent;
+}
+.custom-modal-scroll::-webkit-scrollbar-thumb {
+    background-color: transparent;
+    border-radius: 20px;
+    transition: background-color 0.3s ease;
+}
+.custom-modal-scroll:hover::-webkit-scrollbar-thumb {
+    background-color: #cbd5e1;
+}
+
+.perspective-1000 { perspective: 1000px; }
+.preserve-3d { transform-style: preserve-3d; }
+.backface-hidden { backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+.rotate-y-180 { transform: rotateY(180deg); }
+.is-flipped { transform: rotateY(180deg); }
+

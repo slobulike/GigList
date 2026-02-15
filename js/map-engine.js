@@ -1,46 +1,37 @@
+/**
+ * GigList - Map Engine Module
+ */
 let markers = [];
 
-function initMap() {
-    // If map already exists, don't re-init
-    if (window.leafletMap) return;
+export function initMap(data) {
+    // 1. Check if map container exists in DOM
+    const mapContainer = document.getElementById('map');
+    if (!mapContainer) return;
 
-    window.leafletMap = L.map('map', {
-        zoomControl: false
-    }).setView([51.505, -0.09], 13);
+    // 2. If map already exists, just refresh markers, don't re-init the whole map
+    if (!window.leafletMap) {
+        window.leafletMap = L.map('map', {
+            center: [54.5, -2], // Centered on UK
+            zoom: 6,
+            zoomControl: false
+        });
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 19,
-        attribution: '© OpenStreetMap'
-    }).addTo(window.leafletMap);
-}
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+            attribution: '© OpenStreetMap'
+        }).addTo(window.leafletMap);
+    }
 
-function updateMap(data, venueData) {
-    // Safety check: if map isn't ready, wait
-    if (!window.leafletMap) return;
-
-    // Clear old markers
+    // 3. Clear old markers
     markers.forEach(m => window.leafletMap.removeLayer(m));
     markers = [];
-    
-    const venueVisits = {};
-    data.forEach(row => {
-        const vName = row.OfficialVenue;
-        if(vName) venueVisits[vName] = (venueVisits[vName] || 0) + 1;
-    });
 
-    Object.entries(venueVisits).forEach(([name, count]) => {
-        const vMeta = venueData.find(v => v.OfficialName === name);
-        if (vMeta && vMeta.Latitude && vMeta.Longitude) {
-            const radius = 6 + (Math.sqrt(count) * 4);
-            const circle = L.circleMarker([vMeta.Latitude, vMeta.Longitude], {
-                radius: radius,
-                fillColor: "#4f46e5",
-                color: "#fff",
-                weight: 2,
-                fillOpacity: 0.7
-            }).addTo(window.leafletMap).bindPopup(`<b>${name}</b><br>Total Visits: ${count}`);
-            
-            markers.push(circle);
+    // 4. Add markers based on the data passed in
+    data.forEach(gig => {
+        if (gig.Latitude && gig.Longitude) {
+            const m = L.marker([gig.Latitude, gig.Longitude])
+                .bindPopup(`<b>${gig.Band}</b><br>${gig.OfficialVenue}<br>${gig.Date}`)
+                .addTo(window.leafletMap);
+            markers.push(m);
         }
     });
 }
