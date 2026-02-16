@@ -388,7 +388,18 @@ export const openGigModal = (key, journalData, performanceData) => {
     const formattedDate = `${y}-${m}-${d}`;
     const cleanVenue = entry.OfficialVenue.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-');
 
+
+    // Generate the slug
     const scrapbookPath = `assets/scrapbook/${formattedDate}-${cleanVenue}.jpg`;
+
+    // LOGGING: Check your console in Production (F12) to see this output
+    console.group("📸 GigList Image Debugger");
+    console.log("Journal Key:", key);
+    console.log("Raw Venue:", entry.OfficialVenue);
+    console.log("Generated Date:", formattedDate);
+    console.log("Generated Path:", scrapbookPath);
+    console.groupEnd();
+
     const artistPath = `assets/artists/${entry.Band.toLowerCase().replace(/ /g, '_')}_stock_photo.jpg`;
     const youtubeLink = `https://www.youtube.com/results?search_query=${encodeURIComponent(`${entry.Band} live ${entry.OfficialVenue} ${entry.Date}`)}`;
 

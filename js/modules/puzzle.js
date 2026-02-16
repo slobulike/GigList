@@ -1,64 +1,58 @@
-// puzzle.js
-let tiles = []; // [0, 1, 2, 3, 4, 5, 6, 7, 8] where 8 is empty
-let correctOrder = [0, 1, 2, 3, 4, 5, 6, 7, 8];
-let currentPhoto = "";
+let puzzleState = []; // Current arrangement of indices
+const size = 3; // 3x3 grid
+let emptyIndex = 8; // The 9th slot (index 8) is empty
 
-// Example list - you will populate this with your actual assets
 const scrapbookFiles = [
-    '1997-02-20-brighton-centre.jpg',
-    // add more filenames here
+    '1997-08-28-hylands-park.jpg',
+    '2013-01-19-barfly.jpg',
+    '2014-02-07-Koko.jpg'
 ];
 
 export const initPuzzle = () => {
-    const arena = document.getElementById('game-arena');
-
-    // 1. Pick random photo
+    // 1. Pick photo and setup state
     currentPhoto = scrapbookFiles[Math.floor(Math.random() * scrapbookFiles.length)];
+    puzzleState = [0, 1, 2, 3, 4, 5, 6, 7, 8];
+    emptyIndex = 8;
 
-    // 2. Extract Info for Title
-    const parts = currentPhoto.replace('.jpg', '').split('-');
-    const dateStr = `${parts[0]}-${parts[1]}-${parts[2]}`;
-    const venueSlug = parts.slice(3).join(' '); // "brighton centre"
-
-    // 3. Setup UI
-    arena.innerHTML = `
-        <div class="flex flex-col h-full w-full">
-            <div class="text-center mb-4">
-                <p class="text-[10px] font-bold text-amber-400 uppercase tracking-widest">Sliding Puzzle</p>
-                <h3 id="puzzle-title" class="text-xl font-black text-white italic uppercase">${venueSlug} (${parts[0]})</h3>
-            </div>
-
-            <div id="puzzle-grid" class="grid grid-cols-3 gap-1 w-full aspect-square max-w-[400px] mx-auto bg-slate-800 border-2 border-white/10 rounded-xl overflow-hidden">
-                </div>
-
-            <button onclick="window.initPuzzle()" class="mt-6 text-slate-400 text-[10px] font-bold uppercase tracking-widest hover:text-white transition-colors">
-                Skip / New Photo
-            </button>
-        </div>
-    `;
-
-    renderTiles();
+    shufflePuzzle();
+    renderPuzzleUI();
 };
 
-const renderTiles = () => {
-    const grid = document.getElementById('puzzle-grid');
-    grid.innerHTML = '';
-
-    // For now, let's just show the logic of a 3x3 grid
-    // Tiles will be 33.33% wide/high
-    correctOrder.forEach((pos) => {
-        const tile = document.createElement('div');
-        tile.className = "relative w-full h-full bg-cover bg-no-repeat cursor-pointer border border-black/20";
-        tile.style.backgroundImage = `url('assets/scrapbook/${currentPhoto}')`;
-
-        // Calculate background position
-        const row = Math.floor(pos / 3);
-        const col = pos % 3;
-        tile.style.backgroundPosition = `${col * 50}% ${row * 50}%`;
-        tile.style.backgroundSize = "300% 300%";
-
-        grid.appendChild(tile);
-    });
+const shufflePuzzle = () => {
+    // We do random valid moves instead of a random shuffle to ensure it's solvable
+    for (let i = 0; i < 100; i++) {
+        const neighbors = getNeighbors(emptyIndex);
+        const move = neighbors[Math.floor(Math.random() * neighbors.length)];
+        swap(move);
+    }
 };
 
-window.initPuzzle = initPuzzle;
+const getNeighbors = (idx) => {
+    const neighbors = [];
+    const r = Math.floor(idx / size), c = idx % size;
+    if (r > 0) neighbors.push(idx - size); // Top
+    if (r < size - 1) neighbors.push(idx + size); // Bottom
+    if (c > 0) neighbors.push(idx - 1); // Left
+    if (c < size - 1) neighbors.push(idx + 1); // Right
+    return neighbors;
+};
+
+const swap = (idx) => {
+    [puzzleState[emptyIndex], puzzleState[idx]] = [puzzleState[idx], puzzleState[emptyIndex]];
+    emptyIndex = idx;
+};
+
+window.handleTileClick = (idx) => {
+    const neighbors = getNeighbors(emptyIndex);
+    if (neighbors.includes(idx)) {
+        swap(idx);
+        renderPuzzleUI();
+        checkWin();
+    }
+};
+
+const checkWin = () => {
+    if (puzzleState.every((val, i) => val === i)) {
+        alert("Gig Photorealism Restored! You win!");
+    }
+};
