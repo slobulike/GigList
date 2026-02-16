@@ -453,26 +453,23 @@ export const openGigModal = (key, journalData, performanceData) => {
             </div>
         `;
 
-    // --- RENDER ---
+// --- RENDER ---
     modalContent.innerHTML = `
         <div class="flex flex-col h-full max-h-[90vh]">
             <div class="flex-none bg-white rounded-t-[2.5rem] overflow-hidden border-b border-slate-100 shadow-sm z-50">
                 <div class="relative h-48 md:h-64 w-full bg-slate-900 flex items-center justify-center overflow-hidden">
-                    <img src="${scrapbookPath}"
+                    <img id="h-scrapbook"
+                         src="${scrapbookPath}"
                          alt=""
-                         class="absolute inset-0 w-full h-full object-cover z-10"
-                         onerror="this.style.display='none'; document.getElementById('h-artist').style.display='block';">
+                         class="absolute inset-0 w-full h-full object-cover z-10 hidden">
 
                     <img id="h-artist"
                          src="${artistPath}"
                          alt=""
-                         style="display:none;"
-                         class="absolute inset-0 w-full h-full object-cover z-10"
-                         onerror="this.style.display='none'; document.getElementById('h-ticket').style.display='flex';">
+                         class="absolute inset-0 w-full h-full object-cover z-10 hidden">
 
                     <div id="h-ticket"
-                         style="display:none;"
-                         class="absolute inset-0 z-10 items-center justify-center p-6 bg-slate-50">
+                         class="absolute inset-0 z-10 items-center justify-center p-6 bg-slate-50 hidden">
                         ${ticketHTML}
                     </div>
 
@@ -526,6 +523,22 @@ export const openGigModal = (key, journalData, performanceData) => {
             </div>
         </div>
     `;
+
+    // --- ASSET RESOLUTION (Fixes Production Race Condition) ---
+    const imgScrapbook = document.getElementById('h-scrapbook');
+    const imgArtist = document.getElementById('h-artist');
+    const divTicket = document.getElementById('h-ticket');
+
+    // Attempt logic: Scrapbook -> Artist Stock -> Ticket
+    imgScrapbook.onload = () => imgScrapbook.classList.remove('hidden');
+    imgScrapbook.onerror = () => {
+        imgArtist.onload = () => imgArtist.classList.remove('hidden');
+        imgArtist.onerror = () => {
+            divTicket.classList.remove('hidden');
+            divTicket.style.display = 'flex';
+        };
+        imgArtist.src = artistPath; // Trigger artist load only if scrapbook fails
+    };
 
     modal.classList.remove('hidden');
     document.body.style.overflow = 'hidden';
