@@ -47,13 +47,22 @@ export const renderBadges = (journalData) => {
 
     // 2. Define Badges (Easy to add new ones here!)
     const badgeDefs = [
-        { id: 'first-gig', name: 'The Beginning', desc: 'Attended your first show', icon: 'ticket', earned: totalGigs >= 1 },
+            {
+                id: 'first-gig',
+                name: 'The Beginning',
+                goal: 1,
+                current: totalGigs,
+                rarity: 'common',
+                desc: 'Attended your first show',
+                icon: 'ticket',
+                earned: totalGigs >= 1
+            },
             {
                 id: 'fifty-gigs',
                 name: 'Gig Regular',
                 goal: 50,
                 current: totalGigs,
-                rarity: 'common',
+                rarity: 'rare',
                 desc: 'Reached 50 lifetime gigs',
                 icon: 'star',
                 earned: totalGigs >= 50
@@ -63,7 +72,7 @@ export const renderBadges = (journalData) => {
                 name: 'Century Club',
                 goal: 100,
                 current: totalGigs,
-                rarity: 'rare',
+                rarity: 'legendary',
                 desc: 'Reached 100 lifetime gigs',
                 icon: 'award',
                 earned: totalGigs >= 100
@@ -78,20 +87,65 @@ export const renderBadges = (journalData) => {
                 icon: 'crown',
                 earned: maxArtistShows >= 25
             },
-        { id: 'superfan', name: 'Superfan', desc: 'Seen the same artist 10+ times', icon: 'heart', earned: maxArtistShows >= 10, sub: `Max: ${maxArtistShows} shows` },
-        { id: 'regular', name: 'Home from Home', desc: 'Visited the same venue 5+ times', icon: 'home', earned: maxVenueVisits >= 5, sub: `Max: ${maxVenueVisits} visits` },
-        { id: 'explorer', name: 'Venue Explorer', desc: 'Visited 10+ different venues', icon: 'map-pin', earned: uniqueVenues >= 10, sub: `${uniqueVenues} venues found` },
-        { id: 'monthly-resident', name: 'Local Hero', desc: 'Attended a gig in 3 consecutive months', icon: 'calendar-days', earned: streakCount >= 3, sub: `Streak: ${streakCount}` },
-        {
-            id: 'festival-pro',
-            name: 'Mud & Music',
-            desc: 'Attended 3+ Festivals',
-            icon: 'tent',
-            earned: journalData.filter(g => {
+            {
+                id: 'superfan',
+                name: 'Superfan',
+                goal: 10,
+                current: maxArtistShows,
+                rarity: 'rare',
+                desc: 'Seen the same artist 10+ times',
+                icon: 'heart',
+                earned: maxArtistShows >= 10,
+                sub: `Max: ${maxArtistShows} shows`
+            },
+            {
+                id: 'regular',
+                name: 'Home from Home',
+                goal: 5,
+                current: maxVenueVisits,
+                rarity: 'common',
+                desc: 'Visited the same venue 5+ times',
+                icon: 'home',
+                earned: maxVenueVisits >= 5,
+                sub: `Max: ${maxVenueVisits} visits`
+            },
+            {
+                id: 'explorer',
+                name: 'Venue Explorer',
+                goal: 10,
+                current: uniqueVenues,
+                rarity: 'rare',
+                desc: 'Visited 10+ different venues',
+                icon: 'map-pin', earned: uniqueVenues >= 10,
+                sub: `${uniqueVenues} venues found`
+            },
+            {
+                id: 'monthly-resident',
+                name: 'Local Hero',
+                goal: 3,
+                current: streakCount,
+                rarity: 'rare',
+                desc: 'Attended a gig in 3 consecutive months',
+                icon: 'calendar-days',
+                earned: streakCount >= 3,
+                sub: `Streak: ${streakCount}`
+            },
+            {
+                id: 'festival-pro',
+                name: 'Mud & Music',
+                goal: 3,
+                current: journalData.filter(g => {
+                                         const festValue = g['Festival?'] || "";
+                                         return festValue.trim().toUpperCase().startsWith('Y');
+                                         }).length >= 3,
+                rarity: 'rare',
+                desc: 'Attended 3+ Festivals',
+                icon: 'tent',
+                earned: journalData.filter(g => {
                 const festValue = g['Festival?'] || "";
                 return festValue.trim().toUpperCase().startsWith('Y');
-            }).length >= 3
-        }
+                }).length >= 3
+            }
     ];
 
     // 3. Render HTML

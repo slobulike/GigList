@@ -6,3 +6,4 @@ UserID,UserName,JournalFile,Rank
 5,Meds,journal_meds.csv,6
 6,Chris,journal_chris.csv,7
 7,Al,journal_al.csv,5
+8,Phil,journal_phil.csv,8

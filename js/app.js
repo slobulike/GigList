@@ -1,5 +1,10 @@
 /**
  * Gig List Core Engine
+  V2.4.1 - Release Date 2026-02-17
+ * -------------------------------------------------------------------
+    * [FIX] Small UI improvements to add back Camera icon for photo galleries
+    * [UI/UX] Improved Achievements logic
+    * [REFACTOR] Changed loading approach with delay to assist in initial load speed
 
  V2.4.0 - Release Date 2026-02-15
  * -------------------------------------------------------------------

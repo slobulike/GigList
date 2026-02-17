@@ -17,6 +17,25 @@ const defaultImages = [
     "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&q=75&w=800"
 ];
 
+// Add a timeout to any image load to prevent the 10s hang seen in production
+const safelyLoadImage = (imgElement, path, fallbackFn) => {
+    const timer = setTimeout(() => {
+        console.warn("Image request timed out:", path);
+        imgElement.src = ''; // Cancel request
+        fallbackFn();
+    }, 2500); // 2.5 second hard limit
+
+    imgElement.onload = () => {
+        clearTimeout(timer);
+        imgElement.classList.remove('hidden');
+    };
+    imgElement.onerror = () => {
+        clearTimeout(timer);
+        fallbackFn();
+    };
+    imgElement.src = path;
+};
+
 /* --- DASHBOARD & TICKER --- */
 
 export const updateCurrentDate = () => {
@@ -165,33 +184,53 @@ export const renderTable = (data) => {
         };
 
     tableContainer.innerHTML = `
-        <div class="overflow-x-auto bg-white rounded-3xl border border-slate-100 shadow-sm">
-            <table class="w-full text-left border-collapse">
-                <thead>
-                    <tr class="bg-slate-50/50">
-                        <th onclick="window.handleSort('Date')" class="p-4 cursor-pointer hover:bg-slate-100 transition-colors text-[10px] font-black uppercase tracking-widest text-slate-400 min-w-[120px]">
-                            Date ${getArrow('Date')}
-                        </th>
-                        <th onclick="window.handleSort('Band')" class="p-4 cursor-pointer hover:bg-slate-100 transition-colors text-[10px] font-black uppercase tracking-widest text-slate-400">
-                            Artist ${getArrow('Band')}
-                        </th>
-                        <th onclick="window.handleSort('OfficialVenue')" class="p-4 cursor-pointer hover:bg-slate-100 transition-colors text-[10px] font-black uppercase tracking-widest text-slate-400">
-                            Venue ${getArrow('OfficialVenue')}
-                        </th>
-                    </tr>
-                </thead>
+        <div class="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+                <table class="w-full text-left table-fixed"> <thead>
+                        <tr class="bg-slate-50/50">
+                            <th onclick="window.handleSort('Date')" class="w-24 p-4 cursor-pointer hover:bg-slate-100 transition-colors text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                Date ${getArrow('Date')}
+                            </th>
+                            <th onclick="window.handleSort('Band')" class="p-4 cursor-pointer hover:bg-slate-100 transition-colors text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                Artist ${getArrow('Band')}
+                            </th>
+                            <th onclick="window.handleSort('OfficialVenue')" class="p-4 cursor-pointer hover:bg-slate-100 transition-colors text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                Venue ${getArrow('OfficialVenue')}
+                            </th>
+                        </tr>
+                    </thead>
                 <tbody class="divide-y divide-slate-50">
-                    ${data.map(gig => `
+                    ${data.map(gig => {
+                        // CHANGED: Use gig.Photos to match your CSV header
+                        const photoLink = gig.Photos || "";
+                        const hasPhotoURL = photoLink.trim() !== "" && photoLink !== "nan";
+
+                        const cameraIcon = hasPhotoURL ? `
+                            <a href="${photoLink}"
+                               target="_blank"
+                               onclick="event.stopPropagation()"
+                               class="inline-flex items-center ml-2 text-indigo-400 hover:text-indigo-600 transition-colors"
+                               title="View Photo Album">
+                                <i data-lucide="camera" class="w-3.5 h-3.5"></i>
+                            </a>` : '';
+
+                        return `
                         <tr onclick="window.viewGigDetails('${gig['Journal Key']}')" class="group hover:bg-indigo-50/30 transition-all cursor-pointer">
                             <td class="p-4 text-xs font-medium text-slate-500 font-mono">${gig.Date}</td>
-                            <td class="p-4 text-sm font-bold text-slate-900 group-hover:text-indigo-600">${gig.Band}</td>
+                            <td class="p-4 text-sm font-bold text-slate-900 group-hover:text-indigo-600 flex items-center">
+                                ${gig.Band}
+                                ${cameraIcon}
+                            </td>
                             <td class="p-4 text-xs text-slate-500">${gig.OfficialVenue}</td>
                         </tr>
-                    `).join('')}
+                        `;
+                    }).join('')}
                 </tbody>
             </table>
         </div>
     `;
+        if (window.lucide) {
+        lucide.createIcons();
+    }
 };
 
 /**
