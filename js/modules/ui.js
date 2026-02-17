@@ -524,20 +524,36 @@ export const openGigModal = (key, journalData, performanceData) => {
         </div>
     `;
 
-    // --- ASSET RESOLUTION (Fixes Production Race Condition) ---
+// --- ASSET RESOLUTION (The "Ext-Check" Waterfall) ---
     const imgScrapbook = document.getElementById('h-scrapbook');
     const imgArtist = document.getElementById('h-artist');
     const divTicket = document.getElementById('h-ticket');
 
-    // Attempt logic: Scrapbook -> Artist Stock -> Ticket
-    imgScrapbook.onload = () => imgScrapbook.classList.remove('hidden');
-    imgScrapbook.onerror = () => {
+    const tryArtist = () => {
         imgArtist.onload = () => imgArtist.classList.remove('hidden');
         imgArtist.onerror = () => {
-            divTicket.classList.remove('hidden');
-            divTicket.style.display = 'flex';
+            // If artist.jpg fails, try artist.JPG
+            if (imgArtist.src.endsWith('.jpg')) {
+                imgArtist.src = artistPath.replace('.jpg', '.JPG');
+            } else {
+                // Total failure - show the ticket
+                divTicket.classList.remove('hidden');
+                divTicket.style.display = 'flex';
+            }
         };
-        imgArtist.src = artistPath; // Trigger artist load only if scrapbook fails
+        imgArtist.src = artistPath;
+    };
+
+    imgScrapbook.onload = () => imgScrapbook.classList.remove('hidden');
+    imgScrapbook.onerror = () => {
+        // 1. If scrapbook.jpg fails, try scrapbook.JPG
+        if (imgScrapbook.src.endsWith('.jpg')) {
+            console.log("Retrying scrapbook with .JPG extension...");
+            imgScrapbook.src = scrapbookPath.replace('.jpg', '.JPG');
+        } else {
+            // 2. If both fail, move to Artist logic
+            tryArtist();
+        }
     };
 
     modal.classList.remove('hidden');
