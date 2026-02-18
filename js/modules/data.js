@@ -32,22 +32,38 @@ export const sortGigs = (data, column, ascending = true) => {
 /**
  * GigList - Data Loading Logic
  */
-export const loadAppData = async (user) => {
-    const journalUrl = `data/${user.JournalFile}?v=${new Date().getTime()}`;
-    const perfUrl = `data/performances.csv?v=${new Date().getTime()}`;
 
+export const loadAppData = async (user) => {
+    const version = new Date().getTime();
+    const journalUrl = `data/${user.JournalFile}?v=${version}`;
+    const perfUrl = `data/performances.csv?v=${version}`;
+
+    const escapeHTMLAttr = (str) => {
+        if (!str) return '';
+        return str.replace(/'/g, "\\'").replace(/"/g, "&quot;");
+    };
+
+    // 1. Fetch both in parallel
     const [journalRes, perfRes] = await Promise.all([
-        fetch(journalUrl).then(r => r.text()),
-        fetch(perfUrl).then(r => r.text())
+        fetch(journalUrl),
+        fetch(perfUrl)
     ]);
 
-    journalData = Papa.parse(journalRes, { header: true, skipEmptyLines: true }).data;
-    performanceData = Papa.parse(perfRes, { header: true, skipEmptyLines: true }).data;
+    // 2. Extract text and parse concurrently
+    // This is faster because parsing starts as soon as the text is ready
+    const [journalResult, performanceResult] = await Promise.all([
+        journalRes.text().then(text => Papa.parse(text, { header: true, skipEmptyLines: true })),
+        perfRes.text().then(text => Papa.parse(text, { header: true, skipEmptyLines: true }))
+    ]);
 
-    // Normalization
+    journalData = journalResult.data;
+    performanceData = performanceResult.data;
+
+    // 3. Normalization (Efficient loop)
     journalData.forEach(g => {
         g.Band = g.Band || g.Artist;
         g.type = 'past';
+        g.safeKey = escapeHTMLAttr(g['Journal Key'] || "");
     });
 
     return { journalData, performanceData };

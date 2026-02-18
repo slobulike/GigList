@@ -1,5 +1,10 @@
 /**
  * Gig List Core Engine
+  V2.4.2 - Release Date 2026-02-17
+  * -------------------------------------------------------------------
+  [UI/UX] Added album art from Cover Art Archive
+  [FEATURE] Slide puzzle game
+
   V2.4.1 - Release Date 2026-02-17
  * -------------------------------------------------------------------
     * [FIX] Small UI improvements to add back Camera icon for photo galleries
@@ -80,19 +85,21 @@ import { parseDate } from './modules/utils.js';
 import { renderBadges } from './modules/achievements.js';
 import { renderCalendar } from './modules/calendar.js';
 import './modules/quiz.js';
+import * as Games from './modules/games.js';
 
 let currentUser = JSON.parse(localStorage.getItem('gv_user'));
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "2.4.0";
+const APP_VERSION = "2.4.2";
 
 window.toggleListView = UI.toggleListView;
 window.journalData = window.journalData || [];
 window.openGigModal = UI.openGigModal;
 window.renderMap = UI.renderMap;
 window.currentSort = { column: 'Date', ascending: false };
-
+window.switchGame = Games.switchGame;
+window.startNewPuzzle = Games.startNewPuzzle;
 
 export async function initApp() {
     if (!currentUser) {
@@ -544,3 +551,6 @@ window.handleSort = (column) => {
     const sorted = Data.sortGigs(baseData, window.currentSort.column, window.currentSort.ascending);
     UI.renderTable(sorted);
 };
+
+import { GigPuzzle } from './modules/puzzle.js';
+

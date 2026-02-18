@@ -1,58 +1,92 @@
-let puzzleState = []; // Current arrangement of indices
-const size = 3; // 3x3 grid
-let emptyIndex = 8; // The 9th slot (index 8) is empty
-
-const scrapbookFiles = [
-    '1997-08-28-hylands-park.jpg',
-    '2013-01-19-barfly.jpg',
-    '2014-02-07-Koko.jpg'
-];
-
-export const initPuzzle = () => {
-    // 1. Pick photo and setup state
-    currentPhoto = scrapbookFiles[Math.floor(Math.random() * scrapbookFiles.length)];
-    puzzleState = [0, 1, 2, 3, 4, 5, 6, 7, 8];
-    emptyIndex = 8;
-
-    shufflePuzzle();
-    renderPuzzleUI();
-};
-
-const shufflePuzzle = () => {
-    // We do random valid moves instead of a random shuffle to ensure it's solvable
-    for (let i = 0; i < 100; i++) {
-        const neighbors = getNeighbors(emptyIndex);
-        const move = neighbors[Math.floor(Math.random() * neighbors.length)];
-        swap(move);
+// puzzle.js
+export class GigPuzzle {
+    constructor(containerId, imageUrl, gridSize = 4) {
+        this.container = document.getElementById(containerId);
+        this.imageUrl = imageUrl;
+        this.size = gridSize; // 4x4
+        this.tiles = []; // Flat array of [0, 1, 2... 15]
+        this.emptyIndex = (gridSize * gridSize) - 1;
+        this.init();
     }
-};
 
-const getNeighbors = (idx) => {
-    const neighbors = [];
-    const r = Math.floor(idx / size), c = idx % size;
-    if (r > 0) neighbors.push(idx - size); // Top
-    if (r < size - 1) neighbors.push(idx + size); // Bottom
-    if (c > 0) neighbors.push(idx - 1); // Left
-    if (c < size - 1) neighbors.push(idx + 1); // Right
-    return neighbors;
-};
 
-const swap = (idx) => {
-    [puzzleState[emptyIndex], puzzleState[idx]] = [puzzleState[idx], puzzleState[emptyIndex]];
-    emptyIndex = idx;
-};
-
-window.handleTileClick = (idx) => {
-    const neighbors = getNeighbors(emptyIndex);
-    if (neighbors.includes(idx)) {
-        swap(idx);
-        renderPuzzleUI();
-        checkWin();
+    init() {
+        // Create solved array
+        this.tiles = Array.from({ length: this.size * this.size }, (_, i) => i);
+        this.shuffle();
+        this.render();
     }
-};
 
-const checkWin = () => {
-    if (puzzleState.every((val, i) => val === i)) {
-        alert("Gig Photorealism Restored! You win!");
+    shuffle() {
+        // Shuffle by making 200 valid moves from the solved state
+        for (let i = 0; i < 200; i++) {
+            const neighbors = this.getNeighbors(this.emptyIndex);
+            const move = neighbors[Math.floor(Math.random() * neighbors.length)];
+            this.swap(this.emptyIndex, move);
+            this.emptyIndex = move;
+        }
     }
-};
+
+    getNeighbors(index) {
+        const neighbors = [];
+        const row = Math.floor(index / this.size);
+        const col = index % this.size;
+
+        if (row > 0) neighbors.push(index - this.size); // Top
+        if (row < this.size - 1) neighbors.push(index + this.size); // Bottom
+        if (col > 0) neighbors.push(index - 1); // Left
+        if (col < this.size - 1) neighbors.push(index + 1); // Right
+        return neighbors;
+    }
+
+    swap(i, j) {
+        [this.tiles[i], this.tiles[j]] = [this.tiles[j], this.tiles[i]];
+    }
+
+    handleTileClick(index) {
+        const neighbors = this.getNeighbors(index);
+        if (neighbors.includes(this.emptyIndex)) {
+            this.swap(index, this.emptyIndex);
+            this.emptyIndex = index;
+            this.render();
+            this.checkWin();
+        }
+    }
+
+    checkWin() {
+        const isWin = this.tiles.every((tile, i) => tile === i);
+        if (isWin) {
+            setTimeout(() => alert("🎉 Memory Restored! Gig Puzzle Solved!"), 200);
+        }
+    }
+
+    render() {
+        this.container.innerHTML = '';
+        this.container.style.gridTemplateColumns = `repeat(${this.size}, 1fr)`;
+
+        this.tiles.forEach((tileValue, currentIndex) => {
+            const tile = document.createElement('div');
+            tile.className = 'relative aspect-square border border-white/10 cursor-pointer overflow-hidden rounded-sm';
+
+            if (tileValue === (this.size * this.size) - 1) {
+                    tile.classList.add('bg-slate-800/50'); // Empty slot
+                } else {
+                    // 1. Calculate the original position of this tile in the 4x4 grid
+                    const row = Math.floor(tileValue / this.size);
+                    const col = tileValue % this.size;
+
+                    // 2. The key math: Percentage must be (coord / (size - 1)) * 100
+                    const multiplier = 100 / (this.size - 1);
+                    const posX = col * multiplier;
+                    const posY = row * multiplier;
+
+                    tile.style.backgroundImage = `url(${this.imageUrl})`;
+                    tile.style.backgroundSize = `${this.size * 100}%`; // 400% for a 4x4
+                    tile.style.backgroundPosition = `${posX}% ${posY}%`;
+
+                    tile.onclick = () => this.handleTileClick(currentIndex);
+                }
+                this.container.appendChild(tile);
+            });
+    }
+}

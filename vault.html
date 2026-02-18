@@ -208,26 +208,40 @@
         </div>
 
         <div id="game-arena" class="relative h-[70vh] min-h-[500px] w-full rounded-[2.5rem] shadow-2xl border-4 border-white overflow-hidden bg-slate-900 p-8 flex flex-col">
-            <div id="quiz-header" class="flex justify-between items-center mb-8">
-                <div class="px-4 py-2 bg-indigo-500 rounded-full">
-                    <span id="quiz-score" class="text-white font-black italic">SCORE: 0</span>
-                </div>
-                <div id="quiz-timer" class="text-amber-400 font-mono font-bold text-xl">00:30</div>
-            </div>
 
-            <div id="quiz-body" class="flex-grow flex flex-col justify-center items-center text-center">
-                <div id="question-container" class="mb-10">
-                    <p id="quiz-question" class="text-2xl md:text-3xl font-black text-white italic uppercase tracking-tight leading-tight">
-                        Press Start to Test Your Memory!
-                    </p>
+            <div id="quiz-container" class="flex flex-col h-full">
+                <div id="quiz-header" class="flex justify-between items-center mb-8">
+                    <div class="px-4 py-2 bg-indigo-500 rounded-full">
+                        <span id="quiz-score" class="text-white font-black italic">SCORE: 0</span>
+                    </div>
+                    <div id="quiz-timer" class="text-amber-400 font-mono font-bold text-xl">00:30</div>
                 </div>
 
-                <div id="quiz-options" class="grid grid-cols-1 gap-3 w-full max-w-md">
-                    <button onclick="window.startQuiz()" class="bg-indigo-600 text-white p-5 rounded-2xl font-black uppercase tracking-widest hover:scale-105 transition-all">
-                        Start Quiz
-                    </button>
+                <div id="quiz-body" class="flex-grow flex flex-col justify-center items-center text-center">
+                    <div id="question-container" class="mb-10">
+                        <p id="quiz-question" class="text-2xl md:text-3xl font-black text-white italic uppercase tracking-tight leading-tight">
+                            Press Start to Test Your Memory!
+                        </p>
+                    </div>
+                    <div id="quiz-options" class="grid grid-cols-1 gap-3 w-full max-w-md">
+                        <button onclick="window.startQuiz()" class="bg-indigo-600 text-white p-5 rounded-2xl font-black uppercase tracking-widest hover:scale-105 transition-all">
+                            Start Quiz
+                        </button>
+                    </div>
                 </div>
             </div>
+
+            <div id="puzzle-section" class="hidden flex flex-col items-center justify-center h-full">
+                <h3 class="text-xl font-black italic uppercase mb-4 text-white">Gig Scrambler</h3>
+
+                <div id="puzzle-grid" class="grid w-full max-w-[320px] md:max-w-md gap-1 bg-white/10 p-1 rounded-xl shadow-inner border border-white/20">
+                </div>
+
+                <button onclick="window.startNewPuzzle()" class="mt-6 bg-indigo-500 hover:bg-indigo-600 text-white px-8 py-3 rounded-full font-black uppercase italic text-xs tracking-widest transition-all active:scale-95">
+                    NEW GIG
+                </button>
+            </div>
+
         </div>
     </section>
 

@@ -214,7 +214,7 @@ export const renderTable = (data) => {
                             </a>` : '';
 
                         return `
-                        <tr onclick="window.viewGigDetails('${gig['Journal Key']}')" class="group hover:bg-indigo-50/30 transition-all cursor-pointer">
+                        <tr onclick="window.viewGigDetails('${gig.safeKey}')" class="group hover:bg-indigo-50/30 transition-all cursor-pointer">
                             <td class="p-4 text-xs font-medium text-slate-500 font-mono">${gig.Date}</td>
                             <td class="p-4 text-sm font-bold text-slate-900 group-hover:text-indigo-600 flex items-center">
                                 ${gig.Band}
