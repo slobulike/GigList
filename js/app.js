@@ -1,5 +1,9 @@
 /**
  * Gig List Core Engine
+  V2.4.3 - Release Date 2026-02-19
+   * -------------------------------------------------------------------
+   [FIX] Map and venue coordinate updates
+
   V2.4.2 - Release Date 2026-02-17
   * -------------------------------------------------------------------
   [UI/UX] Added album art from Cover Art Archive
@@ -91,7 +95,7 @@ let currentUser = JSON.parse(localStorage.getItem('gv_user'));
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "2.4.2";
+const APP_VERSION = "2.4.3";
 
 window.toggleListView = UI.toggleListView;
 window.journalData = window.journalData || [];
