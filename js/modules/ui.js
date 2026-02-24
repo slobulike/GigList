@@ -9,6 +9,8 @@ import { getGlobalSeenCount, slugify, slugifyArtist, parseDate } from './utils.j
 import { renderCalendar } from './calendar.js';
 let gigMap = null;
 let markerLayer = null;
+let fullMapInstance = null;
+let fullMarkerLayer = null;
 import * as Data from './data.js';
 
 const defaultImages = [
@@ -46,6 +48,18 @@ export const updateCurrentDate = () => {
 };
 
 export const updateStats = (data) => {
+    // 1. Target the specific ID we just created
+    const homeHeader = document.getElementById('home-welcome-title');
+
+    if (homeHeader) {
+        if (window.isBandMode) {
+            // If the user is a band, use the band name (e.g., Weezer)
+            homeHeader.textContent = window.bandName;
+        } else {
+            // Otherwise, revert to the personal default
+            homeHeader.textContent = "For You";
+        }
+    }
     const counts = {
         total: data.length,
         venues: new Set(data.map(g => g.OfficialVenue)).size,
@@ -170,6 +184,7 @@ export const renderCarouselItem = (index, carouselData, fullData) => {
 /* --- TABLE & CALENDAR VIEWS --- */
 
 export const renderTable = (data) => {
+
     const tableContainer = document.getElementById('tableContainer');
     if (!tableContainer) return;
 
@@ -290,96 +305,197 @@ export const toggleListView = (view) => {
 /**
  * Leaflet Map Engine
  */
+
+const getHomeBase = (venueStats, venuesLookup) => {
+    let topVenue = null;
+    let topVenueName = "None";
+    let maxVisits = 0;
+
+    console.group("Map Centering Logic");
+
+    Object.keys(venueStats).forEach(vName => {
+        const visits = venueStats[vName].length;
+        const coords = venuesLookup[vName];
+
+        if (visits > maxVisits) {
+            // Log every time a new "leader" is found
+            if (coords && !isNaN(coords.lat)) {
+                maxVisits = visits;
+                topVenue = coords;
+                topVenueName = vName;
+                console.log(`📌 New Leader: ${vName} (${visits} visits)`);
+            } else {
+                console.warn(`⚠️ Skipped ${vName}: Found ${visits} visits but NO coordinates in lookup.`);
+            }
+        }
+    });
+
+    if (topVenue) {
+        console.log(`✅ Result: Centering on ${topVenueName} at [${topVenue.lat}, ${topVenue.lng}]`);
+    } else {
+        console.error("❌ Result: No valid venues with coordinates found. Defaulting to London.");
+    }
+
+    console.groupEnd();
+
+    return topVenue ? [topVenue.lat, topVenue.lng] : [51.507, -0.127];
+};
+
 export const renderMap = (data) => {
     const mapCanvas = document.getElementById('map-canvas');
     if (!mapCanvas) return;
 
-    // 1. Initialize map if first time
     if (!gigMap) {
         gigMap = L.map('map-canvas', {
             zoomControl: false,
-            minZoom: 4,         // Tightened to prevent seeing the grey "edge of the world"
-            maxBounds: [[-85, -180], [85, 180]], // Keeps user within the world map
+            minZoom: 1,
             worldCopyJump: true
-        }).setView([51.3, 0.1], 9); // Centered on South East England (London/Kent/Surrey area) at Zoom 9
-
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-            attribution: '©OpenStreetMap'
-        }).addTo(gigMap);
+        });
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png').addTo(gigMap);
         markerLayer = L.layerGroup().addTo(gigMap);
     }
 
     markerLayer.clearLayers();
     const bounds = [];
     const venuesLookup = window.venueLookup || {};
-
-    // 2. Aggregate Gigs by Venue
     const venueStats = {};
+
+    // 1. Aggregate Gigs
     data.forEach(gig => {
         const vName = gig.OfficialVenue;
         if (!venueStats[vName]) venueStats[vName] = [];
         venueStats[vName].push(gig);
     });
 
-    // 3. Create Pins
+    // 2. Re-build Markers with Popups
     Object.keys(venueStats).forEach(vName => {
         const gigsAtVenue = venueStats[vName];
-        const coords = venuesLookup[vName];
+        const venueData = venuesLookup[vName];
 
-        if (coords && !isNaN(coords.lat) && !isNaN(coords.lng)) {
+        if (venueData && !isNaN(venueData.lat)) {
             const visitCount = gigsAtVenue.length;
             const radius = Math.min(6 + (visitCount * 2), 20);
 
-            const marker = L.circleMarker([coords.lat, coords.lng], {
+            const marker = L.circleMarker([venueData.lat, venueData.lng], {
                 radius: radius,
-                fillColor: visitCount > 1 ? "#6366f1" : "#4f46e5",
+                fillColor: "#4f46e5",
                 color: "#fff",
                 weight: 2,
-                opacity: 1,
                 fillOpacity: 0.9
             });
 
-            const gigListHTML = gigsAtVenue.map(g => `
-                <div onclick="window.viewGigDetails('${g['Journal Key']?.replace(/'/g, "\\'")}')"
-                     class="cursor-pointer hover:bg-slate-50 p-1.5 rounded transition-colors border-b border-slate-100 last:border-0 mb-1">
-                    <p class="text-[9px] font-black text-indigo-500 uppercase leading-none">${g.Date}</p>
-                    <p class="text-[11px] font-bold text-slate-800 leading-tight">${g.Band}</p>
-                </div>
-            `).join('');
+            // 3. GENERATE THE POPUP HTML (Restoring the click functionality)
+            const gigListHTML = gigsAtVenue.map(g => {
+                // Escape single quotes in Journal Key for the JS function call
+                const safeKey = g['Journal Key']?.replace(/'/g, "\\'");
+                return `
+                    <div onclick="window.viewGigDetails('${safeKey}')"
+                         class="cursor-pointer hover:bg-slate-50 p-2 rounded transition-colors border-b border-slate-100 last:border-0 mb-1">
+                        <p class="text-[10px] font-black text-indigo-500 uppercase leading-none">${g.Date}</p>
+                        <p class="text-[12px] font-bold text-slate-800 leading-tight">${g.Band}</p>
+                    </div>
+                `;
+            }).join('');
 
             marker.bindPopup(`
-                <div class="p-1 max-h-48 overflow-y-auto custom-scrollbar min-w-[160px]">
-                    <h4 class="text-[9px] font-black uppercase text-slate-400 mb-2 tracking-widest border-b pb-1">${vName}</h4>
+                <div class="p-1 max-h-48 overflow-y-auto custom-scrollbar min-w-[180px]">
+                    <h4 class="text-[10px] font-black uppercase text-slate-400 mb-2 tracking-widest border-b pb-1">${vName}</h4>
                     ${gigListHTML}
                     <div class="pt-2 text-center">
-                        <span class="bg-slate-100 text-slate-500 text-[9px] font-black px-2 py-0.5 rounded-full uppercase">
-                            ${visitCount} ${visitCount > 1 ? 'Visits' : 'Visit'}
+                        <span class="bg-indigo-50 text-indigo-600 text-[10px] font-black px-2 py-0.5 rounded-full uppercase">
+                            ${visitCount} ${visitCount > 1 ? 'Shows' : 'Show'}
                         </span>
                     </div>
                 </div>
             `, { maxWidth: 250, className: 'gig-map-popup' });
 
-            markerLayer.addLayer(marker);
-            bounds.push([coords.lat, coords.lng]);
+            marker.addTo(markerLayer);
+            bounds.push([venueData.lat, venueData.lng]);
         }
     });
 
-    // 4. Smart Fit Logic
-    // If we have data and it's a specific search/filter, zoom to the pins.
-    // If it's the full library, let it stay on the South East starting view.
+    // 4. Centering Logic (Keeping our Debugged Version)
+    const homeBase = getHomeBase(venueStats, venuesLookup);
     const isFiltered = data.length < (window.journalData?.length || 0);
 
-    if (bounds.length > 0 && isFiltered) {
-        gigMap.fitBounds(bounds, { padding: [50, 50], maxZoom: 12 });
-    } else if (!isFiltered) {
-        // Reset to South East default if no filter is active
-        gigMap.setView([51.3, 0.1], 9);
+    if (isFiltered && bounds.length > 0) {
+        gigMap.fitBounds(bounds, { padding: [40, 40] });
+    } else {
+        gigMap.setView(homeBase, 7);
     }
 
-    // Always invalidate size to fix rendering issues in hidden containers
-    setTimeout(() => gigMap.invalidateSize(), 50);
+    setTimeout(() => gigMap.invalidateSize(), 100);
 };
 
+/* --- EXPANDED MAP MODAL LOGIC WITH DIAGNOSTICS --- */
+
+window.openMapModal = () => {
+    console.log("🚀 EXPLORER: Launching...");
+    const modal = document.getElementById('mapModal');
+    if (!modal) return;
+
+    modal.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+
+    // 1. Initialize Map inside ui.js scope
+    if (!fullMapInstance) {
+        console.log("🏗️ Creating Full Map Instance...");
+        fullMapInstance = L.map('full-map-canvas', {
+            zoomControl: false,
+            worldCopyJump: true
+        });
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png').addTo(fullMapInstance);
+        fullMarkerLayer = L.layerGroup().addTo(fullMapInstance);
+    }
+
+    // 2. Fetch data from the global window objects
+    const data = window.filteredResults || window.journalData || [];
+    const venues = window.venueLookup || {};
+
+    // 3. Render
+    setTimeout(() => {
+        fullMapInstance.invalidateSize();
+        fullMarkerLayer.clearLayers();
+
+        const bounds = [];
+        data.forEach(gig => {
+            const venueInfo = venues[gig.OfficialVenue];
+
+            if (venueInfo && venueInfo.lat && venueInfo.lng) {
+                const m = L.circleMarker([venueInfo.lat, venueInfo.lng], {
+                    radius: 7,
+                    fillColor: "#4f46e5",
+                    color: "#fff",
+                    weight: 2,
+                    fillOpacity: 0.9
+                }).bindPopup(`
+                    <div style="font-family: sans-serif; padding: 5px;">
+                        <strong style="color: #4f46e5; font-size: 14px;">${gig.Band}</strong><br>
+                        <span style="font-weight: bold;">${gig.OfficialVenue}</span><br>
+                        <small style="color: #64748b;">${gig.Date}</small>
+                    </div>
+                `);
+                m.addTo(fullMarkerLayer);
+                bounds.push([venueInfo.lat, venueInfo.lng]);
+            }
+        });
+
+        console.log(`✅ EXPLORER: Rendered ${bounds.length} pins.`);
+
+        if (bounds.length > 0) {
+            fullMapInstance.fitBounds(bounds, { padding: [80, 80] });
+        } else {
+            fullMapInstance.setView([20, 0], 2);
+        }
+    }, 400);
+};
+
+window.closeMapModal = () => {
+    const modal = document.getElementById('mapModal');
+    if (modal) modal.classList.add('hidden');
+    document.body.style.overflow = 'auto';
+    console.log("🚪 Map Modal closed.");
+};
 
 /**
  * Helper to generate a consistent but random-ish style for the mosh-pit ticket

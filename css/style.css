@@ -202,3 +202,17 @@
 .rotate-y-180 { transform: rotateY(180deg); }
 .is-flipped { transform: rotateY(180deg); }
 
+/* High-level Modal hierarchy */
+#mapModal {
+    z-index: 9999; /* Ensure it is the absolute top layer */
+}
+
+/* Ensure the expand button on the dashboard is lower */
+#mapContainer .absolute {
+    z-index: 20;
+}
+
+/* Matching the Chart Modal feel */
+#full-map-canvas {
+    background: #f8fafc; /* Matches your app bg */
+}

@@ -28,8 +28,14 @@ self.addEventListener('install', (event) => {
 // Fetch logic: Try network, fall back to cache
 self.addEventListener('fetch', (event) => {
   event.respondWith(
-    fetch(event.request).catch(() => {
-      return caches.match(event.request);
-    })
+    fetch(event.request)
+      .then((response) => {
+        // If network is successful, return it
+        return response;
+      })
+      .catch(() => {
+        // If network fails (offline), look in cache
+        return caches.match(event.request);
+      })
   );
 });

@@ -1,5 +1,10 @@
 /**
  * Gig List Core Engine
+  V2.5.0 - Release Date 2026-02-24
+   * -------------------------------------------------------------------
+   [FEATURE] Added "Band Mode" with Weezer data loaded and available via the user list
+   [UI/UX] Added expanded map modal to allow full screen map display
+
   V2.4.3 - Release Date 2026-02-19
    * -------------------------------------------------------------------
    [FIX] Map and venue coordinate updates
@@ -95,7 +100,7 @@ let currentUser = JSON.parse(localStorage.getItem('gv_user'));
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "2.4.3";
+const APP_VERSION = "2.5.0";
 
 window.toggleListView = UI.toggleListView;
 window.journalData = window.journalData || [];
@@ -112,6 +117,10 @@ export async function initApp() {
     }
 
     // 1. Load Data
+    const { journalData, performanceData, user } = await Data.loadAppData(currentUser);
+    window.isBandMode = user.Type === 'Band';
+    window.bandName = currentUser.Subject || currentUser.UserName;
+    console.log("Band Mode Active:", window.isBandMode);
     const data = await Data.loadAppData(currentUser);
     window.journalData = data.journalData;
     window.performanceData = data.performanceData;
@@ -126,6 +135,7 @@ export async function initApp() {
             identityEl.onclick = window.openSettings;
         }
     window.venueLookup = await Data.loadVenues(); // Load venues.csv lookup
+
 
     // 2. Initialize UI
     document.getElementById('userIdentity').innerText = currentUser.UserName || "User";
@@ -288,6 +298,7 @@ window.closeModal = () => {
         document.body.style.overflow = 'auto'; // Restore scrolling
     }
 };
+
 
 /* SWITCH VIEW LOGIC */
 
@@ -557,4 +568,6 @@ window.handleSort = (column) => {
 };
 
 import { GigPuzzle } from './modules/puzzle.js';
+
+
 

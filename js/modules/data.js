@@ -66,7 +66,7 @@ export const loadAppData = async (user) => {
         g.safeKey = escapeHTMLAttr(g['Journal Key'] || "");
     });
 
-    return { journalData, performanceData };
+    return { journalData, performanceData, user };
 };
 
 export const filterGigs = (query, data, includeFuture = false) => {
