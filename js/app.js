@@ -1,5 +1,10 @@
 /**
  * Gig List Core Engine
+  V2.5.1 - Release Date 2026-02-25
+    * -------------------------------------------------------------------
+    [UI/UX] Switch labels to show song count instead of artist count when in band mode
+    [UI/UX] Make wording dynamic based on band mode to ensure this makes sense e.g x days since {venue} instead of x days since {band name}
+
   V2.5.0 - Release Date 2026-02-24
    * -------------------------------------------------------------------
    [FEATURE] Added "Band Mode" with Weezer data loaded and available via the user list
@@ -100,7 +105,7 @@ let currentUser = JSON.parse(localStorage.getItem('gv_user'));
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "2.5.0";
+const APP_VERSION = "2.5.1";
 
 window.toggleListView = UI.toggleListView;
 window.journalData = window.journalData || [];

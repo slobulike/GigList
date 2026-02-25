@@ -48,26 +48,66 @@ export const updateCurrentDate = () => {
 };
 
 export const updateStats = (data) => {
-    // 1. Target the specific ID we just created
+    // 1. Target the specific IDs
     const homeHeader = document.getElementById('home-welcome-title');
+    const artistLabel = document.getElementById('stat-artist-label'); // Home Tab
+    const dcArtistLabel = document.getElementById('dc-stat-artists-label'); // Data Centre Tab
+    const artistCountLabel = document.getElementById('dc-stat-artists-label'); // Optional: check if label in detail view needs swap
 
+    // 2. Handle Header and Labels
     if (homeHeader) {
-        if (window.isBandMode) {
-            // If the user is a band, use the band name (e.g., Weezer)
-            homeHeader.textContent = window.bandName;
-        } else {
-            // Otherwise, revert to the personal default
-            homeHeader.textContent = "For You";
-        }
+        homeHeader.textContent = window.isBandMode ? (window.bandName || "Band Archive") : "For You";
     }
+
+// Apply the text swap to both labels
+    const artistText = window.isBandMode ? "Songs" : "Artists";
+
+    if (artistLabel) artistLabel.textContent = artistText;
+    if (dcArtistLabel) dcArtistLabel.textContent = artistText;
+
+    // 3. Calculate Core Stats
     const counts = {
         total: data.length,
         venues: new Set(data.map(g => g.OfficialVenue)).size,
-        artists: new Set(data.map(g => g.Band)).size
+        artists: 0 // Will be populated below
     };
-    ['stat-total', 'dc-stat-gigs'].forEach(id => { if(document.getElementById(id)) document.getElementById(id).innerText = counts.total; });
-    ['stat-venues', 'dc-stat-venues'].forEach(id => { if(document.getElementById(id)) document.getElementById(id).innerText = counts.venues; });
-    ['stat-artists', 'dc-stat-artists'].forEach(id => { if(document.getElementById(id)) document.getElementById(id).innerText = counts.artists; });
+
+    if (window.isBandMode) {
+            // 1. Get the keys for currently filtered gigs
+            const currentKeys = new Set(data.map(g => g['Journal Key'] || g['JournalKey']));
+
+            // 2. Filter performance data safely
+            const perf = window.performanceData || [];
+
+            // 3. Count rows that match those keys
+            counts.artists = perf.filter(p => {
+                const pKey = p['Journal Key'] || p['JournalKey'];
+                return currentKeys.has(pKey);
+            }).length;
+
+            console.log(`📊 Band Mode: Found ${counts.artists} song entries for ${currentKeys.size} gigs.`);
+
+    } else {
+        // Standard unique artist count
+        counts.artists = new Set(data.map(g => g.Band)).size;
+    }
+
+    // 4. Batch Update DOM Elements
+    ['stat-total', 'dc-stat-gigs'].forEach(id => {
+        const el = document.getElementById(id);
+        if(el) el.innerText = counts.total.toLocaleString();
+    });
+
+    ['stat-venues', 'dc-stat-venues'].forEach(id => {
+        const el = document.getElementById(id);
+        if(el) el.innerText = counts.venues.toLocaleString();
+    });
+
+    // This targets both the main stat and the detail view stat
+    ['stat-artists', 'dc-stat-artists', 'stat-artist-count'].forEach(id => {
+        const el = document.getElementById(id);
+        if(el) el.innerText = counts.artists.toLocaleString();
+    });
 };
 
 export const updateRank = (data) => {
@@ -78,6 +118,7 @@ export const updateRank = (data) => {
     }
 };
 
+
 export const updateTicker = (data) => {
     const tickerEl = document.getElementById('global-ticker');
     if (!tickerEl) return;
@@ -85,28 +126,50 @@ export const updateTicker = (data) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
+    // 1. Sort and Filter
     const upcomingGigs = data.filter(g => parseDate(g.Date) >= today).sort((a, b) => parseDate(a.Date) - parseDate(b.Date));
     const pastGigs = data.filter(g => parseDate(g.Date) < today).sort((a, b) => parseDate(b.Date) - parseDate(a.Date));
 
-    if (upcomingGigs.length > 0) {
-        const next = upcomingGigs[0];
-        const days = Math.ceil((parseDate(next.Date) - today) / (1000 * 60 * 60 * 24));
+    // 2. Identify Target Data
+    const nextGig = upcomingGigs[0];
+    const lastGig = pastGigs[0];
+
+    // 3. Band Mode Label Overrides (Stats Cards)
+    const sinceLabel = document.getElementById('days-since-label');
+    const untilLabel = document.getElementById('days-until-label');
+    const sinceVenue = document.getElementById('days-since-venue');
+    const untilVenue = document.getElementById('days-until-venue');
+
+    if (window.isBandMode) {
+        if (sinceLabel) sinceLabel.textContent = "Days since last show";
+        if (untilLabel) untilLabel.textContent = "Days until next show";
+        if (sinceVenue && lastGig) sinceVenue.textContent = lastGig.OfficialVenue;
+        if (untilVenue && nextGig) untilVenue.textContent = nextGig.OfficialVenue;
+    }
+
+    // 4. Update the Ticker Content (Now runs for BOTH modes)
+    if (nextGig) {
+        const days = Math.ceil((parseDate(nextGig.Date) - today) / (1000 * 60 * 60 * 24));
+        // In Band Mode, use Venue. In Personal Mode, use Band name.
+        const mainText = window.isBandMode ? nextGig.OfficialVenue : nextGig.Band;
+
         tickerEl.innerHTML = `
             <div class="flex flex-col items-center w-full">
                 <div class="flex items-center text-[11px] font-black tracking-[0.2em] mb-1 opacity-60 uppercase">
                     <span class="text-emerald-500 animate-pulse mr-2">●</span> ${days} ${days === 1 ? 'DAY' : 'DAYS'} UNTIL
                 </div>
-                <div class="text-slate-900 font-black italic text-sm tracking-tight">${next.Band.toUpperCase()}</div>
+                <div class="text-slate-900 font-black italic text-sm tracking-tight">${mainText.toUpperCase()}</div>
             </div>`;
-    } else if (pastGigs.length > 0) {
-        const last = pastGigs[0];
-        const days = Math.floor((today - parseDate(last.Date)) / (1000 * 60 * 60 * 24));
+    } else if (lastGig) {
+        const days = Math.floor((today - parseDate(lastGig.Date)) / (1000 * 60 * 60 * 24));
+        const mainText = window.isBandMode ? lastGig.OfficialVenue : lastGig.Band;
+
         tickerEl.innerHTML = `
             <div class="flex flex-col items-center w-full">
                 <div class="flex items-center text-[11px] font-black tracking-[0.2em] mb-1 opacity-60 uppercase">
                     <span class="text-slate-300 mr-2">○</span> ${days} ${days === 1 ? 'DAY' : 'DAYS'} SINCE
                 </div>
-                <div class="text-slate-600 font-black italic text-sm tracking-tight">${last.Band.toUpperCase()}</div>
+                <div class="text-slate-600 font-black italic text-sm tracking-tight">${mainText.toUpperCase()}</div>
             </div>`;
     }
 };
