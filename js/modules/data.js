@@ -9,12 +9,36 @@ export let performanceData = [];
 /**
  * Sorts an array of gig objects based on column and direction
  */
+
+// Helper to determine show type based on keywords
+// We export this so renderTable can use it too
+export const deriveType = (gig) => {
+    if (gig.Type && gig.Type !== "nan" && gig.Type.trim() !== "") return gig.Type;
+
+    const venueLower = (gig.OfficialVenue || "").toLowerCase();
+
+    // Keywords for TV
+    const tvKeywords = ['jimmy', 'top of the pops', 'snl', 'letterman', 'tonight show', 'tiringo', 'mtv'];
+    if (tvKeywords.some(key => venueLower.includes(key))) return "TV";
+
+    // Keywords for Festivals
+    const festKeywords = ['fest', 'park', 'field', 'weekend', 'glastonbury', 'reading', 'leeds'];
+    if (festKeywords.some(key => venueLower.includes(key))) return "Festival";
+
+    return "Headline";
+};
+
 export const sortGigs = (data, column, ascending = true) => {
     return [...data].sort((a, b) => {
         let valA = a[column] || "";
         let valB = b[column] || "";
 
-        // Use the imported parseDate from utils.js
+        // NEW: Handle "Type" sorting in Band Mode
+        if (window.isBandMode && column === 'Band') {
+            valA = deriveType(a);
+            valB = deriveType(b);
+        }
+
         if (column === 'Date') {
             valA = parseDate(valA) || new Date(0);
             valB = parseDate(valB) || new Date(0);

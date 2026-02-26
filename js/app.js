@@ -1,5 +1,10 @@
 /**
  * Gig List Core Engine
+ V2.5.2 - Release Date 2026-02-26
+     * -------------------------------------------------------------------
+     [UI/UX] Added "Show Type" to the Band mode to show festival, tv, or headline.
+     [UI/UX] Made data view table dynamic so columns are responsive depending on the view mode
+
   V2.5.1 - Release Date 2026-02-25
     * -------------------------------------------------------------------
     [UI/UX] Switch labels to show song count instead of artist count when in band mode
@@ -105,7 +110,7 @@ let currentUser = JSON.parse(localStorage.getItem('gv_user'));
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "2.5.1";
+const APP_VERSION = "2.5.2";
 
 window.toggleListView = UI.toggleListView;
 window.journalData = window.journalData || [];

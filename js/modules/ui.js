@@ -7,6 +7,8 @@
  */
 import { getGlobalSeenCount, slugify, slugifyArtist, parseDate } from './utils.js';
 import { renderCalendar } from './calendar.js';
+import { sortGigs, deriveType } from './data.js';
+
 let gigMap = null;
 let markerLayer = null;
 let fullMapInstance = null;
@@ -247,58 +249,70 @@ export const renderCarouselItem = (index, carouselData, fullData) => {
 /* --- TABLE & CALENDAR VIEWS --- */
 
 export const renderTable = (data) => {
-
     const tableContainer = document.getElementById('tableContainer');
     if (!tableContainer) return;
 
     const getArrow = (col) => {
-            // Safety check: if currentSort isn't ready, show a neutral icon
-            if (!window.currentSort || window.currentSort.column !== col) {
-                return '<span class="opacity-20 ml-1 text-[8px]">↕</span>';
-            }
-            return window.currentSort.ascending ?
-                '<span class="ml-1 text-indigo-600">↑</span>' :
-                '<span class="ml-1 text-indigo-600">↓</span>';
-        };
+        if (!window.currentSort || window.currentSort.column !== col) {
+            return '<span class="opacity-20 ml-1 text-[8px]">↕</span>';
+        }
+        return window.currentSort.ascending ?
+            '<span class="ml-1 text-indigo-600">↑</span>' :
+            '<span class="ml-1 text-indigo-600">↓</span>';
+    };
+
+    const typeColors = {
+        'Headline': 'text-indigo-600 bg-indigo-50 border-indigo-100',
+        'Festival': 'text-amber-600 bg-amber-50 border-amber-100',
+        'Support': 'text-slate-600 bg-slate-50 border-slate-100',
+        'TV': 'text-emerald-600 bg-emerald-50 border-emerald-100'
+    };
 
     tableContainer.innerHTML = `
-        <div class="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
-                <table class="w-full text-left table-fixed"> <thead>
-                        <tr class="bg-slate-50/50">
-                            <th onclick="window.handleSort('Date')" class="w-24 p-4 cursor-pointer hover:bg-slate-100 transition-colors text-[10px] font-black uppercase tracking-widest text-slate-400">
-                                Date ${getArrow('Date')}
-                            </th>
-                            <th onclick="window.handleSort('Band')" class="p-4 cursor-pointer hover:bg-slate-100 transition-colors text-[10px] font-black uppercase tracking-widest text-slate-400">
-                                Artist ${getArrow('Band')}
-                            </th>
-                            <th onclick="window.handleSort('OfficialVenue')" class="p-4 cursor-pointer hover:bg-slate-100 transition-colors text-[10px] font-black uppercase tracking-widest text-slate-400">
-                                Venue ${getArrow('OfficialVenue')}
-                            </th>
-                        </tr>
-                    </thead>
+        <div class="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden font-sans">
+            <table class="w-full text-left table-fixed">
+                <thead>
+                    <tr class="bg-slate-50/50">
+                        <th onclick="window.handleSort('Date')" class="w-24 p-4 cursor-pointer hover:bg-slate-100 transition-colors text-[10px] font-black uppercase tracking-widest text-slate-400">
+                            Date ${getArrow('Date')}
+                        </th>
+                        <th onclick="window.handleSort('Band')" class="w-32 p-4 cursor-pointer hover:bg-slate-100 transition-colors text-[10px] font-black uppercase tracking-widest text-slate-400">
+                            ${window.isBandMode ? 'Type' : 'Artist'} ${getArrow('Band')}
+                        </th>
+                        <th onclick="window.handleSort('OfficialVenue')" class="p-4 cursor-pointer hover:bg-slate-100 transition-colors text-[10px] font-black uppercase tracking-widest text-slate-400">
+                            Venue ${getArrow('OfficialVenue')}
+                        </th>
+                    </tr>
+                </thead>
                 <tbody class="divide-y divide-slate-50">
                     ${data.map(gig => {
-                        // CHANGED: Use gig.Photos to match your CSV header
                         const photoLink = gig.Photos || "";
                         const hasPhotoURL = photoLink.trim() !== "" && photoLink !== "nan";
-
                         const cameraIcon = hasPhotoURL ? `
-                            <a href="${photoLink}"
-                               target="_blank"
-                               onclick="event.stopPropagation()"
-                               class="inline-flex items-center ml-2 text-indigo-400 hover:text-indigo-600 transition-colors"
-                               title="View Photo Album">
+                            <a href="${photoLink}" target="_blank" onclick="event.stopPropagation()"
+                               class="inline-flex items-center text-indigo-400 hover:text-indigo-600 transition-colors" title="View Photo">
                                 <i data-lucide="camera" class="w-3.5 h-3.5"></i>
                             </a>` : '';
 
+                        const displayValue = window.isBandMode ? deriveType(gig) : gig.Band;
+                        const badgeClass = typeColors[displayValue] || 'text-slate-600 bg-slate-50 border-slate-100';
+
+                        const mainContent = window.isBandMode
+                            ? `<span class="px-2 py-0.5 rounded-full border text-[10px] font-bold uppercase tracking-tighter ${badgeClass}">${displayValue}</span>`
+                            : `<span class="text-sm font-bold text-slate-900">${displayValue}</span>`;
+
                         return `
                         <tr onclick="window.viewGigDetails('${gig.safeKey}')" class="group hover:bg-indigo-50/30 transition-all cursor-pointer">
-                            <td class="p-4 text-xs font-medium text-slate-500 font-mono">${gig.Date}</td>
-                            <td class="p-4 text-sm font-bold text-slate-900 group-hover:text-indigo-600 flex items-center">
-                                ${gig.Band}
-                                ${cameraIcon}
+                            <td class="p-4 text-xs font-medium text-slate-500 font-mono tracking-tighter">${gig.Date}</td>
+                            <td class="p-4 leading-tight">
+                                <div class="flex items-center gap-2">
+                                    ${mainContent}
+                                    ${cameraIcon}
+                                </div>
                             </td>
-                            <td class="p-4 text-xs text-slate-500">${gig.OfficialVenue}</td>
+                            <td class="p-4 text-xs text-slate-600 font-medium">
+                                ${gig.OfficialVenue}
+                            </td>
                         </tr>
                         `;
                     }).join('')}
@@ -306,9 +320,8 @@ export const renderTable = (data) => {
             </table>
         </div>
     `;
-        if (window.lucide) {
-        lucide.createIcons();
-    }
+
+    if (window.lucide) lucide.createIcons();
 };
 
 /**
