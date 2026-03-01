@@ -216,3 +216,26 @@
 #full-map-canvas {
     background: #f8fafc; /* Matches your app bg */
 }
+
+/* Band Mode Theme - Colors Only */
+body.band-mode {
+    background-color: #fdfaf3;
+}
+
+/* Ensure header elements are black */
+body.band-mode header h1,
+body.band-mode header div {
+    color: black !important;
+}
+
+/* Keep the Indigo box black in Band Mode to match the amber */
+body.band-mode header .bg-indigo-600 {
+    background-color: black !important;
+    color: #fbbf24 !important; /* Amber icon */
+}
+
+/* Standard button override */
+body.band-mode button.bg-indigo-600 {
+    background-color: black !important;
+    color: white !important;
+}

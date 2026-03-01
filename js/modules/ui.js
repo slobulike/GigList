@@ -330,37 +330,33 @@ export const renderTable = (data) => {
 export const toggleListView = (view) => {
     window.activeView = view;
 
-    // 1. Get Data
     const dataToRender = window.filteredResults || window.journalData;
+    const sortedData = Data.sortGigs(dataToRender, window.currentSort.column, window.currentSort.ascending);
 
-    // 2. Handle Container Visibility
     const containers = {
         'list': document.getElementById('tableContainer'),
         'map': document.getElementById('mapContainer'),
         'calendar': document.getElementById('calendarContainer')
     };
 
+    // Toggle visibility
     Object.keys(containers).forEach(key => {
         if (containers[key]) {
             containers[key].classList.toggle('hidden', key !== view);
         }
     });
 
-    // 3. Trigger Renders
     if (view === 'calendar') {
-        renderCalendar(dataToRender);
+        // We know the container exists now
+        renderCalendar(sortedData);
     } else if (view === 'map') {
-        // Map should also show the sorted order for the sidebar/pins
-        const sortedData = Data.sortGigs(dataToRender, window.currentSort.column, window.currentSort.ascending);
         if (window.renderMap) window.renderMap(sortedData);
     } else {
-        // APPLY SORT HERE for the list view
-        const sortedData = Data.sortGigs(dataToRender, window.currentSort.column, window.currentSort.ascending);
         renderTable(sortedData);
-        updateStats(dataToRender); // Stats don't care about order, so raw data is fine
+        updateStats(dataToRender);
     }
 
-    // 4. Update Button Highlighting
+    // 4. Update Button Highlighting (Tailwind Classes)
     const btnIds = ['btn-list', 'btn-calendar', 'btn-map'];
     btnIds.forEach(id => {
         const btn = document.getElementById(id);
@@ -377,7 +373,11 @@ export const toggleListView = (view) => {
             btn.setAttribute('aria-selected', 'false');
         }
     });
+
+    // Refresh Lucide icons if any were rendered in the new view
+    if (window.lucide) window.lucide.createIcons();
 };
+
 /**
  * Leaflet Map Engine
  */

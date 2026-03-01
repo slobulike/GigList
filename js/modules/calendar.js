@@ -13,7 +13,8 @@ const getTopStat = (entries, key) => {
 };
 
 export const renderCalendar = (data) => {
-    const container = document.getElementById('calendarContainer');
+    // Look for both IDs to be safe
+    const container = document.getElementById('calendarContainer') || document.getElementById('calendarView');
     if (!container) return;
 
     // 1. Group Data by Year then Month
@@ -53,7 +54,7 @@ export const renderCalendar = (data) => {
                     </button>
                 </div>
 
-                <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-12 gap-2" role="grid">
+                <div class="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-4 xl:grid-cols-4 gap-3" role="grid">
                     ${monthNames.map((name, index) => {
                         const monthNum = index + 1;
                         const monthGigs = grouped[year][monthNum] || [];
@@ -186,7 +187,12 @@ window.toggleYearWrapped = (year) => {
 };
 
 window.showMonthDetail = (year, monthNum, monthName) => {
-    const monthGigs = window.journalData.filter(e => {
+    // Use filteredResults if they exist, otherwise fallback to journalData
+    const dataSource = (window.filteredResults && window.filteredResults.length > 0)
+                           ? window.filteredResults
+                           : window.journalData;
+
+        const monthGigs = dataSource.filter(e => {
         const parts = e.Date.split('/');
         const y = parts.length === 3 ? parts[2] : e.Date.split('-')[0];
         const m = parts.length === 3 ? parseInt(parts[1]) : parseInt(e.Date.split('-')[1]);

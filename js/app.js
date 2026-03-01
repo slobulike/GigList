@@ -1,5 +1,12 @@
 /**
  * Gig List Core Engine
+ V2.5.3 - Release Date 2026-02-26
+      * -------------------------------------------------------------------
+    [UI/UX] Band mode styling changes
+    [UI/UX] Song data now shown in band mode including new song chart
+    [FIX] Corrected calendar view to show tiles in grid instead of row
+    [FIX] Correct performances data (using python script) to align to journal key
+
  V2.5.2 - Release Date 2026-02-26
      * -------------------------------------------------------------------
      [UI/UX] Added "Show Type" to the Band mode to show festival, tv, or headline.
@@ -110,9 +117,10 @@ let currentUser = JSON.parse(localStorage.getItem('gv_user'));
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "2.5.2";
+const APP_VERSION = "2.5.3";
 
 window.toggleListView = UI.toggleListView;
+window.activeView = window.activeView || 'list';
 window.journalData = window.journalData || [];
 window.openGigModal = UI.openGigModal;
 window.renderMap = UI.renderMap;
@@ -127,43 +135,84 @@ export async function initApp() {
     }
 
     // 1. Load Data
-    const { journalData, performanceData, user } = await Data.loadAppData(currentUser);
-    window.isBandMode = user.Type === 'Band';
-    window.bandName = currentUser.Subject || currentUser.UserName;
-    console.log("Band Mode Active:", window.isBandMode);
     const data = await Data.loadAppData(currentUser);
     window.journalData = data.journalData;
     window.performanceData = data.performanceData;
     window.filteredResults = [...data.journalData];
-    const versionEl = document.getElementById('app-version-display');
-        if (versionEl) versionEl.innerText = APP_VERSION;
-    const identityEl = document.getElementById('userIdentity');
-        if (identityEl) {
-            identityEl.style.cursor = 'pointer';
-            identityEl.setAttribute('role', 'button');
-            identityEl.setAttribute('aria-label', 'Open User Settings');
-            identityEl.onclick = window.openSettings;
+
+    // Set Mode Flags
+    window.isBandMode = data.user.Type === 'Band';
+    window.currentArtist = data.user.UserName; // Using UserName as the primary ID
+    console.log("Band Mode Active:", window.isBandMode);
+
+    // 2. Apply Band Mode Branding (Top Header Specific)
+        if (window.isBandMode) {
+            document.body.classList.add('band-mode');
+
+            const topHeader = document.querySelector('header');
+
+            if (topHeader) {
+                topHeader.style.position = 'relative';
+                topHeader.classList.remove('bg-white/80', 'border-slate-100');
+                topHeader.classList.add('bg-amber-400', 'border-b-2', 'border-black/20');
+
+                // 1. COMPLETELY HIDE the "Gig List" text on ALL screens
+                const logoText = topHeader.querySelector('h1');
+                if (logoText) {
+                    // !important ensures it wins against any Tailwind responsive classes (md:flex, etc.)
+                    logoText.setAttribute('style', 'display: none !important');
+                }
+
+                // 2. Style the User Badge
+                const badge = document.getElementById('userIdentity');
+                if (badge) {
+                    badge.style.color = 'black';
+                    badge.style.backgroundColor = 'rgba(0,0,0,0.1)';
+                    badge.style.border = '1px solid rgba(0,0,0,0.1)';
+                }
+
+                // 3. Inject "Archive Mode" in the absolute center
+                const oldIndicator = document.getElementById('archive-indicator');
+                if (oldIndicator) oldIndicator.remove();
+
+                const indicator = document.createElement('div');
+                indicator.id = 'archive-indicator';
+                // Absolute center with standard font weight/style
+                indicator.className = "absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 font-black uppercase tracking-[0.2em] text-[11px] text-black whitespace-nowrap z-[60] pointer-events-none";
+                indicator.innerText = "⚡ ARCHIVE MODE ⚡";
+
+                topHeader.appendChild(indicator);
+            }
         }
-    window.venueLookup = await Data.loadVenues(); // Load venues.csv lookup
 
+    // 3. Metadata & Identity
+    const versionEl = document.getElementById('app-version-display');
+    if (versionEl) versionEl.innerText = APP_VERSION;
 
-    // 2. Initialize UI
-    document.getElementById('userIdentity').innerText = currentUser.UserName || "User";
+    const identityEl = document.getElementById('userIdentity');
+    if (identityEl) {
+        identityEl.innerText = currentUser.UserName || "User";
+        identityEl.style.cursor = 'pointer';
+        identityEl.setAttribute('role', 'button');
+        identityEl.setAttribute('aria-label', 'Open User Settings');
+        identityEl.onclick = window.openSettings;
+    }
 
-    // 3. Initial Render
+    window.venueLookup = await Data.loadVenues();
+
+    // 4. Initial Render & Listeners
     refreshUI();
-
-    // 4. Setup Listeners
     initEventListeners();
 }
 
 function refreshUI() {
-    // 1. Get the filter state (Fixed ID to match vault.html)
+    // 1. Get the filter state
     const includeFuture = document.getElementById('upcoming-toggle')?.checked;
+    const searchVal = document.getElementById('searchInput')?.value || "";
 
     // 2. Filter the data
     const results = Data.filterGigs(
-        document.getElementById('searchInput').value,
+        searchVal,
         window.journalData,
         includeFuture
     );
@@ -180,13 +229,33 @@ function refreshUI() {
     UI.updateTicker(results);
     UI.renderCarousel(results);
 
-    // We use the SORTED results for the table
+    // Render the Table with sorted data
     UI.renderTable(sortedResults);
 
-    // We keep the ORIGINAL filtered order for charts to prevent logic breaks
-    Charts.renderYearChart(results, 'yearChart');
-    Charts.renderCompanionChart(results, 'companionChart');
+    // 5. CHART LOGIC (The Swap)
+    const companionContainer = document.getElementById('companionChartContainer');
+    const songContainer = document.getElementById('songChartContainer');
 
+    if (window.isBandMode) {
+        // Band Mode: Show Songs, Hide Companion
+        if (companionContainer) companionContainer.classList.add('hidden');
+        if (songContainer) {
+            songContainer.classList.remove('hidden');
+            Charts.renderTopSongsChart(results, 'topSongsChart');
+        }
+    } else {
+        // Personal Mode: Show Companion, Hide Songs
+        if (songContainer) songContainer.classList.add('hidden');
+        if (companionContainer) {
+            companionContainer.classList.remove('hidden');
+            Charts.renderCompanionChart(results, 'dashboardCompanionChart');
+        }
+    }
+
+    // Always render the Year Chart
+    Charts.renderYearChart(results, 'dashboardYearChart');
+
+    // 6. Map Logic
     const mapContainer = document.getElementById('mapContainer');
     if (mapContainer && !mapContainer.classList.contains('hidden')) {
         UI.renderMap(sortedResults);

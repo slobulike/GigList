@@ -270,31 +270,35 @@ const renderMonthDrillDown = (data, year) => {
  */
 window.openChartModal = function(chartType) {
     const modal = document.getElementById('chartModal');
-    if (!modal) return;
+    const canvas = document.getElementById('modalChartCanvas');
+    if (!modal || !canvas) return;
 
-    // Reset Subtitle to clear Requirement 3 (Back button leakage)
-    const subtitle = modal.querySelector('p.text-slate-400');
-    if (subtitle) {
-        subtitle.innerText = "Interactive Data View";
-        subtitle.onclick = null;
-        subtitle.classList.remove('cursor-pointer', 'text-indigo-600');
+    // 1. THE FIX: Find and destroy any existing instance on this specific canvas
+    const existingChart = Chart.getChart(canvas);
+    if (existingChart) {
+        existingChart.destroy();
     }
 
+    // 2. Show the modal
     modal.classList.remove('hidden');
-    modal.style.display = 'flex'; // Ensure flex layout for centering
+    modal.style.display = 'flex';
     document.body.style.overflow = 'hidden';
 
-    // Use current filtered results or full journal
-    const dataToUse = (typeof filteredResults !== 'undefined' && filteredResults.length > 0)
-                      ? filteredResults
-                      : journalData;
+    // 3. Get Data
+    const dataToUse = (window.filteredResults && window.filteredResults.length > 0)
+                      ? window.filteredResults
+                      : window.journalData;
 
+    // 4. Render based on type
     if (chartType === 'companion') {
         document.getElementById('modalChartTitle').innerText = "Companion Analysis";
         renderCompanionChart(dataToUse, 'modalChartCanvas', true);
     } else if (chartType === 'year') {
         document.getElementById('modalChartTitle').innerText = "Yearly Breakdown";
         renderYearChart(dataToUse, 'modalChartCanvas', true);
+    } else if (chartType === 'songs') {
+        document.getElementById('modalChartTitle').innerText = "Top Songs Leaderboard";
+        renderTopSongsChart(dataToUse, 'modalChartCanvas', true);
     }
 
     if (window.lucide) lucide.createIcons();
@@ -307,4 +311,123 @@ window.closeChartModal = function() {
         modal.style.display = 'none';
         document.body.style.overflow = 'auto';
     }
+};
+
+/**
+ * 4. TOP SONGS CHART (Horizontal Bar)
+ */
+let dashboardSongsChart = null;
+
+export const renderTopSongsChart = (filteredJournal, canvasId, isModal = false) => {
+    const ctx = document.getElementById(canvasId);
+    if (!ctx) return;
+
+    // 1. Precise Instance Management
+    const existingChart = Chart.getChart(ctx);
+    if (existingChart) existingChart.destroy();
+
+    // 1. Create a cleaned set of keys from the active journal (the 1,622 entries)
+    const currentKeys = new Set(
+        filteredJournal
+            .map(g => (g['Journal Key'] || g['JournalKey'] || "").toString().trim().toLowerCase())
+            .filter(k => k !== "")
+    );
+
+    const songCounts = {};
+
+    // 2. Scan performance data
+    (window.performanceData || []).forEach(perf => {
+        // Normalize the key in the performance row
+        const pKey = (perf['Journal Key'] || perf['JournalKey'] || "").toString().trim().toLowerCase();
+
+        // Only count if this performance belongs to the current "User" (Weezer)
+        if (currentKeys.has(pKey)) {
+            const setlistRaw = perf.Setlist || "";
+
+            if (setlistRaw && setlistRaw !== "nan" && setlistRaw !== "NOT_FOUND") {
+                // Split by Pipe, Comma, or Newline
+                const songs = setlistRaw.split(/[|,\n;]/);
+
+                songs.forEach(song => {
+                    const cleanSong = song.trim();
+                    const excludes = ['nan', 'not_found', 'unknown', 'null', ''];
+
+                    if (cleanSong && !excludes.includes(cleanSong.toLowerCase())) {
+                        songCounts[cleanSong] = (songCounts[cleanSong] || 0) + 1;
+                    }
+                });
+            }
+        }
+    });
+
+    // 3. Proper Limits (12 for small, 25 for modal)
+    const limit = isModal ? 25 : 12;
+    const sortedSongs = Object.entries(songCounts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, limit);
+
+    const labels = sortedSongs.map(s => s[0]);
+    const counts = sortedSongs.map(s => s[1]);
+
+    // 4. Vibrant Color Palette
+    const colors = [
+        '#6366f1', '#8b5cf6', '#ec4899', '#f43f5e', '#f59e0b',
+        '#10b981', '#06b6d4', '#3b82f6', '#6366f1', '#a855f7'
+    ];
+
+    const chartConfig = {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                data: counts,
+                backgroundColor: colors, // Chart.js will cycle through these
+                borderRadius: 4,
+                barThickness: isModal ? 12 : 10
+            }]
+        },
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false }, // RE-REMOVED: Legend gone
+                tooltip: {
+                    enabled: true,
+                    callbacks: { label: (ctx) => ` Played ${ctx.raw} times` }
+                }
+            },
+            scales: {
+                x: {
+                    beginAtZero: true,
+                    grid: { display: false },
+                    ticks: { color: '#94a3b8', font: { size: 10 } }
+                },
+                y: {
+                    grid: { display: false },
+                    ticks: {
+                        color: '#475569',
+                        font: { size: isModal ? 10 : 9, weight: 'bold' }
+                    }
+                }
+            },
+            // 5. Interactive Filter
+            onClick: (evt, elements) => {
+                if (elements.length > 0) {
+                    const index = elements[0].index;
+                    const songName = labels[index];
+                    const searchInput = document.getElementById('searchInput');
+                    if (searchInput) {
+                        searchInput.value = songName;
+                        if (window.refreshUI) window.refreshUI();
+                        if (isModal && typeof window.closeChartModal === 'function') {
+                            window.closeChartModal();
+                        }
+                    }
+                }
+            }
+        }
+    };
+
+    new Chart(ctx, chartConfig);
 };
