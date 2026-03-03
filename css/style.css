@@ -219,7 +219,7 @@
 
 /* Band Mode Theme - Colors Only */
 body.band-mode {
-    background-color: #fdfaf3;
+    background-color: #f0f9ff; /* Very light sky blue tint */
 }
 
 /* Ensure header elements are black */
@@ -231,11 +231,15 @@ body.band-mode header div {
 /* Keep the Indigo box black in Band Mode to match the amber */
 body.band-mode header .bg-indigo-600 {
     background-color: black !important;
-    color: #fbbf24 !important; /* Amber icon */
+    color: #189BCC !important; /* Amber icon */
 }
 
 /* Standard button override */
 body.band-mode button.bg-indigo-600 {
-    background-color: black !important;
+    background-color: #189BCC !important;
     color: white !important;
+}
+
+body.band-mode .text-indigo-600 {
+    color: #189BCC !important;
 }

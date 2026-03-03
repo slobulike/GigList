@@ -8,6 +8,7 @@
 import { getGlobalSeenCount, slugify, slugifyArtist, parseDate } from './utils.js';
 import { renderCalendar } from './calendar.js';
 import { sortGigs, deriveType } from './data.js';
+import { getUniqueSongCount } from './data.js';
 
 let gigMap = null;
 let markerLayer = null;
@@ -52,18 +53,15 @@ export const updateCurrentDate = () => {
 export const updateStats = (data) => {
     // 1. Target the specific IDs
     const homeHeader = document.getElementById('home-welcome-title');
-    const artistLabel = document.getElementById('stat-artist-label'); // Home Tab
-    const dcArtistLabel = document.getElementById('dc-stat-artists-label'); // Data Centre Tab
-    const artistCountLabel = document.getElementById('dc-stat-artists-label'); // Optional: check if label in detail view needs swap
+    const artistLabel = document.getElementById('stat-artist-label');
+    const dcArtistLabel = document.getElementById('dc-stat-artists-label');
 
     // 2. Handle Header and Labels
     if (homeHeader) {
         homeHeader.textContent = window.isBandMode ? (window.bandName || "Band Archive") : "For You";
     }
 
-// Apply the text swap to both labels
     const artistText = window.isBandMode ? "Songs" : "Artists";
-
     if (artistLabel) artistLabel.textContent = artistText;
     if (dcArtistLabel) dcArtistLabel.textContent = artistText;
 
@@ -71,28 +69,16 @@ export const updateStats = (data) => {
     const counts = {
         total: data.length,
         venues: new Set(data.map(g => g.OfficialVenue)).size,
-        artists: 0 // Will be populated below
+        artists: 0
     };
 
     if (window.isBandMode) {
-            // 1. Get the keys for currently filtered gigs
-            const currentKeys = new Set(data.map(g => g['Journal Key'] || g['JournalKey']));
-
-            // 2. Filter performance data safely
-            const perf = window.performanceData || [];
-
-            // 3. Count rows that match those keys
-            counts.artists = perf.filter(p => {
-                const pKey = p['Journal Key'] || p['JournalKey'];
-                return currentKeys.has(pKey);
-            }).length;
-
-            console.log(`📊 Band Mode: Found ${counts.artists} song entries for ${currentKeys.size} gigs.`);
-
-    } else {
-        // Standard unique artist count
-        counts.artists = new Set(data.map(g => g.Band)).size;
-    }
+            // Explicitly pass the global performance data
+            counts.artists = getUniqueSongCount(data, window.performanceData);
+            console.log(`📊 Band Mode: Found ${counts.artists} unique songs.`);
+        } else {
+            counts.artists = new Set(data.map(g => g.Band)).size;
+        }
 
     // 4. Batch Update DOM Elements
     ['stat-total', 'dc-stat-gigs'].forEach(id => {
@@ -105,7 +91,6 @@ export const updateStats = (data) => {
         if(el) el.innerText = counts.venues.toLocaleString();
     });
 
-    // This targets both the main stat and the detail view stat
     ['stat-artists', 'dc-stat-artists', 'stat-artist-count'].forEach(id => {
         const el = document.getElementById(id);
         if(el) el.innerText = counts.artists.toLocaleString();

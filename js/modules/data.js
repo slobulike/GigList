@@ -6,12 +6,10 @@ import { formatDate, parseDate } from './utils.js';
 export let journalData = [];
 export let performanceData = [];
 
-/**
- * Sorts an array of gig objects based on column and direction
- */
 
-// Helper to determine show type based on keywords
-// We export this so renderTable can use it too
+/**
+ * Helper to determine show type based on keywords
+ */
 export const deriveType = (gig) => {
     if (gig.Type && gig.Type !== "nan" && gig.Type.trim() !== "") return gig.Type;
 
@@ -28,12 +26,14 @@ export const deriveType = (gig) => {
     return "Headline";
 };
 
+/**
+ * Sorts an array of gig objects
+ */
 export const sortGigs = (data, column, ascending = true) => {
     return [...data].sort((a, b) => {
         let valA = a[column] || "";
         let valB = b[column] || "";
 
-        // NEW: Handle "Type" sorting in Band Mode
         if (window.isBandMode && column === 'Band') {
             valA = deriveType(a);
             valB = deriveType(b);
@@ -56,7 +56,6 @@ export const sortGigs = (data, column, ascending = true) => {
 /**
  * GigList - Data Loading Logic
  */
-
 export const loadAppData = async (user) => {
     const version = new Date().getTime();
     const journalUrl = `data/${user.JournalFile}?v=${version}`;
@@ -67,14 +66,11 @@ export const loadAppData = async (user) => {
         return str.replace(/'/g, "\\'").replace(/"/g, "&quot;");
     };
 
-    // 1. Fetch both in parallel
     const [journalRes, perfRes] = await Promise.all([
         fetch(journalUrl),
         fetch(perfUrl)
     ]);
 
-    // 2. Extract text and parse concurrently
-    // This is faster because parsing starts as soon as the text is ready
     const [journalResult, performanceResult] = await Promise.all([
         journalRes.text().then(text => Papa.parse(text, { header: true, skipEmptyLines: true })),
         perfRes.text().then(text => Papa.parse(text, { header: true, skipEmptyLines: true }))
@@ -83,7 +79,6 @@ export const loadAppData = async (user) => {
     journalData = journalResult.data;
     performanceData = performanceResult.data;
 
-    // 3. Normalization (Efficient loop)
     journalData.forEach(g => {
         g.Band = g.Band || g.Artist;
         g.type = 'past';
@@ -93,127 +88,111 @@ export const loadAppData = async (user) => {
     return { journalData, performanceData, user };
 };
 
-export const filterGigs = (query, data, includeFuture = false) => {
+/**
+ * Calculates unique songs based on passed performance data
+ */
+export const getUniqueSongCount = (filteredGigs) => {
+    const perfs = window.performanceData || [];
+    if (perfs.length === 0) return 0;
 
-if (!query) return data;
+    // 1. Get the current Band Name from the user profile
+    const user = JSON.parse(localStorage.getItem('gv_user'));
+    const currentArtist = (user?.UserName || user?.user_name || "").toLowerCase();
 
-const q = query.toLowerCase().trim();
-const now = new Date();
+    // 2. Build the Set of keys for the gigs currently on screen
+    const activeKeys = new Set(filteredGigs.map(g => (g['Journal Key'] || g['JournalKey'] || "").trim()));
 
-// 1. First, find all Journal Keys that contain this song in performanceData
+    const uniqueSongs = new Set();
 
-const matchingKeysBySong = performanceData
+    perfs.forEach(perf => {
+        const perfKey = (perf['Journal Key'] || perf['JournalKey'] || "").trim();
+        const perfArtist = (perf['Artist'] || perf['Band'] || "").toLowerCase();
 
-.filter(p => p.Setlist && p.Setlist.toLowerCase().includes(q))
+        // 3. Handshake: Must match the Date/Venue key AND the Artist
+        if (activeKeys.has(perfKey) && perfArtist === currentArtist) {
+            // 4. Your CSV uses "Setlist" with songs separated by "|"
+            const setlistStr = perf['Setlist'] || "";
+            if (setlistStr) {
+                const songs = setlistStr.split('|');
+                songs.forEach(s => {
+                    const cleanSong = s.trim();
+                    if (cleanSong) uniqueSongs.add(cleanSong);
+                });
+            }
+        }
+    });
 
-.map(p => p['Journal Key']);
-
-
-
-// 2. Filter the main journal data
-
-return data.filter(g => {
-
-// Date check
-
-const gigDate = new Date(g.Date || "");
-
-if (!includeFuture && gigDate > now) return false;
-
-
-
-const band = (g.Band || g.Artist || "").toLowerCase();
-
-const venue = (g.OfficialVenue || "").toLowerCase();
-
-const companion = (g.Companion || g['Went With'] || "").toLowerCase();
-
-const dateStr = (g.Date || "");
-
-const journalKey = g['Journal Key'];
-
-
-
-// 3. The Match Logic:
-
-return (
-
-band.includes(q) ||
-
-venue.includes(q) ||
-
-companion.includes(q) ||
-
-dateStr.includes(q) ||
-
-matchingKeysBySong.includes(journalKey) // This catches the song titles!
-
-);
-
-});
-
+    console.log(`📊 Stats: Found ${uniqueSongs.size} unique songs for ${currentArtist}`);
+    return uniqueSongs.size;
 };
-
-
-
-
 
 /**
+ * Filter Logic
+ */
+export const filterGigs = (query, data, includeFuture = false) => {
+    const q = query ? query.toLowerCase().trim() : "";
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
 
-* Loads the Venue database for mapping coordinates
+    // 1. Find all Journal Keys matching the song search
+    const matchingKeysBySong = q ? (window.performanceData || [])
+        .filter(p => p.Setlist && p.Setlist.toLowerCase().includes(q))
+        .map(p => p['Journal Key']) : [];
 
-*/
+    return data.filter(g => {
+        // 2. Use the standard parseDate from utils.js
+        const gigDate = parseDate(g.Date);
+        if (!includeFuture && gigDate && gigDate > now) return false;
 
-export const loadVenues = async () => {
+        if (!q) return true;
 
-return new Promise((resolve, reject) => {
+        const band = (g.Band || g.Artist || "").toLowerCase();
+        const venue = (g.OfficialVenue || "").toLowerCase();
+        const companion = (g.Companion || g['Went With'] || "").toLowerCase();
+        const role = (g.Role || "").toLowerCase(); // Restore Support search
+        const type = (g.Type || "").toLowerCase(); // Restore Festival search
+        const dateStr = (g.Date || "");
+        const journalKey = g['Journal Key'];
 
-Papa.parse('data/venues.csv', { // Updated path to include data/ folder
-
-download: true,
-
-header: true,
-
-skipEmptyLines: true,
-
-complete: (results) => {
-
-const lookup = {};
-
-results.data.forEach(v => {
-
-// Use 'OfficialName' as the key to match your venues.csv header
-
-if (v.OfficialName) {
-
-lookup[v.OfficialName] = {
-
-lat: parseFloat(v.Latitude),
-
-lng: parseFloat(v.Longitude)
-
+        // 3. The Match Logic (Cumulative & Deep)
+        return (
+            band.includes(q) ||
+            venue.includes(q) ||
+            companion.includes(q) ||
+            role.includes(q) ||
+            type.includes(q) ||
+            dateStr.includes(q) ||
+            matchingKeysBySong.includes(journalKey)
+        );
+    });
 };
 
-}
-
-});
-
-console.log(`Loaded ${Object.keys(lookup).length} venues for mapping.`);
-
-resolve(lookup);
-
-},
-
-error: (err) => {
-
-console.error("Error loading venues.csv:", err);
-
-reject(err);
-
-}
-
-});
-
-});
-
+/**
+ * Loads the Venue database for mapping coordinates
+ */
+export const loadVenues = async () => {
+    return new Promise((resolve, reject) => {
+        Papa.parse('data/venues.csv', {
+            download: true,
+            header: true,
+            skipEmptyLines: true,
+            complete: (results) => {
+                const lookup = {};
+                results.data.forEach(v => {
+                    if (v.OfficialName) {
+                        lookup[v.OfficialName] = {
+                            lat: parseFloat(v.Latitude),
+                            lng: parseFloat(v.Longitude)
+                        };
+                    }
+                });
+                console.log(`Loaded ${Object.keys(lookup).length} venues for mapping.`);
+                resolve(lookup);
+            },
+            error: (err) => {
+                console.error("Error loading venues.csv:", err);
+                reject(err);
+            }
+        });
+    });
 };

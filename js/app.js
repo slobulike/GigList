@@ -1,5 +1,11 @@
 /**
  * Gig List Core Engine
+  V2.5.4 - Release Date 2026-03-03
+       * -------------------------------------------------------------------
+     [UI/UX] Band mode quiz questions re-written
+     [FIX] Prevented duplicate questions in quiz
+     [FIX] Made sure song search results were returned
+
  V2.5.3 - Release Date 2026-02-26
       * -------------------------------------------------------------------
     [UI/UX] Band mode styling changes
@@ -113,11 +119,12 @@ import { renderCalendar } from './modules/calendar.js';
 import './modules/quiz.js';
 import * as Games from './modules/games.js';
 
+
 let currentUser = JSON.parse(localStorage.getItem('gv_user'));
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "2.5.3";
+const APP_VERSION = "2.5.4";
 
 window.toggleListView = UI.toggleListView;
 window.activeView = window.activeView || 'list';
@@ -153,8 +160,7 @@ export async function initApp() {
 
             if (topHeader) {
                 topHeader.style.position = 'relative';
-                topHeader.classList.remove('bg-white/80', 'border-slate-100');
-                topHeader.classList.add('bg-amber-400', 'border-b-2', 'border-black/20');
+                topHeader.classList.add('bg-[#189BCC]', 'text-white', 'border-b-2', 'border-black/10');
 
                 // 1. COMPLETELY HIDE the "Gig List" text on ALL screens
                 const logoText = topHeader.querySelector('h1');
@@ -165,11 +171,10 @@ export async function initApp() {
 
                 // 2. Style the User Badge
                 const badge = document.getElementById('userIdentity');
-                if (badge) {
-                    badge.style.color = 'black';
-                    badge.style.backgroundColor = 'rgba(0,0,0,0.1)';
-                    badge.style.border = '1px solid rgba(0,0,0,0.1)';
-                }
+                    if (badge) {
+                        badge.style.color = 'white';
+                        badge.style.backgroundColor = 'rgba(255,255,255,0.2)';
+                    }
 
                 // 3. Inject "Archive Mode" in the absolute center
                 const oldIndicator = document.getElementById('archive-indicator');
@@ -178,8 +183,8 @@ export async function initApp() {
                 const indicator = document.createElement('div');
                 indicator.id = 'archive-indicator';
                 // Absolute center with standard font weight/style
-                indicator.className = "absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 font-black uppercase tracking-[0.2em] text-[11px] text-black whitespace-nowrap z-[60] pointer-events-none";
-                indicator.innerText = "⚡ ARCHIVE MODE ⚡";
+                indicator.className = "... text-white ...";
+                indicator.innerText = "⚡ ARTIST ARCHIVE ⚡";
 
                 topHeader.appendChild(indicator);
             }
