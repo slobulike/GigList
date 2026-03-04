@@ -1,5 +1,11 @@
 /**
  * Gig List Core Engine
+  V2.5.5 - Release Date 2026-03-04
+        * -------------------------------------------------------------------
+    [FIX] Upcoming toggle no longer resets filter
+    [UI/UX] Deep Search Labels: Restored the "Support," "Festival," and "Setlist" badges.
+    [A11Y] Silenced the IDE warnings and kept the app WCAG-compliant with aria-labels
+
   V2.5.4 - Release Date 2026-03-03
        * -------------------------------------------------------------------
      [UI/UX] Band mode quiz questions re-written
@@ -124,7 +130,7 @@ let currentUser = JSON.parse(localStorage.getItem('gv_user'));
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "2.5.4";
+const APP_VERSION = "2.5.5";
 
 window.toggleListView = UI.toggleListView;
 window.activeView = window.activeView || 'list';
@@ -602,37 +608,32 @@ window.syncComingSoon = function() {
 
 window.handleUpcomingToggle = () => {
     const showUpcoming = document.getElementById('upcoming-toggle').checked;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
 
-    // 1. Filter the master data
-    window.filteredResults = window.journalData.filter(gig => {
-        const [d, m, y] = gig.Date.split('/');
-        const gigDate = new Date(y, m - 1, d);
+    // 1. Get the current search text from the input
+    const searchEl = document.getElementById('searchInput');
+    const currentSearch = searchEl ? searchEl.value : "";
 
-        if (showUpcoming) return true;
-        return gigDate <= today;
-    });
+    // 2. Use your central filter function (this handles both the text AND the date toggle)
+    // IMPORTANT: Make sure Data.filterGigs is imported/available here
+    window.filteredResults = Data.filterGigs(currentSearch, window.journalData, showUpcoming);
 
-    // 2. Identify the current data and APPLY SORT
-    // This line ensures the data is sorted by your current global sort state
+    // 3. Apply the current SORT to the results
     const currentData = Data.sortGigs(
         window.filteredResults,
         window.currentSort.column,
         window.currentSort.ascending
     );
 
-    // 3. Refresh the active view
+    // 4. Refresh the active view
     if (window.activeView === 'calendar') {
         renderCalendar(currentData);
     } else if (window.activeView === 'map') {
         if (window.renderMap) window.renderMap(currentData);
     } else {
         UI.renderTable(currentData);
-        UI.updateStats(currentData);
     }
 
-    // Always update stats regardless of view so they stay in sync
+    // Always update stats with the final data
     UI.updateStats(currentData);
 };
 

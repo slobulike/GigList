@@ -261,7 +261,7 @@ export const renderTable = (data) => {
                         <th onclick="window.handleSort('Date')" class="w-24 p-4 cursor-pointer hover:bg-slate-100 transition-colors text-[10px] font-black uppercase tracking-widest text-slate-400">
                             Date ${getArrow('Date')}
                         </th>
-                        <th onclick="window.handleSort('Band')" class="w-32 p-4 cursor-pointer hover:bg-slate-100 transition-colors text-[10px] font-black uppercase tracking-widest text-slate-400">
+                        <th onclick="window.handleSort('Band')" class="w-40 p-4 cursor-pointer hover:bg-slate-100 transition-colors text-[10px] font-black uppercase tracking-widest text-slate-400">
                             ${window.isBandMode ? 'Type' : 'Artist'} ${getArrow('Band')}
                         </th>
                         <th onclick="window.handleSort('OfficialVenue')" class="p-4 cursor-pointer hover:bg-slate-100 transition-colors text-[10px] font-black uppercase tracking-widest text-slate-400">
@@ -279,6 +279,25 @@ export const renderTable = (data) => {
                                 <i data-lucide="camera" class="w-3.5 h-3.5"></i>
                             </a>` : '';
 
+                        // --- MATCH LABELS LOGIC ---
+                        let matchLabels = '';
+                        if (gig._isSupportMatch) {
+                            matchLabels = `
+                                <span class="inline-flex items-center gap-1 text-[9px] bg-blue-500/10 text-blue-600 font-black uppercase px-2 py-0.5 rounded-full mt-1">
+                                    <i data-lucide="mic-2" class="w-2.5 h-2.5"></i> Support Match
+                                </span>`;
+                        } else if (gig._isFestMatch) {
+                            matchLabels = `
+                                <span class="inline-flex items-center gap-1 text-[9px] bg-amber-500/10 text-amber-600 font-black uppercase px-2 py-0.5 rounded-full mt-1">
+                                    <i data-lucide="users" class="w-2.5 h-2.5"></i> Lineup Match
+                                </span>`;
+                        } else if (gig._isSongMatch) {
+                            matchLabels = `
+                                <span class="inline-flex items-center gap-1 text-[9px] bg-emerald-500/10 text-emerald-600 font-black uppercase px-2 py-0.5 rounded-full mt-1">
+                                    <i data-lucide="music" class="w-2.5 h-2.5"></i> Setlist Match
+                                </span>`;
+                        }
+
                         const displayValue = window.isBandMode ? deriveType(gig) : gig.Band;
                         const badgeClass = typeColors[displayValue] || 'text-slate-600 bg-slate-50 border-slate-100';
 
@@ -290,13 +309,19 @@ export const renderTable = (data) => {
                         <tr onclick="window.viewGigDetails('${gig.safeKey}')" class="group hover:bg-indigo-50/30 transition-all cursor-pointer">
                             <td class="p-4 text-xs font-medium text-slate-500 font-mono tracking-tighter">${gig.Date}</td>
                             <td class="p-4 leading-tight">
-                                <div class="flex items-center gap-2">
-                                    ${mainContent}
-                                    ${cameraIcon}
+                                <div class="flex flex-col gap-1">
+                                    <div class="flex items-center gap-2">
+                                        ${mainContent}
+                                        ${cameraIcon}
+                                    </div>
+                                    ${matchLabels}
                                 </div>
                             </td>
                             <td class="p-4 text-xs text-slate-600 font-medium">
-                                ${gig.OfficialVenue}
+                                <div class="flex flex-col">
+                                    <span>${gig.OfficialVenue}</span>
+                                    <span class="text-[10px] text-slate-400 font-normal uppercase">${gig.City || ''}</span>
+                                </div>
                             </td>
                         </tr>
                         `;

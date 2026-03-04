@@ -134,37 +134,40 @@ export const filterGigs = (query, data, includeFuture = false) => {
     const now = new Date();
     now.setHours(0, 0, 0, 0);
 
-    // 1. Find all Journal Keys matching the song search
-    const matchingKeysBySong = q ? (window.performanceData || [])
-        .filter(p => p.Setlist && p.Setlist.toLowerCase().includes(q))
-        .map(p => p['Journal Key']) : [];
+    return data.map(row => {
+        const band = (row.Band || row.Artist || "").toLowerCase();
+        const lineup = (row['Festival Lineups'] || "").toLowerCase();
+        const journalKey = row['Journal Key'];
 
-    return data.filter(g => {
-        // 2. Use the standard parseDate from utils.js
-        const gigDate = parseDate(g.Date);
-        if (!includeFuture && gigDate && gigDate > now) return false;
-
-        if (!q) return true;
-
-        const band = (g.Band || g.Artist || "").toLowerCase();
-        const venue = (g.OfficialVenue || "").toLowerCase();
-        const companion = (g.Companion || g['Went With'] || "").toLowerCase();
-        const role = (g.Role || "").toLowerCase(); // Restore Support search
-        const type = (g.Type || "").toLowerCase(); // Restore Festival search
-        const dateStr = (g.Date || "");
-        const journalKey = g['Journal Key'];
-
-        // 3. The Match Logic (Cumulative & Deep)
-        return (
-            band.includes(q) ||
-            venue.includes(q) ||
-            companion.includes(q) ||
-            role.includes(q) ||
-            type.includes(q) ||
-            dateStr.includes(q) ||
-            matchingKeysBySong.includes(journalKey)
+        // 1. Calculate the Deep Match Flags
+        const hasSongMatch = q.length > 2 && (window.performanceData || []).some(p =>
+            p['Journal Key'] === journalKey && (p['Setlist'] || "").toLowerCase().includes(q)
         );
-    });
+
+        const isFestivalMatch = q.length > 2 && !band.includes(q) && lineup.includes(q);
+
+        const isSupportMatch = q.length > 2 && !isFestivalMatch && (window.performanceData || []).some(p =>
+            p['Journal Key'] === journalKey &&
+            p.Artist.toLowerCase().includes(q) &&
+            band !== p.Artist.toLowerCase()
+        );
+
+        // 2. Determine Visibility
+        const gigDate = parseDate(row.Date);
+        const matchFuture = includeFuture ? true : (gigDate && gigDate <= now);
+
+        const basicMatch = `${band} ${row.OfficialVenue || ""} ${row.Companion || row['Went With'] || ""}`.toLowerCase().includes(q);
+        const isVisible = (basicMatch || hasSongMatch || isFestivalMatch || isSupportMatch) && matchFuture;
+
+        // 3. Return the enriched object
+        return {
+            ...row,
+            _isSongMatch: hasSongMatch,
+            _isFestMatch: isFestivalMatch,
+            _isSupportMatch: isSupportMatch,
+            _visible: isVisible
+        };
+    }).filter(r => r._visible);
 };
 
 /**
