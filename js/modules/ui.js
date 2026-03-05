@@ -55,6 +55,17 @@ export const updateStats = (data) => {
     const homeHeader = document.getElementById('home-welcome-title');
     const artistLabel = document.getElementById('stat-artist-label');
     const dcArtistLabel = document.getElementById('dc-stat-artists-label');
+    const bandColors = {
+        'Weezer': '#00ADEF',
+        'Frank Turner': '#1D3557',
+        'New Found Glory': '#E63946'
+    };
+
+    if (window.isBandMode) {
+        const brandColor = bandColors[window.currentArtist] || '#6366f1';
+        const topHeader = document.querySelector('header');
+        if (topHeader) topHeader.style.backgroundColor = brandColor;
+    }
 
     // 2. Handle Header and Labels
     if (homeHeader) {
@@ -332,6 +343,26 @@ export const renderTable = (data) => {
     `;
 
     if (window.lucide) lucide.createIcons();
+};
+
+export const openChartModal = (title, renderCallback) => {
+    const modal = document.getElementById('chartModal');
+    const content = document.getElementById('modal-content');
+    if (!modal || !content) return;
+
+    // Set title and prepare canvas
+    content.innerHTML = `
+        <div class="p-8">
+            <h2 id="modal-title" class="text-3xl font-black text-slate-800 uppercase italic mb-6">${title}</h2>
+            <div class="h-[60vh] w-full relative">
+                <canvas id="modalChartCanvas"></canvas>
+            </div>
+        </div>
+    `;
+
+    modal.classList.remove('hidden');
+    // Call the callback to render the chart into the new canvas
+    renderCallback('modalChartCanvas');
 };
 
 /**

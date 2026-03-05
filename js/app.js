@@ -1,5 +1,12 @@
 /**
  * Gig List Core Engine
+  V2.6.0 - Release Date 2026-03-04
+        * -------------------------------------------------------------------
+ [FEATURE] "Top Bands" leaderboard added to Individual Mode.
+ [FIX] Successfully joined Journal and Performance data (Headline vs. Support).
+ [FIX] Eliminated Weezer double-counting (31 reduced back to 20).
+ [UI/UX] Added interactive filtering and "clean" hover-only expand buttons.
+
   V2.5.5 - Release Date 2026-03-04
         * -------------------------------------------------------------------
     [FIX] Upcoming toggle no longer resets filter
@@ -130,7 +137,7 @@ let currentUser = JSON.parse(localStorage.getItem('gv_user'));
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "2.5.5";
+const APP_VERSION = "2.6.0";
 
 window.toggleListView = UI.toggleListView;
 window.activeView = window.activeView || 'list';
@@ -217,53 +224,69 @@ export async function initApp() {
 }
 
 function refreshUI() {
-    // 1. Get the filter state
+    // 1. Get the current filter/search state
     const includeFuture = document.getElementById('upcoming-toggle')?.checked;
     const searchVal = document.getElementById('searchInput')?.value || "";
 
-    // 2. Filter the data
+    // 2. Filter the data using the Data module logic
     const results = Data.filterGigs(
         searchVal,
         window.journalData,
         includeFuture
     );
 
+    // Store globally for other modules to access if needed
     window.filteredResults = results;
 
     // 3. Create a sorted version specifically for the table/map
     const sortedResults = Data.sortGigs(results, window.currentSort.column, window.currentSort.ascending);
 
-    // 4. Update UI Components
+    // 4. Update UI Text Components
     UI.updateCurrentDate();
     UI.updateStats(results);
     UI.updateRank(results);
     UI.updateTicker(results);
     UI.renderCarousel(results);
 
-    // Render the Table with sorted data
+    // Render the Table with the sorted data
     UI.renderTable(sortedResults);
 
-    // 5. CHART LOGIC (The Swap)
+    // 5. CHART LOGIC
+    // Grab all chart containers
     const companionContainer = document.getElementById('companionChartContainer');
     const songContainer = document.getElementById('songChartContainer');
+    const topBandsContainer = document.getElementById('topBandsChartContainer');
 
     if (window.isBandMode) {
-        // Band Mode: Show Songs, Hide Companion
-        if (companionContainer) companionContainer.classList.add('hidden');
+        // --- BAND MODE VIEW ---
+        // Show Song stats, hide personal stats (Companion & Top Bands)
         if (songContainer) {
             songContainer.classList.remove('hidden');
             Charts.renderTopSongsChart(results, 'topSongsChart');
         }
+        if (companionContainer) companionContainer.classList.add('hidden');
+        if (topBandsContainer) topBandsContainer.classList.add('hidden');
+
     } else {
-        // Personal Mode: Show Companion, Hide Songs
+        // --- INDIVIDUAL MODE VIEW ---
+        // Hide Song stats, show personal stats
         if (songContainer) songContainer.classList.add('hidden');
+
+        // Render Companion Chart
         if (companionContainer) {
             companionContainer.classList.remove('hidden');
             Charts.renderCompanionChart(results, 'dashboardCompanionChart');
         }
+
+        // Render NEW Top Bands Chart (using the broad net logic)
+        if (topBandsContainer) {
+            topBandsContainer.classList.remove('hidden');
+            // We pass journalData and performanceData to get the full count
+            Charts.renderTopBandsChart(results, window.performanceData, 'topBandsChart');
+        }
     }
 
-    // Always render the Year Chart
+    // Always render the Year Chart at the bottom (Universal)
     Charts.renderYearChart(results, 'dashboardYearChart');
 
     // 6. Map Logic
@@ -272,6 +295,7 @@ function refreshUI() {
         UI.renderMap(sortedResults);
     }
 
+    // 7. Refresh Icons
     if (window.lucide) lucide.createIcons();
 }
 
@@ -650,6 +674,14 @@ window.handleSort = (column) => {
     const baseData = window.filteredResults || window.journalData;
     const sorted = Data.sortGigs(baseData, window.currentSort.column, window.currentSort.ascending);
     UI.renderTable(sorted);
+};
+
+window.openTopBandsModal = () => {
+    // This calls your existing UI.js modal logic
+    UI.openChartModal('Top Bands Seen', (canvasId) => {
+        // Pass 'true' so the chart module knows to use the modal settings
+        Charts.renderTopBandsChart(window.journalData, window.performanceData, canvasId, true);
+    });
 };
 
 import { GigPuzzle } from './modules/puzzle.js';

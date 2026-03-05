@@ -199,3 +199,46 @@ export const loadVenues = async () => {
         });
     });
 };
+/**
+ * Aggregates band appearance statistics across headline and performance data.
+ * Updated to filter against the user's actual journal keys.
+ */
+export const getBandAppearanceStats = (journalData, performanceData) => {
+    const stats = {};
+    const attendedShowsMap = new Map();
+
+    journalData.forEach(j => {
+        const key = j['Journal Key'];
+        const headlineBand = j['Band'];
+        if (key) attendedShowsMap.set(key, headlineBand);
+    });
+
+    // Track processed artist-key pairs to prevent double-counting per show
+    const processedPairs = new Set();
+
+    performanceData.forEach(perf => {
+        const key = perf['journal_key'] || perf['Journal Key'];
+        const artistName = perf['Artist'];
+
+        if (!attendedShowsMap.has(key) || !artistName) return;
+
+        // Unique identifier for this artist at this specific show
+        const uniqueKey = `${key}|${artistName}`;
+        if (processedPairs.has(uniqueKey)) return;
+
+        processedPairs.add(uniqueKey);
+
+        if (!stats[artistName]) {
+            stats[artistName] = { headline: 0, support: 0, total: 0 };
+        }
+
+        if (attendedShowsMap.get(key) === artistName) {
+            stats[artistName].headline++;
+        } else {
+            stats[artistName].support++;
+        }
+        stats[artistName].total++;
+    });
+
+    return stats;
+};

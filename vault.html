@@ -130,6 +130,21 @@
                 </div>
             </div>
 
+            <div id="topBandsChartContainer" class="group bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 hidden relative transition-all hover:shadow-md">
+                <div class="flex justify-between items-start mb-4">
+                    <div>
+                        <p class="text-[10px] font-black uppercase text-slate-400 tracking-widest">Top Bands</p>
+                    </div>
+                    <button onclick="window.openTopBandsModal()"
+                            class="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-slate-50 rounded-lg text-slate-300 transition-all duration-200">
+                        <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i>
+                    </button>
+                </div>
+                <div class="h-[350px] relative">
+                    <canvas id="topBandsChart"></canvas>
+                </div>
+            </div>
+
             <div class="grid grid-cols-1 gap-4">
 
                 <div id="songChartContainer" class="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm hidden h-72 relative group">

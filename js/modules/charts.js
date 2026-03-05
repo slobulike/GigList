@@ -2,9 +2,12 @@
  * GigList - Charts Module
  */
 
+import * as Data from './data.js';
+
 let modalChartInstance = null;
 let dashboardYearChart = null;
 let dashboardCompanionChart = null;
+let dashboardTopBandsChart = null;
 
 // Helper to get color palette
 const getChartColors = (count) => {
@@ -263,6 +266,97 @@ const renderMonthDrillDown = (data, year) => {
             }
         }
     });
+};
+
+/**
+ * 4. Top Bands Horizontal Bar Chart
+ */
+
+export const renderTopBandsChart = (journalData, performanceData, canvasId, isModal = false) => {
+    const ctx = document.getElementById(canvasId);
+    if (!ctx) return;
+
+    if (isModal && modalChartInstance) modalChartInstance.destroy();
+    if (!isModal && dashboardTopBandsChart) dashboardTopBandsChart.destroy();
+
+    const stats = Data.getBandAppearanceStats(journalData, performanceData);
+    const topLimit = isModal ? 20 : 10;
+
+    const topTen = Object.entries(stats)
+        .sort((a, b) => b[1].total - a[1].total)
+        .slice(0, topLimit);
+
+    const chartConfig = {
+        type: 'bar',
+        data: {
+            labels: topTen.map(t => t[0]),
+            datasets: [
+                {
+                    label: 'Headline',
+                    data: topTen.map(t => t[1].headline),
+                    backgroundColor: '#1D3557',
+                    stack: 'Stack 0',
+                    borderRadius: 4
+                },
+                {
+                    label: 'Support/Festival',
+                    data: topTen.map(t => t[1].support),
+                    backgroundColor: '#A8DADC',
+                    stack: 'Stack 0',
+                    borderRadius: 4
+                }
+            ]
+        },
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: isModal, // Only show legend in the expanded view
+                    position: 'bottom',
+                    labels: { boxWidth: 10, font: { size: 11, weight: 'bold' } }
+                },
+                tooltip: { enabled: true }
+            },
+            scales: {
+                x: {
+                    stacked: true,
+                    display: false, // Hide X axis entirely for that super-clean "progress bar" look
+                    grid: { display: false }
+                },
+                y: {
+                    stacked: true,
+                    grid: { display: false },
+                    border: { display: false },
+                    ticks: {
+                        crossAlign: 'far', // Aligns band names closer to the bars
+                        font: { weight: '800', size: 12 },
+                        color: '#64748b'
+                    }
+                }
+            },
+            onClick: (evt, elements) => {
+                if (elements.length > 0) {
+                    const index = elements[0].index;
+                    const bandName = topTen[index][0];
+                    const searchInput = document.getElementById('searchInput');
+                    if (searchInput) {
+                        searchInput.value = bandName;
+                        if (window.refreshUI) window.refreshUI();
+                        // Close modal using the global closer in app.js or ui.js
+                        const modal = document.getElementById('chartModal');
+                        if (modal) modal.classList.add('hidden');
+                        document.body.style.overflow = 'auto';
+                    }
+                }
+            }
+        }
+    };
+
+    const newChart = new Chart(ctx, chartConfig);
+    if (isModal) modalChartInstance = newChart;
+    else dashboardTopBandsChart = newChart;
 };
 
 /**
