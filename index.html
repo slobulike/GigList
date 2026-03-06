@@ -32,95 +32,126 @@
 
 <body class="bg-slate-50 flex flex-col items-center justify-center min-h-screen p-6">
 
-<main class="w-full max-w-sm space-y-8" role="main">
-
+<main class="w-full max-w-sm mx-auto space-y-8 pt-12" role="main">
     <header class="text-center space-y-2">
         <div class="inline-flex items-center justify-center w-20 h-20 bg-indigo-600 rounded-[2rem] shadow-xl shadow-indigo-200 mb-4 rotate-3" aria-hidden="true">
             <span class="text-4xl">🎸</span>
         </div>
-        <h1 class="text-5xl font-black italic tracking-tighter text-slate-900">GIG LIST</h1>
-        <p id="instruction" class="text-slate-400 font-bold text-sm uppercase tracking-widest">Select Profile to Enter</p>
+        <h1 class="text-5xl font-black italic tracking-tighter text-slate-900 uppercase">GIG LIST</h1>
+        <p id="instruction" class="text-slate-400 font-bold text-sm uppercase tracking-widest">
+            Select Archive Mode
+        </p>
     </header>
 
-    <div id="journalsSection" class="hidden space-y-4">
-        <h2 class="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-2 ml-4">Personal Journals</h2>
-        <div id="userList" class="space-y-3" role="list"></div>
+    <div id="modeSelection" class="space-y-4">
+        <button onclick="window.location.href='index.html?mode=Individual'"
+                class="w-full p-8 bg-white border-2 border-slate-100 rounded-[2.5rem] shadow-lg hover:border-indigo-500 transition-all text-center">
+            <h2 class="text-2xl font-black uppercase italic">Individual</h2>
+            <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Personal Memories</p>
+        </button>
+
+        <button onclick="window.location.href='index.html?mode=Band'"
+                class="w-full p-8 bg-slate-900 text-white rounded-[2.5rem] shadow-lg hover:ring-4 ring-indigo-500/20 transition-all text-center">
+            <h2 class="text-2xl font-black uppercase italic">Band Mode</h2>
+            <p class="text-[10px] text-indigo-300 font-bold uppercase tracking-widest mt-1">Official Archives</p>
+        </button>
     </div>
 
-    <div id="artistsSection" class="hidden space-y-4 pt-4">
-        <h2 class="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-2 ml-4">Artist Archives</h2>
-        <div id="artistList" class="space-y-3" role="list"></div>
+    <div id="userListSection" class="hidden space-y-4">
+        <div class="flex justify-between items-center mb-2">
+            <button onclick="window.location.href='index.html'" class="text-[10px] font-black text-indigo-600 uppercase tracking-widest flex items-center gap-1">
+                ← Back to Modes
+            </button>
+        </div>
+
+        <div id="userList" class="space-y-3" role="list" aria-live="polite">
+            <div id="loadingSkeleton" class="animate-pulse space-y-3">
+                <div class="h-20 bg-slate-100 rounded-[2rem] w-full"></div>
+                <div class="h-20 bg-slate-100 rounded-[2rem] w-full"></div>
+            </div>
+        </div>
     </div>
 
-    <div id="loadingSkeleton" class="animate-pulse space-y-3">
-        <div class="h-20 bg-slate-200 rounded-3xl w-full"></div>
-        <div class="h-20 bg-slate-200 rounded-3xl w-full"></div>
-    </div>
-
-    <footer class="pt-8">
-        <p class="text-center text-[10px] text-slate-300 font-black uppercase tracking-widest">
-            &copy; 2026 Archive Engine
+    <footer class="pt-8 text-center">
+        <p class="text-[10px] text-slate-300 font-black uppercase tracking-widest">
+            &copy; 2026 Strictly GigList
         </p>
     </footer>
 </main>
 
 <script>
-    const csvPath = `data/users.csv?v=${new Date().getTime()}`;
+    document.addEventListener('DOMContentLoaded', () => {
+        const urlParams = new URLSearchParams(window.location.search);
+        const requestedMode = urlParams.get('mode');
 
-    Papa.parse(csvPath, {
-        download: true,
-        header: true,
-        skipEmptyLines: true,
-        complete: function(results) {
-    const userContainer = document.getElementById('userList');
-    const artistContainer = document.getElementById('artistList');
-    const skeleton = document.getElementById('loadingSkeleton');
+        const modeSelection = document.getElementById('modeSelection');
+        const userListSection = document.getElementById('userListSection');
+        const instruction = document.getElementById('instruction');
 
-    // Clear initial state
-    userContainer.innerHTML = '';
-    artistContainer.innerHTML = '';
-    skeleton.classList.add('hidden');
-
-    results.data.forEach(user => {
-        const name = user.UserName || user.user_name;
-        if(!name) return;
-
-        const isBand = user.Type === 'Band';
-        const wrapper = document.createElement('div');
-        wrapper.setAttribute('role', 'listitem');
-
-        const btn = document.createElement('button');
-        // We'll use a specific hover color for Bands later
-        btn.className = "user-card w-full p-6 bg-white border-2 border-white hover:border-blue-100 shadow-sm hover:shadow-xl transition-all duration-300 rounded-[2rem] flex justify-between items-center group relative overflow-hidden";
-
-        btn.innerHTML = `
-            <div class="flex flex-col items-start text-left relative z-10">
-                <span class="text-[10px] text-slate-400 font-black uppercase tracking-widest mb-1 group-hover:text-blue-600 transition-colors">
-                    ${isBand ? 'Artist Archive' : 'User Profile'}
-                </span>
-                <span class="text-2xl font-black text-slate-900 tracking-tighter">${name}</span>
-            </div>
-            <div class="bg-slate-50 group-hover:bg-blue-600 w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-300 relative z-10">
-                <span class="text-slate-400 group-hover:text-white font-black">→</span>
-            </div>
-        `;
-
-        btn.onclick = () => {
-            localStorage.setItem('gv_user', JSON.stringify(user));
-            window.location.href = 'vault.html';
-        };
-
-        wrapper.appendChild(btn);
-
-        if (isBand) {
-            artistContainer.appendChild(wrapper);
-            document.getElementById('artistsSection').classList.remove('hidden');
-        } else {
-            userContainer.appendChild(wrapper);
-            document.getElementById('journalsSection').classList.remove('hidden');
+        if (requestedMode) {
+            modeSelection.classList.add('hidden');
+            userListSection.classList.remove('hidden');
+            instruction.innerText = `Select ${requestedMode} Profile`;
+            loadUsers(requestedMode);
         }
-    });
-}
+
+        function loadUsers(mode) {
+            const csvPath = `data/users.csv?v=${new Date().getTime()}`;
+
+            Papa.parse(csvPath, {
+                download: true,
+                header: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    const container = document.getElementById('userList');
+                    const skeleton = document.getElementById('loadingSkeleton');
+                    container.innerHTML = '';
+                    if(skeleton) skeleton.classList.add('hidden');
+
+                    const filtered = results.data.filter(u => {
+                        if (!u.UserName && !u.user_name) return false;
+                        const rawType = (u.Type || '').trim().toLowerCase();
+                        const targetMode = mode.toLowerCase();
+
+                        // Map 'Individual' request to 'Personal' CSV data
+                        if (targetMode === 'individual') {
+                            return rawType === 'personal';
+                        }
+                        return rawType === targetMode;
+                    });
+
+                    if (filtered.length === 0) {
+                        container.innerHTML = `<p class="text-center text-slate-400 font-bold py-10">No ${mode} profiles found.</p>`;
+                        return;
+                    }
+
+                    filtered.forEach(user => {
+                        const name = user.UserName || user.user_name;
+                        const btn = document.createElement('button');
+                        btn.className = "w-full p-6 bg-white border-2 border-white hover:border-indigo-100 shadow-sm hover:shadow-xl transition-all duration-300 rounded-[2rem] flex justify-between items-center group";
+
+                        btn.innerHTML = `
+                            <div class="flex flex-col items-start text-left">
+                                <span class="text-[10px] text-slate-400 font-black uppercase tracking-widest mb-1 group-hover:text-indigo-600 transition-colors">
+                                    Archive
+                                </span>
+                                <span class="text-2xl font-black text-slate-900 tracking-tighter">${name}</span>
+                            </div>
+                            <div class="bg-slate-50 group-hover:bg-indigo-600 w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-300">
+                                <span class="text-slate-400 group-hover:text-white font-black">→</span>
+                            </div>
+                        `;
+
+                        btn.onclick = () => {
+                            localStorage.setItem('gv_user', JSON.stringify(user));
+                            window.location.href = 'vault.html';
+                        };
+
+                        container.appendChild(btn);
+                    });
+                }
+            });
+        }
     });
 </script>
 <script>

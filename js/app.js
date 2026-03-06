@@ -1,6 +1,10 @@
 /**
  * Gig List Core Engine
-  V2.6.0 - Release Date 2026-03-04
+ V2.6.1 - Release Date 2026-03-06
+        * -------------------------------------------------------------------
+ [UI/UX] Updated index page to show mode selection screen and then separate band and individual user lists.
+
+  V2.6.0 - Release Date 2026-03-05
         * -------------------------------------------------------------------
  [FEATURE] "Top Bands" leaderboard added to Individual Mode.
  [FIX] Successfully joined Journal and Performance data (Headline vs. Support).
@@ -607,8 +611,29 @@ window.openSettings = function() {
     if (modal) {
         modal.classList.remove('hidden');
         modal.setAttribute('aria-hidden', 'false');
-        // Trap focus for ARIA (Optional but good practice)
+
+        // 1. Locate the button specifically by ID (preferred) or by its common text
+        const switchUserBtn = document.getElementById('settings-switch-user') ||
+                             modal.querySelector('button[onclick*="index.html"]');
+
+        if (switchUserBtn) {
+            // 2. We use 'Individual' for the URL parameter because our index logic
+            // now knows to map 'Individual' requests to 'Personal' CSV data.
+            const mode = window.isBandMode ? 'Band' : 'Individual';
+
+            // 3. Wipe any existing inline onclick to prevent conflicts
+            switchUserBtn.onclick = null;
+
+            // 4. Assign the precise new navigation logic
+            switchUserBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                window.location.href = `index.html?mode=${mode}`;
+            }, { once: true }); // 'once' ensures no memory leaks if modal opens/closes often
+        }
+
+        // WCAG focus management
         document.getElementById('setlistIdInput')?.focus();
+
         if (window.lucide) lucide.createIcons();
     }
 };
@@ -677,11 +702,17 @@ window.handleSort = (column) => {
 };
 
 window.openTopBandsModal = () => {
-    // This calls your existing UI.js modal logic
-    UI.openChartModal('Top Bands Seen', (canvasId) => {
-        // Pass 'true' so the chart module knows to use the modal settings
-        Charts.renderTopBandsChart(window.journalData, window.performanceData, canvasId, true);
-    });
+    if (typeof UI.openChartModal === 'function') {
+        UI.openChartModal('Top Bands Seen', (canvasId) => {
+            // Use filteredResults if they exist, otherwise use all journalData
+            const dataToChart = (window.filteredResults && window.filteredResults.length > 0)
+                ? window.filteredResults
+                : window.journalData;
+
+            Charts.renderTopBandsChart(dataToChart, window.performanceData, canvasId, true);
+        });
+        if (window.lucide) lucide.createIcons();
+    }
 };
 
 import { GigPuzzle } from './modules/puzzle.js';
