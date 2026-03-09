@@ -1,5 +1,10 @@
 /**
  * Gig List Core Engine
+ V2.6.2 - Release Date 2026-03-09
+         * -------------------------------------------------------------------
+  [FIX] Fixed top bands modal that would only open once.
+  N.B - moved to using Claude having failed to resolve the issue after many attempts with Gemini and ChatGPT.
+
  V2.6.1 - Release Date 2026-03-06
         * -------------------------------------------------------------------
  [UI/UX] Updated index page to show mode selection screen and then separate band and individual user lists.
@@ -141,7 +146,7 @@ let currentUser = JSON.parse(localStorage.getItem('gv_user'));
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "2.6.0";
+const APP_VERSION = "2.6.2";
 
 window.toggleListView = UI.toggleListView;
 window.activeView = window.activeView || 'list';
@@ -702,20 +707,8 @@ window.handleSort = (column) => {
 };
 
 window.openTopBandsModal = () => {
-    if (typeof UI.openChartModal === 'function') {
-        UI.openChartModal('Top Bands Seen', (canvasId) => {
-            // Use filteredResults if they exist, otherwise use all journalData
-            const dataToChart = (window.filteredResults && window.filteredResults.length > 0)
-                ? window.filteredResults
-                : window.journalData;
-
-            Charts.renderTopBandsChart(dataToChart, window.performanceData, canvasId, true);
-        });
-        if (window.lucide) lucide.createIcons();
-    }
+    // Delegate to the charts.js modal controller, exactly like the year/companion buttons do
+    window.openChartModal('topbands');
 };
 
 import { GigPuzzle } from './modules/puzzle.js';
-
-
-

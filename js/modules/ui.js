@@ -361,8 +361,20 @@ export const openChartModal = (title, renderCallback) => {
     `;
 
     modal.classList.remove('hidden');
-    // Call the callback to render the chart into the new canvas
-    renderCallback('modalChartCanvas');
+
+    setTimeout(() => {
+        const canvas = document.getElementById('modalChartCanvas');
+
+        if (canvas && canvas.offsetWidth > 0) {
+            renderCallback('modalChartCanvas');
+        } else {
+            // If layout still hasn't resolved, wait one more frame
+            requestAnimationFrame(() => {
+                renderCallback('modalChartCanvas');
+            });
+        }
+
+    }, 80);
 };
 
 /**

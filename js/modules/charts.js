@@ -26,7 +26,12 @@ export const renderCompanionChart = (data, canvasId, isModal = false) => {
     const ctx = document.getElementById(canvasId);
     if (!ctx) return;
 
-    if (isModal && modalChartInstance) modalChartInstance.destroy();
+    const existingChart = Chart.getChart(ctx);
+    if (existingChart) existingChart.destroy();
+
+    if (!isModal && dashboardCompanionChart) {
+        dashboardCompanionChart.destroy();
+    }
     if (!isModal && dashboardCompanionChart) dashboardCompanionChart.destroy();
 
     // Requirement 1: Limit logic
@@ -86,8 +91,10 @@ export const renderCompanionChart = (data, canvasId, isModal = false) => {
     };
 
     const newChart = new Chart(ctx, chartConfig);
-    if (isModal) modalChartInstance = newChart;
-    else dashboardCompanionChart = newChart;
+
+    if (!isModal) {
+        dashboardCompanionChart = newChart;
+    }
 };
 
 /**
@@ -273,12 +280,39 @@ const renderMonthDrillDown = (data, year) => {
  */
 
 export const renderTopBandsChart = (journalData, performanceData, canvasId, isModal = false) => {
-    const ctx = document.getElementById(canvasId);
-    if (!ctx) return;
+    // 1. RE-ADD LOGGING
+    console.log("renderTopBandsChart START", canvasId);
 
-    if (isModal && modalChartInstance) modalChartInstance.destroy();
-    if (!isModal && dashboardTopBandsChart) dashboardTopBandsChart.destroy();
+    const canvas = document.getElementById(canvasId);
+    console.log("Canvas element found:", canvas);
 
+    if (!canvas) {
+        console.error("CRITICAL: Canvas not found in DOM:", canvasId);
+        return;
+    }
+
+    // 2. THE COLLAPSE FIX
+    // We removed the manual width/height overrides that caused the 0px bug.
+    // Instead, we ensure the canvas is visible before Chart.js touches it.
+
+    // 3. CLEANUP (Using the most reliable method)
+    const existingChart = Chart.getChart(canvas);
+    console.log("Existing chart on this canvas:", existingChart);
+
+    if (existingChart) {
+        console.log("Destroying existing chart instance...");
+        existingChart.destroy();
+    }
+
+    // Secondary cleanup for the global tracker
+    if (isModal && window.modalChartInstance) {
+        console.log("Destroying global modalChartInstance...");
+        window.modalChartInstance.destroy();
+        window.modalChartInstance = null;
+    }
+
+    // 4. DATA PROCESSING
+    console.log("Processing band stats...");
     const stats = Data.getBandAppearanceStats(journalData, performanceData);
     const topLimit = isModal ? 20 : 10;
 
@@ -286,10 +320,17 @@ export const renderTopBandsChart = (journalData, performanceData, canvasId, isMo
         .sort((a, b) => b[1].total - a[1].total)
         .slice(0, topLimit);
 
+    if (topTen.length === 0) {
+        console.warn("No data found to render chart.");
+        return;
+    }
+
+    const labels = topTen.map(t => t[0]);
+
     const chartConfig = {
         type: 'bar',
         data: {
-            labels: topTen.map(t => t[0]),
+            labels: labels,
             datasets: [
                 {
                     label: 'Headline',
@@ -313,24 +354,20 @@ export const renderTopBandsChart = (journalData, performanceData, canvasId, isMo
             maintainAspectRatio: false,
             plugins: {
                 legend: {
-                    display: isModal, // Only show legend in the expanded view
+                    display: isModal,
                     position: 'bottom',
                     labels: { boxWidth: 10, font: { size: 11, weight: 'bold' } }
                 },
                 tooltip: { enabled: true }
             },
             scales: {
-                x: {
-                    stacked: true,
-                    display: false, // Hide X axis entirely for that super-clean "progress bar" look
-                    grid: { display: false }
-                },
+                x: { stacked: true, display: false },
                 y: {
                     stacked: true,
                     grid: { display: false },
                     border: { display: false },
                     ticks: {
-                        crossAlign: 'far', // Aligns band names closer to the bars
+                        crossAlign: 'far',
                         font: { weight: '800', size: 12 },
                         color: '#64748b'
                     }
@@ -339,26 +376,33 @@ export const renderTopBandsChart = (journalData, performanceData, canvasId, isMo
             onClick: (evt, elements) => {
                 if (elements.length > 0) {
                     const index = elements[0].index;
-                    const bandName = topTen[index][0];
+                    const bandName = labels[index];
                     const searchInput = document.getElementById('searchInput');
                     if (searchInput) {
                         searchInput.value = bandName;
                         if (window.refreshUI) window.refreshUI();
-                        // Close modal using the global closer in app.js or ui.js
-                        const modal = document.getElementById('chartModal');
-                        if (modal) modal.classList.add('hidden');
-                        document.body.style.overflow = 'auto';
+                        if (typeof window.closeChartModal === 'function') {
+                            window.closeChartModal();
+                        }
                     }
                 }
             }
         }
     };
 
-    const newChart = new Chart(ctx, chartConfig);
-    if (isModal) modalChartInstance = newChart;
-    else dashboardTopBandsChart = newChart;
+    console.log("Initializing new Chart.js instance...");
+    try {
+        const newChart = new Chart(canvas, chartConfig);
+        if (isModal) {
+            window.modalChartInstance = newChart;
+        } else {
+            dashboardTopBandsChart = newChart;
+        }
+        console.log("Chart rendered successfully.");
+    } catch (err) {
+        console.error("Chart.js Initialization Error:", err);
+    }
 };
-
 /**
  * Global Modal Controller (Fixes Requirement 3)
  */
@@ -367,44 +411,72 @@ window.openChartModal = function(chartType) {
     const canvas = document.getElementById('modalChartCanvas');
     if (!modal || !canvas) return;
 
-    // 1. THE FIX: Find and destroy any existing instance on this specific canvas
+    // Always destroy any existing chart on this canvas
     const existingChart = Chart.getChart(canvas);
     if (existingChart) {
         existingChart.destroy();
     }
 
-    // 2. Show the modal
+    // Reset subtitle in case a drill-down left it in "Back to Yearly" state
+    const subtitle = modal.querySelector('p.text-slate-400');
+    if (subtitle) { subtitle.innerHTML = 'Interactive Data View'; subtitle.onclick = null; }
+
     modal.classList.remove('hidden');
     modal.style.display = 'flex';
     document.body.style.overflow = 'hidden';
 
-    // 3. Get Data
     const dataToUse = (window.filteredResults && window.filteredResults.length > 0)
-                      ? window.filteredResults
-                      : window.journalData;
+        ? window.filteredResults
+        : window.journalData;
 
-    // 4. Render based on type
     if (chartType === 'companion') {
+
         document.getElementById('modalChartTitle').innerText = "Companion Analysis";
         renderCompanionChart(dataToUse, 'modalChartCanvas', true);
+
     } else if (chartType === 'year') {
+
         document.getElementById('modalChartTitle').innerText = "Yearly Breakdown";
         renderYearChart(dataToUse, 'modalChartCanvas', true);
+
     } else if (chartType === 'songs') {
+
         document.getElementById('modalChartTitle').innerText = "Top Songs Leaderboard";
         renderTopSongsChart(dataToUse, 'modalChartCanvas', true);
+
+    } else if (chartType === 'topbands') {
+
+        document.getElementById('modalChartTitle').innerText = "Top Bands Leaderboard";
+        renderTopBandsChart(
+            dataToUse,
+            window.performanceData,
+            'modalChartCanvas',
+            true
+        );
     }
 
     if (window.lucide) lucide.createIcons();
 };
 
 window.closeChartModal = function() {
+
     const modal = document.getElementById('chartModal');
+    const canvas = document.getElementById('modalChartCanvas');
+
+    // Destroy any chart attached to the canvas
+    if (canvas) {
+        const existingChart = Chart.getChart(canvas);
+        if (existingChart) {
+            existingChart.destroy();
+        }
+    }
+
     if (modal) {
         modal.classList.add('hidden');
         modal.style.display = 'none';
-        document.body.style.overflow = 'auto';
     }
+
+    document.body.style.overflow = 'auto';
 };
 
 /**
