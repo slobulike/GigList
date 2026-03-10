@@ -101,6 +101,16 @@
     <section id="view-data" class="view-section hidden space-y-6" role="region" aria-labelledby="data-centre-title">
         <h2 id="data-centre-title" class="text-4xl font-black italic tracking-tighter text-slate-900">Data Centre</h2>
 
+        <div class="space-y-4 pt-4">
+            <div class="relative w-full">
+                <i data-lucide="search" class="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"></i>
+                <input type="text"
+                       id="searchInput"
+                       aria-label="Search for artists, venues, or songs"
+                       placeholder="Search artists, venues, or songs..."
+                       class="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all shadow-sm">
+            </div>
+
         <div class="grid grid-cols-3 gap-4">
             <div class="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-center">
                 <p class="text-xs text-slate-500 uppercase tracking-widest font-bold">Gigs</p>
@@ -175,15 +185,7 @@
             </div>
         </div>
 
-        <div class="space-y-4 pt-4">
-            <div class="relative w-full">
-                <i data-lucide="search" class="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"></i>
-                <input type="text"
-                       id="searchInput"
-                       aria-label="Search for artists, venues, or songs"
-                       placeholder="Search artists, venues, or songs..."
-                       class="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all shadow-sm">
-            </div>
+
 
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div class="flex bg-slate-100 p-1 rounded-2xl shadow-inner w-fit">

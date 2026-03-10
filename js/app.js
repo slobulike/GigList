@@ -1,142 +1,23 @@
 /**
  * Gig List Core Engine
+ V2.6.3 - Release Date 2026-03-10
+          * -------------------------------------------------------------------
+  [FEATURE] Added new band specific achievements.
+  [UI/UX] Moved Search box to top of Data tab
+
  V2.6.2 - Release Date 2026-03-09
          * -------------------------------------------------------------------
   [FIX] Fixed top bands modal that would only open once.
   N.B - moved to using Claude having failed to resolve the issue after many attempts with Gemini and ChatGPT.
 
- V2.6.1 - Release Date 2026-03-06
-        * -------------------------------------------------------------------
- [UI/UX] Updated index page to show mode selection screen and then separate band and individual user lists.
-
-  V2.6.0 - Release Date 2026-03-05
-        * -------------------------------------------------------------------
- [FEATURE] "Top Bands" leaderboard added to Individual Mode.
- [FIX] Successfully joined Journal and Performance data (Headline vs. Support).
- [FIX] Eliminated Weezer double-counting (31 reduced back to 20).
- [UI/UX] Added interactive filtering and "clean" hover-only expand buttons.
-
-  V2.5.5 - Release Date 2026-03-04
-        * -------------------------------------------------------------------
-    [FIX] Upcoming toggle no longer resets filter
-    [UI/UX] Deep Search Labels: Restored the "Support," "Festival," and "Setlist" badges.
-    [A11Y] Silenced the IDE warnings and kept the app WCAG-compliant with aria-labels
-
-  V2.5.4 - Release Date 2026-03-03
-       * -------------------------------------------------------------------
-     [UI/UX] Band mode quiz questions re-written
-     [FIX] Prevented duplicate questions in quiz
-     [FIX] Made sure song search results were returned
-
- V2.5.3 - Release Date 2026-02-26
-      * -------------------------------------------------------------------
-    [UI/UX] Band mode styling changes
-    [UI/UX] Song data now shown in band mode including new song chart
-    [FIX] Corrected calendar view to show tiles in grid instead of row
-    [FIX] Correct performances data (using python script) to align to journal key
-
- V2.5.2 - Release Date 2026-02-26
-     * -------------------------------------------------------------------
-     [UI/UX] Added "Show Type" to the Band mode to show festival, tv, or headline.
-     [UI/UX] Made data view table dynamic so columns are responsive depending on the view mode
-
-  V2.5.1 - Release Date 2026-02-25
-    * -------------------------------------------------------------------
-    [UI/UX] Switch labels to show song count instead of artist count when in band mode
-    [UI/UX] Make wording dynamic based on band mode to ensure this makes sense e.g x days since {venue} instead of x days since {band name}
-
-  V2.5.0 - Release Date 2026-02-24
-   * -------------------------------------------------------------------
-   [FEATURE] Added "Band Mode" with Weezer data loaded and available via the user list
-   [UI/UX] Added expanded map modal to allow full screen map display
-
-  V2.4.3 - Release Date 2026-02-19
-   * -------------------------------------------------------------------
-   [FIX] Map and venue coordinate updates
-
-  V2.4.2 - Release Date 2026-02-17
-  * -------------------------------------------------------------------
-  [UI/UX] Added album art from Cover Art Archive
-  [FEATURE] Slide puzzle game
-
-  V2.4.1 - Release Date 2026-02-17
- * -------------------------------------------------------------------
-    * [FIX] Small UI improvements to add back Camera icon for photo galleries
-    * [UI/UX] Improved Achievements logic
-    * [REFACTOR] Changed loading approach with delay to assist in initial load speed
-
- V2.4.0 - Release Date 2026-02-15
- * -------------------------------------------------------------------
-    * [REFACTOR] Re-write to use ES6 multiple JS files
-    * [UI/UX] Design System Standardization: Unified all section headers (Home, Data, Games)
-    * [UI/UX] Updated Calendar grid to a high-density 3-column layout for mobile (up to 12-column for desktop).
-    * [FEATURE] The Arena (Games Tab): Initial launch of the "Games" section.
-    * [FEATURE] Flashback Quiz: A high-speed memory game using personalized venue, date, and frequency data.
-    * [FEATURE] Integrated local high-score tracking via localStorage.
-    * [FEATURE] Performance "Wrapped" Overhaul: Completely redesigned the summary cards into high-fidelity "Wrapped" style visuals.
-        Added granular venue, year, and "Frequent Flyer" loyalty statistics.
-    * [FIX] Data Engine & Sorting: Fixed "Sticky Sort" regression: Reverse-chronological order now persists when switching between List, Map, and Calendar views.
-        Hardened date parsing logic to eliminate "NaN" errors in the Quiz and Stats modules.
-    * [FIX] Accessibility (WCAG):
-        Refined button contrast and ARIA states across the new navigation and game arena.
-    * [FIX] Layout Stability:
-        Resolved "Summary Card" overflow bugs on mobile devices.
-        Optimized container toggling in ui.js for smoother view transitions.
-
-
- V1.1.3 - Release Date 2026-02-09 PM
- * -------------------------------------------------------------------
-   * [FEATURE] Year chart expanded modal: Added monthly drill down
-
- V1.1.3 - Release Date 2026-02-09
- * -------------------------------------------------------------------
-  * [FIX] Companion chart modal: Updated large view with correct labels and count
-  * [FIX] User Settings modal: Updated format to fix layout
-
- V1.1.2 - Release Date 2026-02-08
- * -------------------------------------------------------------------
-  * [FEATURE] Intelligent Countdown: Dynamic ticker with last or next gig logic
-  * [FEATURE] Data Lab Expansion: Enable view of upcoming shows in data tab
-  * [FEATURE] Home Carousel Update: New cards added for upcoming shows and festivals
-  * [FIX] Seen Count: Ensures that all appearances across headline, support and festivals are included
-  * [FIX] Scroll-Lock Fix: Resolved issue where scroll on data tab was not enabled after viewing details
-  * [FIX] Leaflet (Map) initial load: Improvement to page load for map to improve load time and first load
-  * [A11Y] ARIA labels: Future Toggle and Carousel cards
-
-
- V1.1.1 - Release Date 2026-02-07
- * -------------------------------------------------------------------
- * [FEATURE] Calendar Drill-Down: Interactive month detail "flip" cards
- * added to the year view, enabling direct modal access.
- * [FEATURE] Dynamic Ticket Variants: Implemented deterministic pastel
- * color-ways (Pink, Green, Yellow) and portrait/landscape
- * layouts for the "Mosh-Pit" ticket generator.
- * [A11Y]    Accessibility Gold Standard: Managed focus on modal open,
- * ARIA roles for charts/tickets, and screen-reader labels
- * for the calendar grid.
- * [FIX]     Cumulative Search: Search and companion-chart filters
- * now correctly query "Went With" data.
- * [FIX]     Home Page Baseline: Restored "Throwback" memory triggers
- * within the UI refresh router.
- * [CORE]    Automated Versioning: Linked UI build number to APP_VERSION
- * variable to eliminate hardcoding.
-
- V1.1.0 - Release Date 2026-02-05
- * -------------------------------------------------------------------
- Feature: "Mosh-Pit" Ticket Generation (Automatic fallback for missing photos).
- Feature: High-Res Chart Overlays (Interactive full-screen analytics).
- Feature: YouTube "Watch Clips" integration (Contextual live video search).
- Logic: Enhanced Festival Mode layout for multi-band days.
- Bugfix: Standardized "Festival?" field detection and chart legend labels.
-
- */
+*/
 
 import * as Data from './modules/data.js';
 import * as Charts from './modules/charts.js';
 import * as Utils from './modules/utils.js';
 import * as UI from './modules/ui.js';
 import { parseDate } from './modules/utils.js';
-import { renderBadges } from './modules/achievements.js';
+import { renderBadges, renderBandBadges } from './modules/achievements.js';
 import { renderCalendar } from './modules/calendar.js';
 import './modules/quiz.js';
 import * as Games from './modules/games.js';
@@ -276,6 +157,7 @@ function refreshUI() {
         if (companionContainer) companionContainer.classList.add('hidden');
         if (topBandsContainer) topBandsContainer.classList.add('hidden');
 
+
     } else {
         // --- INDIVIDUAL MODE VIEW ---
         // Hide Song stats, show personal stats
@@ -306,6 +188,19 @@ function refreshUI() {
 
     // 7. Refresh Icons
     if (window.lucide) lucide.createIcons();
+
+    // 8. Band achievements
+    const badgeGrid = document.getElementById('badges-grid');
+
+    if (badgeGrid) {
+        if (window.isBandMode) {
+            console.log("Forcing Band Badge Render...");
+            renderBandBadges(window.performanceData || []);
+        } else {
+            // Calling the original version
+            renderBadges(window.filteredResults || window.journalData);
+        }
+    }
 }
 
 // Ensure the checkbox triggers the refresh
@@ -455,14 +350,21 @@ window.switchView = (viewId) => {
     }
 
     // 3. TRIGGER RENDERING
-    if (viewId === 'calendar') {
-        console.log("Rendering Calendar...");
-        renderCalendar(window.journalData);
-    }
+        if (viewId === 'calendar') {
+            console.log("Rendering Calendar...");
+            renderCalendar(window.journalData);
+        }
 
-    if (viewId === 'achievements') {
-        renderBadges(window.journalData);
-    }
+        if (viewId === 'achievements') {
+            // --- ADD THE TOGGLE HERE ---
+            if (window.isBandMode) {
+                console.log("Rendering BAND Achievements...");
+                renderBandBadges(window.performanceData);
+            } else {
+                console.log("Rendering PERSONAL Achievements...");
+                renderBadges(window.journalData);
+            }
+        }
 
     window.scrollTo(0, 0);
 };
