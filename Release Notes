@@ -1,3 +1,13 @@
+  V2.6.3 - Release Date 2026-03-10
+           * -------------------------------------------------------------------
+   [FEATURE] Added new band specific achievements.
+   [UI/UX] Moved Search box to top of Data tab
+
+  V2.6.2 - Release Date 2026-03-09
+          * -------------------------------------------------------------------
+   [FIX] Fixed top bands modal that would only open once.
+   N.B - moved to using Claude having failed to resolve the issue after many attempts with Gemini and ChatGPT.
+
  V2.6.1 - Release Date 2026-03-06
         * -------------------------------------------------------------------
  [UI/UX] Updated index page to show mode selection screen and then separate band and individual user lists.

@@ -66,9 +66,11 @@ export const loadAppData = async (user) => {
         return str.replace(/'/g, "\\'").replace(/"/g, "&quot;");
     };
 
-    const [journalRes, perfRes] = await Promise.all([
+    // 1. Fetch all three data sources in parallel
+    const [journalRes, perfRes, venueLookup] = await Promise.all([
         fetch(journalUrl),
-        fetch(perfUrl)
+        fetch(perfUrl),
+        loadVenues() // This is your existing function that returns the lookup object
     ]);
 
     const [journalResult, performanceResult] = await Promise.all([
@@ -76,13 +78,30 @@ export const loadAppData = async (user) => {
         perfRes.text().then(text => Papa.parse(text, { header: true, skipEmptyLines: true }))
     ]);
 
-    journalData = journalResult.data;
-    performanceData = performanceResult.data;
+    let journalData = journalResult.data;
+    let performanceData = performanceResult.data;
 
-    journalData.forEach(g => {
-        g.Band = g.Band || g.Artist;
-        g.type = 'past';
-        g.safeKey = escapeHTMLAttr(g['Journal Key'] || "");
+    // 2. Standardize and Enrich Journal Data
+    journalData.forEach(row => { // Ensure this says 'row'
+        row.Band = row.Band || row.Artist;
+        row.type = 'past';
+        row.safeKey = escapeHTMLAttr(row['Journal Key'] || "");
+
+        // Match geography from the venueLookup
+        const venueInfo = venueLookup[row.OfficialVenue];
+        if (venueInfo) {
+            row.City = venueInfo.city || "";
+            row.Country = venueInfo.country || "";
+        }
+    });
+
+    // 3. Enrich Performance Data
+    performanceData.forEach(perf => {
+        const venueInfo = venueLookup[perf.OfficialVenue];
+        if (venueInfo) {
+            perf.City = venueInfo.city || "";
+            perf.Country = venueInfo.country || "";
+        }
     });
 
     return { journalData, performanceData, user };
@@ -156,7 +175,15 @@ export const filterGigs = (query, data, includeFuture = false) => {
         const gigDate = parseDate(row.Date);
         const matchFuture = includeFuture ? true : (gigDate && gigDate <= now);
 
-        const basicMatch = `${band} ${row.OfficialVenue || ""} ${row.Companion || row['Went With'] || ""}`.toLowerCase().includes(q);
+        // --- UPDATED: Added row.City and row.Country to basicMatch ---
+        const basicMatch = `
+            ${band}
+            ${row.OfficialVenue || ""}
+            ${row.Companion || row['Went With'] || ""}
+            ${row.City || ""}
+            ${row.Country || ""}
+        `.toLowerCase().includes(q);
+
         const isVisible = (basicMatch || hasSongMatch || isFestivalMatch || isSupportMatch) && matchFuture;
 
         // 3. Return the enriched object
@@ -182,23 +209,27 @@ export const loadVenues = async () => {
             complete: (results) => {
                 const lookup = {};
                 results.data.forEach(v => {
+                    // Using OfficialName as our primary key
                     if (v.OfficialName) {
                         lookup[v.OfficialName] = {
                             lat: parseFloat(v.Latitude),
-                            lng: parseFloat(v.Longitude)
+                            lng: parseFloat(v.Longitude),
+                            // Handle the Pandas merge suffixes
+                            city: v.City_y || v.City_x || v.District || "Unknown City",
+                            country: v.Country || "Unknown Country",
+                            capacity: v.Capacity || "Unknown"
                         };
                     }
                 });
-                console.log(`Loaded ${Object.keys(lookup).length} venues for mapping.`);
+                window.allVenues = lookup; // Store globally for Achievements
+                console.log(`Loaded ${Object.keys(lookup).length} enriched venues.`);
                 resolve(lookup);
             },
-            error: (err) => {
-                console.error("Error loading venues.csv:", err);
-                reject(err);
-            }
+            error: (err) => reject(err)
         });
     });
 };
+
 /**
  * Aggregates band appearance statistics across headline and performance data.
  * Updated to filter against the user's actual journal keys.

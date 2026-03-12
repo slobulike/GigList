@@ -7,5 +7,7 @@ UserID,UserName,JournalFile,Rank,Type,Subject
 6,Chris,journal_chris.csv,7,Personal,
 7,Al,journal_al.csv,5,Personal,
 8,Phil,journal_phil.csv,8,Personal,
+11,Venetia,journal_noobrown1.csv,9,Personal,
 
 9,Weezer,journal_weezer.csv,1,Band,Weezer
+10,New Found Glory,journal_new_found_glory.csv,2,Band,New Found Glory

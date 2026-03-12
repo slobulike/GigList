@@ -1,15 +1,9 @@
 /**
  * Gig List Core Engine
- V2.6.3 - Release Date 2026-03-10
+ V2.6.4 - Release Date 2026-03-12
           * -------------------------------------------------------------------
-  [FEATURE] Added new band specific achievements.
-  [UI/UX] Moved Search box to top of Data tab
-
- V2.6.2 - Release Date 2026-03-09
-         * -------------------------------------------------------------------
-  [FIX] Fixed top bands modal that would only open once.
-  N.B - moved to using Claude having failed to resolve the issue after many attempts with Gemini and ChatGPT.
-
+  [FEATURE] Enriched venue data with city and country, and made searchable field.
+  [FEATURE] Added New Found Glory as artist
 */
 
 import * as Data from './modules/data.js';
@@ -27,7 +21,7 @@ let currentUser = JSON.parse(localStorage.getItem('gv_user'));
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "2.6.2";
+const APP_VERSION = "2.6.4";
 
 window.toggleListView = UI.toggleListView;
 window.activeView = window.activeView || 'list';
