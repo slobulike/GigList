@@ -1,3 +1,10 @@
+   /**
+
+   V2.6.4 - Release Date 2026-03-12
+            * -------------------------------------------------------------------
+    [FEATURE] Enriched venue data with city and country, and made searchable field.
+    [FEATURE] Added New Found Glory as artist
+
   V2.6.3 - Release Date 2026-03-10
            * -------------------------------------------------------------------
    [FEATURE] Added new band specific achievements.

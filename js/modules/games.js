@@ -2,27 +2,29 @@
 import { GigPuzzle } from './puzzle.js';
 
 export const switchGame = (gameType) => {
-    const quizSection = document.getElementById('quiz-container');
+    const quizSection   = document.getElementById('quiz-container');
     const puzzleSection = document.getElementById('puzzle-section');
-    const navQuiz = document.getElementById('nav-quiz');
-    const navPuzzle = document.getElementById('nav-puzzle');
+    const navQuiz       = document.getElementById('nav-quiz');
+    const navPuzzle     = document.getElementById('nav-puzzle');
+
+    // Guard against missing DOM elements
+    if (!quizSection || !puzzleSection || !navQuiz || !navPuzzle) return;
+
+    const activeClass   = "px-3 py-1 text-[10px] font-black uppercase rounded-full bg-white shadow-sm text-indigo-600";
+    const inactiveClass = "px-3 py-1 text-[10px] font-black uppercase rounded-full text-slate-500 hover:text-slate-700";
 
     if (gameType === 'quiz') {
         quizSection.classList.remove('hidden');
         puzzleSection.classList.add('hidden');
-
-        // Active Styles
-        navQuiz.className = "px-3 py-1 text-[10px] font-black uppercase rounded-full bg-white shadow-sm text-indigo-600";
-        navPuzzle.className = "px-3 py-1 text-[10px] font-black uppercase rounded-full text-slate-500 hover:text-slate-700";
+        navQuiz.className   = activeClass;
+        navPuzzle.className = inactiveClass;
     } else {
         quizSection.classList.add('hidden');
         puzzleSection.classList.remove('hidden');
+        navPuzzle.className = activeClass;
+        navQuiz.className   = inactiveClass;
 
-        // Active Styles
-        navPuzzle.className = "px-3 py-1 text-[10px] font-black uppercase rounded-full bg-white shadow-sm text-indigo-600";
-        navQuiz.className = "px-3 py-1 text-[10px] font-black uppercase rounded-full text-slate-500 hover:text-slate-700";
-
-        // Auto-start if empty
+        // Auto-start if the grid is empty
         const grid = document.getElementById('puzzle-grid');
         if (grid && !grid.hasChildNodes()) {
             window.startNewPuzzle();
@@ -34,45 +36,48 @@ export const startNewPuzzle = async () => {
     const data = window.journalData;
     if (!data || data.length === 0) return;
 
-    // 1. Pick a random gig from the CURRENT user's journal
-    const randomGig = data[Math.floor(Math.random() * data.length)];
+    // Pick a random gig, guarding against missing fields
+    const candidates = data.filter(g => g.Date && g.OfficialVenue && g.Band);
+    if (candidates.length === 0) return;
 
-    // 2. Format the Scrapbook Path: yyyy-mm-dd-venue.jpg
-    const [d, m, y] = randomGig.Date.split('/');
+    const randomGig = candidates[Math.floor(Math.random() * candidates.length)];
+
+    // Build scrapbook path: assets/scrapbook/yyyy-mm-dd-venue-slug.jpg
+    const [d, m, y]   = randomGig.Date.split('/');
     const formattedDate = `${y}-${m}-${d}`;
-    const cleanVenue = randomGig.OfficialVenue
+    const cleanVenue    = randomGig.OfficialVenue
         .toLowerCase()
         .replace(/[^a-z0-9]/g, '-')
-        .replace(/-+/g, '-');
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '');
 
     const scrapbookPath = `assets/scrapbook/${formattedDate}-${cleanVenue}.jpg`;
 
-    // 3. Define the Fallback: artist_name_stock_photo.jpg
+    // Fallback: artist stock photo
     const cleanArtist = randomGig.Band.toLowerCase().replace(/\s+/g, '_');
     const fallbackPath = `assets/artists/${cleanArtist}_stock_photo.jpg`;
 
-    // 4. Verify which image exists
     const imageToUse = await determineImagePath(scrapbookPath, fallbackPath);
-
-    console.log(`🧩 Puzzle assigned: ${imageToUse}`);
 
     try {
         new GigPuzzle('puzzle-grid', imageToUse);
     } catch (e) {
-        console.error("Puzzle failed to initialize", e);
+        console.error("Puzzle failed to initialize:", e);
     }
 };
 
-// Helper to check if a file exists before trying to load it in the puzzle
+// Guaranteed fallback — an Unsplash concert photo that is always available
+const DEFAULT_PUZZLE_IMAGE = 'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?auto=format&fit=crop&w=800&q=75';
+
+// Probes image paths with HEAD requests to find the first one that exists
 async function determineImagePath(primary, fallback) {
     try {
-        const response = await fetch(primary, { method: 'HEAD' });
-        if (response.ok) return primary;
+        const res = await fetch(primary, { method: 'HEAD' });
+        if (res.ok) return primary;
 
-        // If primary fails, check fallback
-        const fallbackResponse = await fetch(fallback, { method: 'HEAD' });
-        return fallbackResponse.ok ? fallback : 'assets/default-gig-photo.jpg';
-    } catch (e) {
-        return fallback; // Default to fallback on network error
+        const fallbackRes = await fetch(fallback, { method: 'HEAD' });
+        return fallbackRes.ok ? fallback : DEFAULT_PUZZLE_IMAGE;
+    } catch {
+        return DEFAULT_PUZZLE_IMAGE;
     }
 }

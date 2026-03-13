@@ -197,9 +197,27 @@ export const renderCarouselItem = (index, carouselData, fullData) => {
 
     let subtext = item.details;
     if (item.isFuture) {
-        const count = getGlobalSeenCount(item.band, fullData);
         const isFest = item['Festival?']?.trim().toUpperCase().startsWith('Y');
-        subtext = count > 0 ? `🔥 ${isFest ? 'Been' : 'Seen'} ${count} times before` : `✨ First time seeing them!`;
+        const verb = isFest ? 'Been' : 'Seen';
+
+        // Count only PAST shows for this band, excluding this future show itself
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const pastCount = fullData.filter(g =>
+            (g.Band || g.band || '').toLowerCase() === (item.band || '').toLowerCase()
+            && parseDate(g.Date) < today
+        ).length;
+
+        // This upcoming show will be their (pastCount + 1)th show
+        const nextCount = pastCount + 1;
+
+        if (pastCount === 0) {
+            subtext = isFest ? `✨ First time going!` : `✨ First time seeing them!`;
+        } else if (nextCount === 5 || nextCount === 10 || nextCount === 25 || nextCount === 50 || nextCount === 100) {
+            subtext = `🏆 This will be ${isFest ? 'visit' : 'show'} #${nextCount} — Achievement incoming!`;
+        } else {
+            subtext = `🔥 ${verb} ${pastCount} time${pastCount !== 1 ? 's' : ''} before`;
+        }
     }
 
     card.innerHTML = `
