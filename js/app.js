@@ -1,9 +1,12 @@
 /**
  * Gig List Core Engine
- V2.7.0 - Release Date 2026-03-13
+ V2.7.1 - Release Date 2026-03-14
           * -------------------------------------------------------------------
-  [REFACTOR] All js code reviewed by Claude.
-  [FIX] Future shows on carousel now use correct language e.g. been to festivals, seen artists
+  [REFACTOR] Updated CDN URL to correctly invoke the Tailwind Play CDN and stop warning in console
+  [UI/UX] Add "On this Day" banner
+  [UI/UX] Add show countdown card
+  [UI/UX] Update carousel card "pill"
+  [UI/UX] Wrapped re-design
 */
 
 import * as Data from './modules/data.js';
@@ -20,7 +23,7 @@ let currentUser = JSON.parse(localStorage.getItem('gv_user'));
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "2.6.4";
+const APP_VERSION = "2.7.1";
 
 window.toggleListView = UI.toggleListView;
 window.activeView = window.activeView || 'list';
@@ -52,28 +55,35 @@ export async function initApp() {
 
         const topHeader = document.querySelector('header');
         if (topHeader) {
-            topHeader.style.position = 'relative';
-            topHeader.classList.add('bg-[#189BCC]', 'text-white', 'border-b-2', 'border-black/10');
+            // Do NOT override position — header must stay fixed in both modes
+            topHeader.classList.add('bg-[#189BCC]', 'border-b-2', 'border-black/10');
+            // Remove the white/blur default so the band colour shows through cleanly
+            topHeader.classList.remove('bg-white/80', 'backdrop-blur-xl');
 
-            const logoText = topHeader.querySelector('h1');
-            if (logoText) logoText.setAttribute('style', 'display: none !important');
+            // Tint the logo icon to match
+            const logoIcon = document.getElementById('header-logo-icon');
+            if (logoIcon) {
+                logoIcon.style.backgroundColor = 'rgba(255,255,255,0.2)';
+                logoIcon.style.boxShadow = 'none';
+            }
 
+            // Update the merged title to show the band name
+            const titleEl = document.getElementById('header-page-title');
+            if (titleEl) {
+                titleEl.textContent = window.currentArtist || 'Artist Archive';
+                titleEl.style.color = 'white';
+            }
+
+            // Date line in white too
+            const dateEl = document.getElementById('header-date-display');
+            if (dateEl) dateEl.style.color = 'rgba(255,255,255,0.7)';
+
+            // Style the user badge for the band colour header
             const badge = document.getElementById('userIdentity');
             if (badge) {
                 badge.style.color = 'white';
                 badge.style.backgroundColor = 'rgba(255,255,255,0.2)';
             }
-
-            // Inject "Archive Mode" indicator
-            const oldIndicator = document.getElementById('archive-indicator');
-            if (oldIndicator) oldIndicator.remove();
-
-            const indicator = document.createElement('div');
-            indicator.id = 'archive-indicator';
-            indicator.className = 'absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2 text-white font-black text-xs tracking-widest uppercase';
-            indicator.setAttribute('aria-label', 'Artist Archive Mode');
-            indicator.innerText = '⚡ ARTIST ARCHIVE ⚡';
-            topHeader.appendChild(indicator);
         }
     }
 
@@ -114,6 +124,7 @@ function refreshUI() {
     UI.updateStats(results);
     UI.updateRank(results);
     UI.updateTicker(results);
+    UI.renderOTDBanner(results);
     UI.renderCarousel(results);
     UI.renderTable(sortedResults);
 
@@ -170,6 +181,7 @@ window.loadThrowback = (gigs) => {
         .sort((a, b) => parseDate(b.Date) - parseDate(a.Date));
 
     UI.updateTicker(gigs);
+    UI.renderOTDBanner(gigs);
 
     const futureItems = upcomingGigs.map(g => ({ ...g, type: 'upcoming', isFuture: true }));
 

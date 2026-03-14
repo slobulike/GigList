@@ -44,36 +44,41 @@ const safelyLoadImage = (imgElement, path, fallbackFn) => {
 /* --- DASHBOARD & TICKER --- */
 
 export const updateCurrentDate = () => {
-    const dateEl = document.getElementById('current-date-display');
+    const dateEl = document.getElementById('header-date-display');
     if (!dateEl) return;
     const now = new Date();
     dateEl.innerText = now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
 };
 
 export const updateStats = (data) => {
-    // 1. Target the specific IDs
-    const homeHeader = document.getElementById('home-welcome-title');
-    const artistLabel = document.getElementById('stat-artist-label');
-    const dcArtistLabel = document.getElementById('dc-stat-artists-label');
+    const headerTitle  = document.getElementById('header-page-title');
+    const artistLabel    = document.getElementById('stat-artist-label');
+    const dcArtistLabel  = document.getElementById('dc-stat-artists-label');
+
+    // Per-artist brand colours used in band mode header
     const bandColors = {
-        'Weezer': '#00ADEF',
-        'Frank Turner': '#1D3557',
+        'Weezer':          '#00ADEF',
+        'Frank Turner':    '#1D3557',
         'New Found Glory': '#E63946'
     };
 
+    // Update the merged header title to reflect current mode
+    if (headerTitle && !window.isBandMode) {
+        // Individual mode: always show "For You" (band mode title is set once at init)
+        headerTitle.textContent = 'For You';
+        headerTitle.style.color = '';
+    }
+
+    // In band mode, apply the per-band header colour on every stats refresh
     if (window.isBandMode) {
-        const brandColor = bandColors[window.currentArtist] || '#6366f1';
+        const brandColor = bandColors[window.currentArtist] || '#189BCC';
         const topHeader = document.querySelector('header');
         if (topHeader) topHeader.style.backgroundColor = brandColor;
     }
 
-    // 2. Handle Header and Labels
-    if (homeHeader) {
-        homeHeader.textContent = window.isBandMode ? (window.bandName || "Band Archive") : "For You";
-    }
-
-    const artistText = window.isBandMode ? "Songs" : "Artists";
-    if (artistLabel) artistLabel.textContent = artistText;
+    // Labels: "Artists" in individual mode, "Songs" in band mode
+    const artistText = window.isBandMode ? 'Songs' : 'Artists';
+    if (artistLabel)   artistLabel.textContent   = artistText;
     if (dcArtistLabel) dcArtistLabel.textContent = artistText;
 
     // 3. Calculate Core Stats
@@ -117,58 +122,98 @@ export const updateRank = (data) => {
 };
 
 
+export const renderOTDBanner = (data) => {
+    const banner   = document.getElementById('otd-banner');
+    const mainEl   = document.getElementById('otd-main');
+    const subEl    = document.getElementById('otd-sub');
+    const yearsEl  = document.getElementById('otd-years-num');
+    if (!banner) return;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayDay   = today.getDate();
+    const todayMonth = today.getMonth() + 1;
+    const thisYear   = today.getFullYear();
+
+    // Find past gigs on exactly this calendar day in a previous year
+    const matches = data.filter(g => {
+        if (!g.Date) return false;
+        const parts = g.Date.split('/');
+        if (parts.length !== 3) return false;
+        const [d, m, y] = parts.map(Number);
+        return d === todayDay && m === todayMonth && y < thisYear;
+    }).sort((a, b) => {
+        // Show the most recent anniversary (largest year) first
+        const [,,ya] = a.Date.split('/').map(Number);
+        const [,,yb] = b.Date.split('/').map(Number);
+        return yb - ya;
+    });
+
+    if (matches.length === 0) {
+        banner.classList.add('hidden');
+        return;
+    }
+
+    const gig      = matches[0];
+    const [,,gigYear] = gig.Date.split('/').map(Number);
+    const yearsAgo = thisYear - gigYear;
+    const artistName = gig.Band || gig.band || 'Unknown Artist';
+
+    if (mainEl) mainEl.textContent = `${artistName} · ${gig.OfficialVenue}`;
+    if (subEl)  subEl.textContent  = `${gig.Date} — ${yearsAgo} year${yearsAgo !== 1 ? 's' : ''} ago today`;
+    if (yearsEl) yearsEl.textContent = yearsAgo;
+
+    banner.classList.remove('hidden');
+    if (window.lucide) lucide.createIcons();
+};
+
 export const updateTicker = (data) => {
-    const tickerEl = document.getElementById('global-ticker');
-    if (!tickerEl) return;
+    const eyebrowEl = document.getElementById('countdown-eyebrow');
+    const mainEl    = document.getElementById('countdown-main');
+    const subEl     = document.getElementById('countdown-sub');
+    const numEl     = document.getElementById('countdown-num');
+    const unitEl    = document.getElementById('countdown-unit');
+    const card      = document.getElementById('countdown-card');
+    if (!card) return;
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    // 1. Sort and Filter
-    const upcomingGigs = data.filter(g => parseDate(g.Date) >= today).sort((a, b) => parseDate(a.Date) - parseDate(b.Date));
-    const pastGigs = data.filter(g => parseDate(g.Date) < today).sort((a, b) => parseDate(b.Date) - parseDate(a.Date));
+    const upcomingGigs = data.filter(g => parseDate(g.Date) >= today)
+        .sort((a, b) => parseDate(a.Date) - parseDate(b.Date));
+    const pastGigs = data.filter(g => parseDate(g.Date) < today)
+        .sort((a, b) => parseDate(b.Date) - parseDate(a.Date));
 
-    // 2. Identify Target Data
     const nextGig = upcomingGigs[0];
     const lastGig = pastGigs[0];
 
-    // 3. Band Mode Label Overrides (Stats Cards)
-    const sinceLabel = document.getElementById('days-since-label');
-    const untilLabel = document.getElementById('days-until-label');
-    const sinceVenue = document.getElementById('days-since-venue');
-    const untilVenue = document.getElementById('days-until-venue');
-
-    if (window.isBandMode) {
-        if (sinceLabel) sinceLabel.textContent = "Days since last show";
-        if (untilLabel) untilLabel.textContent = "Days until next show";
-        if (sinceVenue && lastGig) sinceVenue.textContent = lastGig.OfficialVenue;
-        if (untilVenue && nextGig) untilVenue.textContent = nextGig.OfficialVenue;
-    }
-
-    // 4. Update the Ticker Content (Now runs for BOTH modes)
     if (nextGig) {
         const days = Math.ceil((parseDate(nextGig.Date) - today) / (1000 * 60 * 60 * 24));
-        // In Band Mode, use Venue. In Personal Mode, use Band name.
         const mainText = window.isBandMode ? nextGig.OfficialVenue : nextGig.Band;
+        const subText  = window.isBandMode
+            ? nextGig.Date
+            : `${nextGig.OfficialVenue} · ${nextGig.Date}`;
 
-        tickerEl.innerHTML = `
-            <div class="flex flex-col items-center w-full">
-                <div class="flex items-center text-[11px] font-black tracking-[0.2em] mb-1 opacity-60 uppercase">
-                    <span class="text-emerald-500 animate-pulse mr-2">●</span> ${days} ${days === 1 ? 'DAY' : 'DAYS'} UNTIL
-                </div>
-                <div class="text-slate-900 font-black italic text-sm tracking-tight">${mainText.toUpperCase()}</div>
-            </div>`;
+        card.className = 'bg-indigo-600 rounded-[1.5rem] p-4 flex items-center justify-between';
+        if (eyebrowEl) { eyebrowEl.textContent = 'Next show'; eyebrowEl.className = 'text-[9px] font-black text-indigo-300 uppercase tracking-widest mb-1'; }
+        if (mainEl)    { mainEl.textContent = mainText; mainEl.className = 'text-lg font-black text-white leading-tight'; }
+        if (subEl)     { subEl.textContent = subText;   subEl.className = 'text-[10px] font-bold text-indigo-300 mt-0.5'; }
+        if (numEl)     { numEl.textContent = days;      numEl.className = 'text-4xl font-black text-white leading-none tracking-tighter'; }
+        if (unitEl)    { unitEl.textContent = days === 1 ? 'day' : 'days'; unitEl.className = 'text-[9px] font-black text-indigo-300 uppercase tracking-widest'; }
+
     } else if (lastGig) {
         const days = Math.floor((today - parseDate(lastGig.Date)) / (1000 * 60 * 60 * 24));
         const mainText = window.isBandMode ? lastGig.OfficialVenue : lastGig.Band;
+        const subText  = window.isBandMode
+            ? lastGig.Date
+            : `${lastGig.OfficialVenue} · ${lastGig.Date}`;
 
-        tickerEl.innerHTML = `
-            <div class="flex flex-col items-center w-full">
-                <div class="flex items-center text-[11px] font-black tracking-[0.2em] mb-1 opacity-60 uppercase">
-                    <span class="text-slate-300 mr-2">○</span> ${days} ${days === 1 ? 'DAY' : 'DAYS'} SINCE
-                </div>
-                <div class="text-slate-600 font-black italic text-sm tracking-tight">${mainText.toUpperCase()}</div>
-            </div>`;
+        card.className = 'bg-slate-700 rounded-[1.5rem] p-4 flex items-center justify-between';
+        if (eyebrowEl) { eyebrowEl.textContent = 'Last show'; eyebrowEl.className = 'text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1'; }
+        if (mainEl)    { mainEl.textContent = mainText; mainEl.className = 'text-lg font-black text-white leading-tight'; }
+        if (subEl)     { subEl.textContent = subText;   subEl.className = 'text-[10px] font-bold text-slate-400 mt-0.5'; }
+        if (numEl)     { numEl.textContent = days;      numEl.className = 'text-4xl font-black text-white leading-none tracking-tighter'; }
+        if (unitEl)    { unitEl.textContent = days === 1 ? 'day ago' : 'days ago'; unitEl.className = 'text-[9px] font-black text-slate-400 uppercase tracking-widest'; }
     }
 };
 
@@ -196,11 +241,11 @@ export const renderCarouselItem = (index, carouselData, fullData) => {
     const hoverClass = item.isFuture ? 'group-hover:text-emerald-400' : 'group-hover:text-indigo-400';
 
     let subtext = item.details;
+    let showNumberPill = '';
     if (item.isFuture) {
         const isFest = item['Festival?']?.trim().toUpperCase().startsWith('Y');
         const verb = isFest ? 'Been' : 'Seen';
 
-        // Count only PAST shows for this band, excluding this future show itself
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         const pastCount = fullData.filter(g =>
@@ -208,7 +253,6 @@ export const renderCarouselItem = (index, carouselData, fullData) => {
             && parseDate(g.Date) < today
         ).length;
 
-        // This upcoming show will be their (pastCount + 1)th show
         const nextCount = pastCount + 1;
 
         if (pastCount === 0) {
@@ -217,6 +261,11 @@ export const renderCarouselItem = (index, carouselData, fullData) => {
             subtext = `🏆 This will be ${isFest ? 'visit' : 'show'} #${nextCount} — Achievement incoming!`;
         } else {
             subtext = `🔥 ${verb} ${pastCount} time${pastCount !== 1 ? 's' : ''} before`;
+        }
+
+        // Only show the number pill from show #2 onwards
+        if (nextCount > 1) {
+            showNumberPill = `<span class="bg-emerald-400/90 text-emerald-950 font-black text-[9px] uppercase tracking-widest px-3 py-1 rounded-full">${isFest ? 'Visit' : 'Show'} #${nextCount}</span>`;
         }
     }
 
@@ -247,7 +296,11 @@ export const renderCarouselItem = (index, carouselData, fullData) => {
                             ${item.band}
                         </h3>
                         <p class="text-slate-300 font-bold text-sm">${item.details}</p>
-                        ${item.isFuture ? `<p class="text-emerald-400 font-black text-[10px] uppercase mt-2 tracking-widest">${subtext}</p>` : ''}
+                        ${item.isFuture ? `
+                        <div class="flex items-center gap-2 mt-2 flex-wrap">
+                            <span class="bg-white/15 border border-white/25 text-white font-black text-[9px] uppercase tracking-widest px-3 py-1 rounded-full">${subtext}</span>
+                            ${showNumberPill}
+                        </div>` : ''}
                     </div>
 
                     <div class="flex gap-1.5 mt-6">

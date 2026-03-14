@@ -1,6 +1,10 @@
-   /**
+  /**
+  V2.7.0 - Release Date 2026-03-13
+          * -------------------------------------------------------------------
+  [REFACTOR] All js code reviewed by Claude.
+  [FIX] Future shows on carousel now use correct language e.g. been to festivals, seen artists
 
-   V2.6.4 - Release Date 2026-03-12
+  V2.6.4 - Release Date 2026-03-12
             * -------------------------------------------------------------------
     [FEATURE] Enriched venue data with city and country, and made searchable field.
     [FEATURE] Added New Found Glory as artist

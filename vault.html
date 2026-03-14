@@ -5,13 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gig List - Your Musical Journey</title>
 
+    <script>tailwind = { corePlugins: { preflight: true } };</script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" media="print" onload="this.media='all'">
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <script type="module" src="./js/app.js?v=1.2"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
+    <script src="https://unpkg.com/lucide@latest" defer></script>
 
 
     <style>
@@ -28,23 +28,22 @@
 </head>
 <body class="bg-[#f8fafc] text-slate-900 selection:bg-indigo-100">
 
-<header class="fixed top-0 left-0 right-0 bg-white/80 backdrop-blur-xl z-50 px-6 py-4 flex justify-between items-center border-b border-slate-100">
-    <a href="index.html" class="flex items-center gap-3 hover:opacity-70 transition-opacity">
-        <div class="w-10 h-10 bg-indigo-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-indigo-200">
-            <i data-lucide="music" class="w-6 h-6"></i>
+<header class="fixed top-0 left-0 right-0 bg-white/80 backdrop-blur-xl z-50 px-5 py-3 flex justify-between items-center border-b border-slate-100">
+    <a href="index.html" class="flex items-center gap-3 hover:opacity-70 transition-opacity" aria-label="Gig List home">
+        <div id="header-logo-icon" class="w-10 h-10 bg-indigo-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-indigo-200 flex-shrink-0">
+            <i data-lucide="music" class="w-6 h-6" aria-hidden="true"></i>
         </div>
-        <h1 class="text-xl font-black tracking-tight text-slate-800">Gig List</h1>
+        <div class="min-w-0">
+            <h1 id="header-page-title" class="text-xl font-black tracking-tight text-slate-800 leading-none">Gig List</h1>
+            <p id="header-date-display" class="text-[10px] text-slate-400 font-bold mt-0.5 leading-none">--</p>
+        </div>
     </a>
-    <div id="userIdentity" class="text-[10px] font-black uppercase tracking-widest text-slate-400 bg-slate-100 px-3 py-2 rounded-full">User</div>
+    <div id="userIdentity" class="text-[10px] font-black uppercase tracking-widest text-slate-400 bg-slate-100 px-3 py-2 rounded-full flex-shrink-0">User</div>
 </header>
 
-<main class="pt-24 pb-32 px-4 max-w-md mx-auto">
+<main class="pt-20 pb-32 px-4 max-w-md mx-auto">
 
-    <section id="view-home" class="view-section space-y-6">
-        <div class="space-y-1">
-            <h2 id="home-welcome-title" class="text-4xl font-black italic tracking-tighter text-slate-900">For You</h2>
-            <p id="current-date-display" class="text-slate-400 font-bold text-sm">--</p>
-        </div>
+    <section id="view-home" class="view-section space-y-4" aria-hidden="false">
 
 
         <div class="grid grid-cols-4 gap-2 mb-6">
@@ -66,11 +65,32 @@
             </div>
         </div>
 
-        <div class="w-full px-6 mb-4">
-            <div id="global-ticker"
-                 class="w-full bg-slate-100 py-5 px-4 rounded-[2rem] flex items-center justify-center text-center font-black italic uppercase tracking-tighter border border-slate-200/50 shadow-sm"
-                 style="font-size: 1.4rem;">
-                LOADING...
+        <!-- On This Day banner — only rendered when a matching anniversary exists -->
+        <div id="otd-banner" class="hidden bg-amber-50 border border-amber-200 rounded-[1.5rem] p-4 flex items-center gap-3" role="status" aria-label="On This Day anniversary">
+            <div class="w-10 h-10 bg-white border border-amber-200 rounded-xl flex items-center justify-center flex-shrink-0">
+                <i data-lucide="clock" class="w-4 h-4 text-amber-600" aria-hidden="true"></i>
+            </div>
+            <div class="flex-1 min-w-0">
+                <p class="text-[9px] font-black text-amber-800 uppercase tracking-widest mb-0.5">On this day</p>
+                <p id="otd-main" class="text-sm font-bold text-slate-800 truncate">--</p>
+                <p id="otd-sub" class="text-[10px] font-bold text-amber-700">--</p>
+            </div>
+            <div id="otd-years" class="bg-amber-100 rounded-xl px-3 py-2 text-center flex-shrink-0">
+                <p id="otd-years-num" class="text-lg font-black text-amber-800 leading-none">0</p>
+                <p class="text-[7px] font-black text-amber-600 uppercase tracking-wide">yrs ago</p>
+            </div>
+        </div>
+
+        <!-- Next show / days since countdown card -->
+        <div id="countdown-card" class="bg-indigo-600 rounded-[1.5rem] p-4 flex items-center justify-between" aria-live="polite">
+            <div>
+                <p id="countdown-eyebrow" class="text-[9px] font-black text-indigo-300 uppercase tracking-widest mb-1">Next show</p>
+                <p id="countdown-main" class="text-lg font-black text-white leading-tight">--</p>
+                <p id="countdown-sub" class="text-[10px] font-bold text-indigo-300 mt-0.5">--</p>
+            </div>
+            <div class="text-right flex-shrink-0 ml-4">
+                <p id="countdown-num" class="text-4xl font-black text-white leading-none tracking-tighter">--</p>
+                <p id="countdown-unit" class="text-[9px] font-black text-indigo-300 uppercase tracking-widest">days</p>
             </div>
         </div>
 
@@ -98,7 +118,7 @@
         </div>
     </section>
 
-    <section id="view-data" class="view-section hidden space-y-6" role="region" aria-labelledby="data-centre-title">
+    <section id="view-data" class="view-section hidden space-y-6" role="region" aria-labelledby="data-centre-title" aria-hidden="true">
         <h2 id="data-centre-title" class="text-4xl font-black italic tracking-tighter text-slate-900">Data Centre</h2>
 
         <div class="space-y-4 pt-4">
@@ -111,79 +131,79 @@
                        class="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all shadow-sm">
             </div>
 
-        <div class="grid grid-cols-3 gap-4">
-            <div class="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-center">
-                <p class="text-xs text-slate-500 uppercase tracking-widest font-bold">Gigs</p>
-                <h3 id="dc-stat-gigs" class="text-2xl font-black text-indigo-600">0</h3>
-            </div>
-            <div class="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-center">
-                <p class="text-xs text-slate-500 uppercase tracking-widest font-bold">Venues</p>
-                <h3 id="dc-stat-venues" class="text-2xl font-black text-indigo-600">0</h3>
-            </div>
-            <div class="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-center">
-                <p id="dc-stat-artists-label" class="text-xs text-slate-500 uppercase tracking-widest font-bold">Artists</p>
-                <h3 id="dc-stat-artists" class="text-2xl font-black text-indigo-600">0</h3>
-            </div>
-        </div>
-
-        <div class="grid grid-cols-1 gap-4">
-
-            <div class="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm relative group h-64">
-                <div class="flex justify-between items-start mb-2">
-                    <p class="text-[10px] font-black uppercase text-slate-400">Yearly History</p>
-                    <button onclick="openChartModal('year')" class="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-slate-100 rounded-lg text-slate-400">
-                        <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i>
-                    </button>
+            <div class="grid grid-cols-3 gap-4">
+                <div class="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-center">
+                    <p class="text-xs text-slate-500 uppercase tracking-widest font-bold">Gigs</p>
+                    <h3 id="dc-stat-gigs" class="text-2xl font-black text-indigo-600">0</h3>
                 </div>
-                <div class="h-40">
-                    <canvas id="dashboardYearChart"></canvas>
+                <div class="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-center">
+                    <p class="text-xs text-slate-500 uppercase tracking-widest font-bold">Venues</p>
+                    <h3 id="dc-stat-venues" class="text-2xl font-black text-indigo-600">0</h3>
                 </div>
-            </div>
-
-            <div id="topBandsChartContainer" class="group bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 hidden relative transition-all hover:shadow-md">
-                <div class="flex justify-between items-start mb-4">
-                    <div>
-                        <p class="text-[10px] font-black uppercase text-slate-400 tracking-widest">Top Bands</p>
-                    </div>
-                    <button onclick="console.log('TopBands clicked'); window.openTopBandsModal()"
-                            class="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-slate-50 rounded-lg text-slate-300 transition-all duration-200">
-                        <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i>
-                    </button>
-                </div>
-                <div class="h-[350px] relative">
-                    <canvas id="topBandsChart"></canvas>
+                <div class="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-center">
+                    <p id="dc-stat-artists-label" class="text-xs text-slate-500 uppercase tracking-widest font-bold">Artists</p>
+                    <h3 id="dc-stat-artists" class="text-2xl font-black text-indigo-600">0</h3>
                 </div>
             </div>
 
             <div class="grid grid-cols-1 gap-4">
 
-                <div id="songChartContainer" class="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm hidden h-72 relative group">
+                <div class="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm relative group h-64">
                     <div class="flex justify-between items-start mb-2">
-                        <p class="text-[10px] font-black uppercase text-slate-400">Top Songs</p>
-                        <button onclick="window.openChartModal('songs')"
-                                class="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-indigo-600">
-                            <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i>
-                        </button>
-                    </div>
-                    <div class="h-56">
-                        <canvas id="topSongsChart"></canvas>
-                    </div>
-                </div>
-
-                <div id="companionChartContainer" class="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm relative group h-64">
-                    <div class="flex justify-between items-start mb-2">
-                        <p class="text-[10px] font-black uppercase text-slate-400">Companions</p>
-                        <button onclick="openChartModal('companion')" class="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-slate-100 rounded-lg text-slate-400">
+                        <p class="text-[10px] font-black uppercase text-slate-400">Yearly History</p>
+                        <button onclick="openChartModal('year')" class="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-slate-100 rounded-lg text-slate-400">
                             <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i>
                         </button>
                     </div>
                     <div class="h-40">
-                        <canvas id="dashboardCompanionChart"></canvas>
+                        <canvas id="dashboardYearChart"></canvas>
                     </div>
                 </div>
 
+                <div id="topBandsChartContainer" class="group bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 hidden relative transition-all hover:shadow-md">
+                    <div class="flex justify-between items-start mb-4">
+                        <div>
+                            <p class="text-[10px] font-black uppercase text-slate-400 tracking-widest">Top Bands</p>
+                        </div>
+                        <button onclick="window.openTopBandsModal()"
+                                class="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-slate-50 rounded-lg text-slate-300 transition-all duration-200">
+                            <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i>
+                        </button>
+                    </div>
+                    <div class="h-[350px] relative">
+                        <canvas id="topBandsChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 gap-4">
+
+                    <div id="songChartContainer" class="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm hidden h-72 relative group">
+                        <div class="flex justify-between items-start mb-2">
+                            <p class="text-[10px] font-black uppercase text-slate-400">Top Songs</p>
+                            <button onclick="window.openChartModal('songs')"
+                                    class="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-indigo-600">
+                                <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i>
+                            </button>
+                        </div>
+                        <div class="h-56">
+                            <canvas id="topSongsChart"></canvas>
+                        </div>
+                    </div>
+
+                    <div id="companionChartContainer" class="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm relative group h-64">
+                        <div class="flex justify-between items-start mb-2">
+                            <p class="text-[10px] font-black uppercase text-slate-400">Companions</p>
+                            <button onclick="openChartModal('companion')" class="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-slate-100 rounded-lg text-slate-400">
+                                <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i>
+                            </button>
+                        </div>
+                        <div class="h-40">
+                            <canvas id="dashboardCompanionChart"></canvas>
+                        </div>
+                    </div>
+
+                </div>
             </div>
-        </div>
 
 
 
@@ -228,7 +248,7 @@
         <div id="calendarContainer" class="hidden space-y-8"></div>
     </section>
 
-    <section id="view-map" class="view-section hidden space-y-4">
+    <section id="view-map" class="view-section hidden space-y-4" role="region" aria-label="Games" aria-hidden="true">
         <div class="flex justify-between items-end mb-2">
             <h2 class="text-4xl font-black italic tracking-tighter text-slate-900">Games</h2>
             <div class="flex gap-2 bg-slate-200 p-1 rounded-full border border-slate-300">
@@ -275,7 +295,7 @@
         </div>
     </section>
 
-    <section id="view-achievements" class="view-section hidden pt-6 text-center space-y-4">
+    <section id="view-achievements" class="view-section hidden pt-6 text-center space-y-4" role="region" aria-label="Achievements" aria-hidden="true">
         <div class="space-y-6">
             <div class="space-y-1">
                 <h2 class="text-4xl font-black italic tracking-tighter text-slate-900">Your Badges</h2>
@@ -289,21 +309,21 @@
     </section>
 </main>
 
-<nav class="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-2xl border-t border-slate-100 px-6 pt-3 pb-8 flex justify-between items-center z-50">
-    <button onclick="switchView('home')" id="nav-home" class="nav-item active flex flex-col items-center gap-1 flex-1">
-        <i data-lucide="layout-grid" class="w-6"></i>
+<nav class="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-2xl border-t border-slate-100 px-6 pt-3 pb-8 flex justify-between items-center z-50" aria-label="Main navigation">
+    <button onclick="switchView('home')" id="nav-home" class="nav-item active flex flex-col items-center gap-1 flex-1" aria-current="page" aria-label="Home">
+        <i data-lucide="layout-grid" class="w-6" aria-hidden="true"></i>
         <span class="text-[9px] font-black uppercase">Home</span>
     </button>
-    <button onclick="switchView('data')" id="nav-data" class="nav-item text-slate-400 flex flex-col items-center gap-1 flex-1">
-        <i data-lucide="database" class="w-6"></i>
+    <button onclick="switchView('data')" id="nav-data" class="nav-item text-slate-400 flex flex-col items-center gap-1 flex-1" aria-current="false" aria-label="Data Centre">
+        <i data-lucide="database" class="w-6" aria-hidden="true"></i>
         <span class="text-[9px] font-black uppercase">Data</span>
     </button>
-    <button onclick="switchView('map')" id="nav-map" class="nav-item text-slate-400 flex flex-col items-center gap-1 flex-1">
-        <i data-lucide="gamepad-2" class="w-6"></i>
+    <button onclick="switchView('map')" id="nav-map" class="nav-item text-slate-400 flex flex-col items-center gap-1 flex-1" aria-current="false" aria-label="Games">
+        <i data-lucide="gamepad-2" class="w-6" aria-hidden="true"></i>
         <span class="text-[9px] font-black uppercase">Games</span>
     </button>
-    <button onclick="switchView('achievements')" id="nav-achievements" class="nav-item text-slate-400 flex flex-col items-center gap-1 flex-1">
-        <i data-lucide="ticket" class="w-6"></i>
+    <button onclick="switchView('achievements')" id="nav-achievements" class="nav-item text-slate-400 flex flex-col items-center gap-1 flex-1" aria-current="false" aria-label="Achievements">
+        <i data-lucide="ticket" class="w-6" aria-hidden="true"></i>
         <span class="text-[9px] font-black uppercase">Achievements</span>
     </button>
 </nav>
@@ -376,7 +396,7 @@
 </svg>
 <div id="chartModal"
      class="fixed inset-0 z-[100] hidden bg-slate-900/40 backdrop-blur-md flex items-center justify-center p-4 md:p-12"
-     role="dialog" aria-modal="true" aria-labelledby="modalChartTitle">
+     role="dialog" aria-modal="true" aria-labelledby="modalChartTitle" aria-hidden="true">
     <div class="w-full max-w-6xl h-full max-h-[90vh] bg-white rounded-[3rem] shadow-2xl flex flex-col overflow-hidden border border-white/20">
 
         <div class="flex justify-between items-center p-6 md:p-8 border-b border-slate-100">
@@ -385,9 +405,9 @@
                 <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Interactive Data View</p>
             </div>
             <button onclick="closeChartModal()"
-                    aria-label="Close modal"
+                    aria-label="Close chart"
                     class="bg-slate-100 hover:bg-red-50 hover:text-red-600 text-slate-500 p-3 rounded-2xl transition-all">
-                <i data-lucide="x" class="w-6 h-6"></i>
+                <i data-lucide="x" class="w-6 h-6" aria-hidden="true"></i>
             </button>
         </div>
 
@@ -396,10 +416,10 @@
         </div>
     </div>
 </div>
-</body>
-</html>
-
-<div id="modal" class="hidden fixed inset-0 z-[100] bg-slate-900/90 backdrop-blur-sm flex items-center justify-center p-4" tabindex="-1">
+<div id="modal"
+     class="hidden fixed inset-0 z-[100] bg-slate-900/90 backdrop-blur-sm flex items-center justify-center p-4"
+     role="dialog" aria-modal="true" aria-labelledby="modal-title" aria-hidden="true"
+     tabindex="-1">
     <div class="bg-white w-full max-w-2xl max-h-[90vh] rounded-[3rem] overflow-hidden shadow-2xl relative overflow-y-auto custom-scrollbar">
         <div id="modal-content"></div>
     </div>
@@ -407,7 +427,7 @@
 
 <div id="mapModal"
      class="fixed inset-0 z-[100] hidden bg-slate-900/40 backdrop-blur-md flex items-center justify-center p-4 md:p-12"
-     role="dialog" aria-modal="true">
+     role="dialog" aria-modal="true" aria-label="Global Explorer Map" aria-hidden="true">
 
     <div class="w-full max-w-6xl h-full max-h-[90vh] bg-white rounded-[3rem] shadow-2xl flex flex-col overflow-hidden border border-white/20">
 
@@ -417,9 +437,9 @@
                 <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Interactive Tour Map</p>
             </div>
             <button onclick="window.closeMapModal()"
-                    aria-label="Close modal"
+                    aria-label="Close map"
                     class="bg-slate-100 hover:bg-red-50 hover:text-red-600 text-slate-500 p-3 rounded-2xl transition-all">
-                <i data-lucide="x" class="w-6 h-6"></i>
+                <i data-lucide="x" class="w-6 h-6" aria-hidden="true"></i>
             </button>
         </div>
 
@@ -437,3 +457,6 @@
         initApp();
     }
 </script>
+
+</body>
+</html>

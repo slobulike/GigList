@@ -13,6 +13,7 @@
     <meta name="apple-mobile-web-app-title" content="GigVault">
     <link rel="apple-touch-icon" href="assets/icon-512.png">
 
+    <script>tailwind = { corePlugins: { preflight: true } };</script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -45,15 +46,17 @@
 
     <div id="modeSelection" class="space-y-4">
         <button onclick="window.location.href='index.html?mode=Individual'"
+                aria-label="Select Individual mode — Personal Memories"
                 class="w-full p-8 bg-white border-2 border-slate-100 rounded-[2.5rem] shadow-lg hover:border-indigo-500 transition-all text-center">
-            <h2 class="text-2xl font-black uppercase italic">Individual</h2>
-            <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Personal Memories</p>
+            <span class="block text-2xl font-black uppercase italic">Individual</span>
+            <span class="block text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Personal Memories</span>
         </button>
 
         <button onclick="window.location.href='index.html?mode=Band'"
+                aria-label="Select Band mode — Official Archives"
                 class="w-full p-8 bg-slate-900 text-white rounded-[2.5rem] shadow-lg hover:ring-4 ring-indigo-500/20 transition-all text-center">
-            <h2 class="text-2xl font-black uppercase italic">Band Mode</h2>
-            <p class="text-[10px] text-indigo-300 font-bold uppercase tracking-widest mt-1">Official Archives</p>
+            <span class="block text-2xl font-black uppercase italic">Band Mode</span>
+            <span class="block text-[10px] text-indigo-300 font-bold uppercase tracking-widest mt-1">Official Archives</span>
         </button>
     </div>
 
@@ -137,7 +140,7 @@
                                 </span>
                                 <span class="text-2xl font-black text-slate-900 tracking-tighter">${name}</span>
                             </div>
-                            <div class="bg-slate-50 group-hover:bg-indigo-600 w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-300">
+                            <div class="bg-slate-50 group-hover:bg-indigo-600 w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-300" aria-hidden="true">
                                 <span class="text-slate-400 group-hover:text-white font-black">→</span>
                             </div>
                         `;
@@ -156,9 +159,7 @@
 </script>
 <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./sw.js')
-        .then(() => console.log("Service Worker Registered"))
-        .catch((err) => console.log("Service Worker Failed", err));
+      navigator.serviceWorker.register('./sw.js');
     }
 </script>
 </body>
