@@ -22,7 +22,7 @@ let currentUser = JSON.parse(localStorage.getItem('gv_user'));
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "2.7.0";
+const APP_VERSION = "2.8.1";
 
 window.toggleListView = UI.toggleListView;
 window.activeView = window.activeView || 'list';
