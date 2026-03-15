@@ -119,7 +119,27 @@
     </section>
 
     <section id="view-data" class="view-section hidden space-y-6" role="region" aria-labelledby="data-centre-title" aria-hidden="true">
-        <h2 id="data-centre-title" class="text-4xl font-black italic tracking-tighter text-slate-900">Data Centre</h2>
+        <div class="flex items-center justify-between">
+            <h2 id="data-centre-title" class="text-4xl font-black italic tracking-tighter text-slate-900">Data Centre</h2>
+            <button onclick="window.openAddGigModal()"
+                    aria-label="Add a new show"
+                    class="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black uppercase tracking-widest px-4 py-2.5 rounded-full transition-all active:scale-95">
+                <i data-lucide="plus" class="w-3.5 h-3.5" aria-hidden="true"></i>
+                Add Show
+            </button>
+        </div>
+
+        <!-- Unsaved changes banner -->
+        <div id="unsaved-banner" class="hidden bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 flex items-center justify-between gap-3" role="alert">
+            <div class="flex items-center gap-2">
+                <i data-lucide="alert-circle" class="w-4 h-4 text-amber-600 flex-shrink-0" aria-hidden="true"></i>
+                <span class="text-xs font-bold text-amber-800">Unsaved changes — export your CSV to save permanently.</span>
+            </div>
+            <button onclick="window.exportCSV()"
+                    class="bg-amber-500 hover:bg-amber-600 text-white text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-full transition-all active:scale-95 flex-shrink-0">
+                Export CSV
+            </button>
+        </div>
 
         <div class="space-y-4 pt-4">
             <div class="relative w-full">
@@ -445,6 +465,150 @@
 
         <div class="flex-grow relative bg-slate-50/50">
             <div id="full-map-canvas" class="w-full h-full"></div>
+        </div>
+    </div>
+</div>
+
+<!-- ── ADD / EDIT GIG MODAL ──────────────────────────────────────────────── -->
+<div id="editor-modal"
+     class="hidden fixed inset-0 z-[110] bg-slate-900/60 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4"
+     role="dialog" aria-modal="true" aria-labelledby="editor-modal-title" aria-hidden="true">
+
+    <div class="bg-white w-full sm:max-w-lg max-h-[92vh] rounded-t-[2.5rem] sm:rounded-[2.5rem] flex flex-col overflow-hidden shadow-2xl">
+
+        <!-- Header -->
+        <div class="flex items-center justify-between px-6 py-5 border-b border-slate-100 flex-shrink-0">
+            <h2 id="editor-modal-title" class="text-xl font-black tracking-tight text-slate-900 uppercase italic">Add Show</h2>
+            <button onclick="window.closeEditorModal()"
+                    aria-label="Close"
+                    class="bg-slate-100 hover:bg-red-50 hover:text-red-600 text-slate-500 p-2.5 rounded-xl transition-all">
+                <i data-lucide="x" class="w-5 h-5" aria-hidden="true"></i>
+            </button>
+        </div>
+
+        <!-- Error message -->
+        <div id="editor-error"
+             class="hidden mx-6 mt-4 bg-red-50 border border-red-200 text-red-700 text-xs font-bold px-4 py-3 rounded-xl"
+             role="alert"></div>
+
+        <!-- Form body -->
+        <div class="overflow-y-auto flex-grow px-6 py-5 space-y-5">
+
+            <!-- Date -->
+            <div>
+                <label for="editor-date" class="block text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-2">Date <span aria-hidden="true">*</span></label>
+                <input type="text" id="editor-date"
+                       placeholder="DD/MM/YYYY"
+                       maxlength="10"
+                       class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                       aria-required="true">
+            </div>
+
+            <!-- Artist (combobox) -->
+            <div class="relative">
+                <label for="editor-band" class="block text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-2">Artist <span aria-hidden="true">*</span></label>
+                <input type="text" id="editor-band"
+                       placeholder="Type to search or add new…"
+                       autocomplete="off"
+                       class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                       role="combobox" aria-autocomplete="list" aria-controls="editor-band-list" aria-required="true">
+                <ul id="editor-band-list"
+                    role="listbox" aria-label="Artist suggestions"
+                    class="hidden absolute z-10 left-0 right-0 bg-white border border-slate-200 rounded-2xl shadow-xl mt-1 overflow-hidden max-h-48 overflow-y-auto"></ul>
+            </div>
+
+            <!-- Official Venue (combobox) -->
+            <div class="relative">
+                <label for="editor-venue" class="block text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-2">Official Venue <span aria-hidden="true">*</span></label>
+                <input type="text" id="editor-venue"
+                       placeholder="Type to search or add new…"
+                       autocomplete="off"
+                       class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                       role="combobox" aria-autocomplete="list" aria-controls="editor-venue-list" aria-required="true">
+                <ul id="editor-venue-list"
+                    role="listbox" aria-label="Venue suggestions"
+                    class="hidden absolute z-10 left-0 right-0 bg-white border border-slate-200 rounded-2xl shadow-xl mt-1 overflow-hidden max-h-48 overflow-y-auto"></ul>
+                <p class="text-[10px] text-slate-400 mt-1.5 px-1">Use the official venue name — this is the join key across all data.</p>
+            </div>
+
+            <!-- Festival toggle -->
+            <div class="flex items-center justify-between bg-slate-50 rounded-2xl px-4 py-3 border border-slate-200">
+                <label for="editor-festival" class="text-sm font-bold text-slate-700 cursor-pointer">Festival show?</label>
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" id="editor-festival"
+                           class="hidden peer"
+                           onchange="window.editorToggleFestival()">
+                    <span class="w-10 h-5 bg-slate-200 rounded-full peer peer-checked:bg-indigo-600 transition-colors after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-5"></span>
+                </label>
+            </div>
+
+            <!-- Festival Lineups (shown only when festival = Y) -->
+            <div id="editor-festival-section" class="hidden">
+                <label for="editor-lineups" class="block text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-2">Festival Lineup</label>
+                <textarea id="editor-lineups"
+                          rows="3"
+                          placeholder="Artist names separated by / …"
+                          class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all resize-none"></textarea>
+            </div>
+
+            <!-- Notable Support (combobox) -->
+            <div class="relative">
+                <label for="editor-support" class="block text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-2">Notable Support</label>
+                <input type="text" id="editor-support"
+                       placeholder="Type to search or add new…"
+                       autocomplete="off"
+                       class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                       role="combobox" aria-autocomplete="list" aria-controls="editor-support-list">
+                <ul id="editor-support-list"
+                    role="listbox" aria-label="Support act suggestions"
+                    class="hidden absolute z-10 left-0 right-0 bg-white border border-slate-200 rounded-2xl shadow-xl mt-1 overflow-hidden max-h-48 overflow-y-auto"></ul>
+            </div>
+
+            <!-- Went With -->
+            <div>
+                <label for="editor-went-with" class="block text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-2">Went With</label>
+                <input type="text" id="editor-went-with"
+                       placeholder="Names separated by / …"
+                       class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all">
+            </div>
+
+            <!-- Comments -->
+            <div>
+                <label for="editor-comments" class="block text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-2">Comments</label>
+                <textarea id="editor-comments"
+                          rows="3"
+                          placeholder="Your memories of the show…"
+                          class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all resize-none"></textarea>
+            </div>
+
+            <!-- Price -->
+            <div>
+                <label for="editor-price" class="block text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-2">Price</label>
+                <input type="text" id="editor-price"
+                       placeholder="£0.00"
+                       class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all">
+            </div>
+
+            <!-- Photos URL -->
+            <div>
+                <label for="editor-photos" class="block text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-2">Photos URL</label>
+                <input type="url" id="editor-photos"
+                       placeholder="https://photos.google.com/…"
+                       class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all">
+            </div>
+
+        </div>
+
+        <!-- Footer actions -->
+        <div class="flex gap-3 px-6 py-5 border-t border-slate-100 flex-shrink-0">
+            <button onclick="window.closeEditorModal()"
+                    class="flex-1 py-3 text-sm font-black text-slate-500 bg-slate-100 hover:bg-slate-200 rounded-2xl transition-all active:scale-95 uppercase tracking-widest">
+                Cancel
+            </button>
+            <button onclick="window.saveGig()"
+                    class="flex-2 flex-grow py-3 text-sm font-black text-white bg-indigo-600 hover:bg-indigo-700 rounded-2xl transition-all active:scale-95 uppercase tracking-widest">
+                Save Show
+            </button>
         </div>
     </div>
 </div>

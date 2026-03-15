@@ -1,12 +1,10 @@
 /**
  * Gig List Core Engine
- V2.7.1 - Release Date 2026-03-14
+  V2.8.0 - Release Date 2026-03-15
           * -------------------------------------------------------------------
-  [REFACTOR] Updated CDN URL to correctly invoke the Tailwind Play CDN and stop warning in console
-  [UI/UX] Add "On this Day" banner
-  [UI/UX] Add show countdown card
-  [UI/UX] Update carousel card "pill"
-  [UI/UX] Wrapped re-design
+  [FEATURE] Added editor.js to allow users to add new shows and amend existing shows
+  [REFACTOR] Aligned format of setlist.fm journal files and original user files
+
 */
 
 import * as Data from './modules/data.js';
@@ -18,12 +16,13 @@ import { renderCalendar } from './modules/calendar.js';
 import './modules/quiz.js';
 import * as Games from './modules/games.js';
 import { GigPuzzle } from './modules/puzzle.js';
+import { initEditor, exportCSV } from './modules/editor.js';
 
 let currentUser = JSON.parse(localStorage.getItem('gv_user'));
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "2.7.1";
+const APP_VERSION = "2.7.0";
 
 window.toggleListView = UI.toggleListView;
 window.activeView = window.activeView || 'list';
@@ -109,6 +108,7 @@ export async function initApp() {
     // 4. Initial Render & Listeners
     refreshUI();
     initEventListeners();
+    initEditor(); // wire combobox autocomplete now that journalData is loaded
 }
 
 function refreshUI() {
@@ -316,6 +316,7 @@ window.openGigModal = window.viewGigDetails;
 window.closeModal = () => {
     const modal = document.getElementById('modal');
     if (modal) {
+        if (modal.contains(document.activeElement)) document.activeElement.blur();
         modal.classList.add('hidden');
         modal.setAttribute('aria-hidden', 'true');
         document.body.style.overflow = 'auto';
@@ -348,6 +349,7 @@ window.openSettings = function() {
 window.closeSettings = function() {
     const modal = document.getElementById('settingsModal');
     if (modal) {
+        if (modal.contains(document.activeElement)) document.activeElement.blur();
         modal.classList.add('hidden');
         modal.setAttribute('aria-hidden', 'true');
     }

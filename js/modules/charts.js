@@ -463,6 +463,11 @@ window.closeChartModal = function() {
     }
 
     if (modal) {
+        // Move focus out of the modal before hiding it — prevents the
+        // "aria-hidden on element with focused descendant" console warning
+        if (modal.contains(document.activeElement)) {
+            document.activeElement.blur();
+        }
         modal.classList.add('hidden');
         modal.setAttribute('aria-hidden', 'true');
     }

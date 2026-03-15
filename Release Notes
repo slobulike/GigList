@@ -1,4 +1,18 @@
   /**
+  V2.8.0 - Release Date 2026-03-15
+          * -------------------------------------------------------------------
+  [FEATURE] Added editor.js to allow users to add new shows and amend existing shows
+  [REFACTOR] Aligned format of setlist.fm journal files and original user files
+
+  V2.7.1 - Release Date 2026-03-14
+          * -------------------------------------------------------------------
+  [FEATURE] Added new banner for "On this day" and updated "Next show" banner format
+  [FEATURE] Renewed wrapped calendar summary
+  [REFACTOR] All html reviewed by Claude.
+  [A11Y] Aria tagging re-added correctly across entire site
+  [UI/UX] Update carousel card "pill"
+  [REFACTOR] Updated CDN URL to correctly invoke the Tailwind Play CDN and stop warning in console
+
   V2.7.0 - Release Date 2026-03-13
           * -------------------------------------------------------------------
   [REFACTOR] All js code reviewed by Claude.

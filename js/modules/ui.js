@@ -692,9 +692,12 @@ window.openMapModal = () => {
 
 window.closeMapModal = () => {
     const modal = document.getElementById('mapModal');
-    if (modal) modal.classList.add('hidden');
+    if (modal) {
+        if (modal.contains(document.activeElement)) document.activeElement.blur();
+        modal.classList.add('hidden');
+        modal.setAttribute('aria-hidden', 'true');
+    }
     document.body.style.overflow = 'auto';
-    console.log("🚪 Map Modal closed.");
 };
 
 /**
@@ -836,10 +839,14 @@ export const openGigModal = (key, journalData, performanceData) => {
                 </div>
 
                 <div class="p-6 pb-4 bg-white">
-                    <div class="flex items-center gap-2 mb-3">
+                    <div class="flex items-center gap-2 mb-3 flex-wrap">
                         <a href="${youtubeLink}" target="_blank" rel="noopener" class="bg-red-600 hover:bg-red-700 text-white text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-transform active:scale-95 focus:ring-2 focus:ring-red-500">
-                             <i data-lucide="play-circle" class="w-4 h-4"></i> WATCH CLIPS
+                             <i data-lucide="play-circle" class="w-4 h-4" aria-hidden="true"></i> WATCH CLIPS
                         </a>
+                        <button onclick="window.openEditGigModal('${entry['Journal Key']?.replace(/'/g, "\\'")}')"
+                                class="bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 text-slate-500 text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
+                            <i data-lucide="pencil" class="w-3.5 h-3.5" aria-hidden="true"></i> EDIT
+                        </button>
                         ${isFestival ? '<span class="bg-amber-400 text-black text-[8px] font-black px-2 py-1 rounded uppercase">Festival</span>' : ''}
                     </div>
                     <h2 id="modal-title" tabindex="-1" class="text-4xl font-black italic uppercase leading-none text-slate-900 mb-3 outline-none">${entry.Band}</h2>
