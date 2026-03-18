@@ -1,4 +1,14 @@
   /**
+  V3.0.0 - Release Date 2026-03-18
+            * -------------------------------------------------------------------
+   [REFACTOR] Moved all backend data to Supabase
+   [REFACTOR] Added Google OAuth
+   [UX/UI] Adjusted user switching and band mode selection to align with new authed user setup
+
+  V2.8.1 - Release Date 2026-03-15
+            * ---------------------------------
+    [FIX] Version bump
+
   V2.8.0 - Release Date 2026-03-15
           * -------------------------------------------------------------------
   [FEATURE] Added editor.js to allow users to add new shows and amend existing shows

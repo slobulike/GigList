@@ -114,7 +114,7 @@ export const updateStats = (data) => {
 };
 
 export const updateRank = (data) => {
-    const user = JSON.parse(localStorage.getItem('gv_user'));
+    const user = window.currentUser;
     const rankEl = document.getElementById('stat-rank');
     if (rankEl && user) {
         rankEl.innerText = user.Rank || user.rank || Math.floor(data.length / 10);
@@ -511,32 +511,15 @@ const getHomeBase = (venueStats, venuesLookup) => {
     let topVenueName = "None";
     let maxVisits = 0;
 
-    console.group("Map Centering Logic");
-
     Object.keys(venueStats).forEach(vName => {
         const visits = venueStats[vName].length;
         const coords = venuesLookup[vName];
-
-        if (visits > maxVisits) {
-            // Log every time a new "leader" is found
-            if (coords && !isNaN(coords.lat)) {
-                maxVisits = visits;
-                topVenue = coords;
-                topVenueName = vName;
-                console.log(`📌 New Leader: ${vName} (${visits} visits)`);
-            } else {
-                console.warn(`⚠️ Skipped ${vName}: Found ${visits} visits but NO coordinates in lookup.`);
-            }
+        if (visits > maxVisits && coords && !isNaN(coords.lat)) {
+            maxVisits = visits;
+            topVenue = coords;
+            topVenueName = vName;
         }
     });
-
-    if (topVenue) {
-        console.log(`✅ Result: Centering on ${topVenueName} at [${topVenue.lat}, ${topVenue.lng}]`);
-    } else {
-        console.error("❌ Result: No valid venues with coordinates found. Defaulting to London.");
-    }
-
-    console.groupEnd();
 
     return topVenue ? [topVenue.lat, topVenue.lng] : [51.507, -0.127];
 };
@@ -750,14 +733,6 @@ export const openGigModal = (key, journalData, performanceData) => {
     // Generate the slug
     const scrapbookPath = `assets/scrapbook/${formattedDate}-${cleanVenue}.jpg`;
 
-    // LOGGING: Check your console in Production (F12) to see this output
-    console.group("📸 GigList Image Debugger");
-    console.log("Journal Key:", key);
-    console.log("Raw Venue:", entry.OfficialVenue);
-    console.log("Generated Date:", formattedDate);
-    console.log("Generated Path:", scrapbookPath);
-    console.groupEnd();
-
     const artistPath = `assets/artists/${entry.Band.toLowerCase().replace(/ /g, '_')}_stock_photo.jpg`;
     const youtubeLink = `https://www.youtube.com/results?search_query=${encodeURIComponent(`${entry.Band} live ${entry.OfficialVenue} ${entry.Date}`)}`;
 
@@ -910,7 +885,6 @@ export const openGigModal = (key, journalData, performanceData) => {
     imgScrapbook.onerror = () => {
         // 1. If scrapbook.jpg fails, try scrapbook.JPG
         if (imgScrapbook.src.endsWith('.jpg')) {
-            console.log("Retrying scrapbook with .JPG extension...");
             imgScrapbook.src = scrapbookPath.replace('.jpg', '.JPG');
         } else {
             // 2. If both fail, move to Artist logic

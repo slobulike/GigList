@@ -2,6 +2,7 @@
  * GigList - Data Module
  */
 import { parseDate } from './utils.js';
+import { supabase } from './supabase.js';
 
 /**
  * Helper to determine show type based on keywords
@@ -48,62 +49,105 @@ export const sortGigs = (data, column, ascending = true) => {
 };
 
 /**
- * Data Loading
+ * Data Loading — reads from Supabase.
+ *
+ * Phase 3 note: this replaces the CSV fetch/Papa.parse approach.
+ * The shape of the returned data is identical to the old CSV version
+ * so nothing else in the app needs to change.
  */
 export const loadAppData = async (user) => {
-    const version = new Date().getTime();
-    const journalUrl = `data/${user.JournalFile}?v=${version}`;
-    const perfUrl = `data/performances.csv?v=${version}`;
-
     const escapeHTMLAttr = (str) => {
         if (!str) return '';
         return str.replace(/'/g, "\\'").replace(/"/g, "&quot;");
     };
 
-    // Fetch all sources in parallel. loadVenues is called once here — app.js
-    // stores the result as window.venueLookup so it does not need to call it again.
-    const [journalRes, perfRes, venueLookup] = await Promise.all([
-        fetch(journalUrl),
-        fetch(perfUrl),
-        loadVenues()
-    ]);
-
-    // Guard against failed fetches (e.g. missing CSV files returning 404 HTML)
-    if (!journalRes.ok) throw new Error(`Failed to load journal: ${journalRes.status} ${journalUrl}`);
-    if (!perfRes.ok)    throw new Error(`Failed to load performances: ${perfRes.status} ${perfUrl}`);
-
-    const [journalResult, performanceResult] = await Promise.all([
-        journalRes.text().then(text => Papa.parse(text, { header: true, skipEmptyLines: true })),
-        perfRes.text().then(text => Papa.parse(text, { header: true, skipEmptyLines: true }))
-    ]);
-
     const now = new Date();
     now.setHours(0, 0, 0, 0);
 
-    let journalData = journalResult.data;
-    let performanceData = performanceResult.data;
+    // Load venues first — needed to enrich journal and performance rows
+    const venueLookup = await loadVenues();
 
-    // Standardize and enrich journal rows
+    // Load journal rows
+    // Band mode: fetch by band name (null user_id rows)
+    // Individual mode: fetch by authenticated user's id
+    let journalQuery;
+    if (user.Type === 'Band') {
+        journalQuery = supabase
+            .from('journals')
+            .select('*')
+            .is('user_id', null)
+            .eq('band', user.Subject || user.UserName)
+            .limit(10000);
+    } else {
+        journalQuery = supabase
+            .from('journals')
+            .select('*')
+            .eq('user_id', user.id)
+            .limit(10000);
+    }
+
+    // Load performances in parallel with journals
+    const [journalRes, perfRes] = await Promise.all([
+        journalQuery,
+        supabase.from('performances').select('*').limit(50000)
+    ]);
+
+    if (journalRes.error) throw new Error(`Failed to load journals: ${journalRes.error.message}`);
+    if (perfRes.error)   throw new Error(`Failed to load performances: ${perfRes.error.message}`);
+
+    let journalData     = journalRes.data || [];
+    let performanceData = perfRes.data    || [];
+
+    // Normalise column names from Supabase snake_case to the app's expected format
+    // Supabase returns lowercase column names; the app expects the original CSV casing
+    journalData = journalData.map(row => ({
+        ...row,
+        Band:              row.band             || row.Band             || '',
+        OfficialVenue:     row.official_venue   || row.OfficialVenue    || '',
+        'Journal Key':     row.journal_key      || row['Journal Key']   || '',
+        'Festival?':       row.festival ? 'Y' : 'N',
+        'Festival Lineups': row.festival_lineups || row['Festival Lineups'] || '',
+        'Notable Support': row.notable_support  || row['Notable Support']  || '',
+        'Went With':       row.went_with        || row['Went With']     || '',
+        Comments:          row.comments         || row.Comments         || '',
+        Photos:            row.photos           || row.Photos           || '',
+        Price:             row.price            || row.Price            || '',
+        Date:              row.date             || row.Date             || '',
+        Year:              row.year             || row.Year             || '',
+        Month:             row.month            || row.Month            || '',
+        Day:               row.day              || row.Day              || '',
+    }));
+
+    performanceData = performanceData.map(p => ({
+        ...p,
+        'Journal Key':  p.journal_key    || p['Journal Key'] || '',
+        Artist:         p.artist         || p.Artist         || '',
+        Role:           p.role           || p.Role           || '',
+        Setlist:        p.setlist        || p.Setlist        || '',
+        OfficialVenue:  p.official_venue || p.OfficialVenue  || '',
+        SetlistURL:     p.setlist_url    || p.SetlistURL      || '',
+    }));
+
+    // Enrich journal rows
     journalData.forEach(row => {
-        row.Band = row.Band || row.Artist;
-        // Tag future vs past correctly so downstream code can rely on this
+        row.Band = row.Band || row.Artist || '';
         const gigDate = parseDate(row.Date);
-        row.type = (gigDate && gigDate >= now) ? 'future' : 'past';
-        row.safeKey = escapeHTMLAttr(row['Journal Key'] || "");
+        row.type    = (gigDate && gigDate >= now) ? 'future' : 'past';
+        row.safeKey = escapeHTMLAttr(row['Journal Key'] || '');
 
         const venueInfo = venueLookup[row.OfficialVenue];
         if (venueInfo) {
-            row.City    = venueInfo.city    || "";
-            row.Country = venueInfo.country || "";
+            row.City    = venueInfo.city    || '';
+            row.Country = venueInfo.country || '';
         }
     });
 
-    // Enrich performance rows with geography
+    // Enrich performance rows
     performanceData.forEach(perf => {
         const venueInfo = venueLookup[perf.OfficialVenue];
         if (venueInfo) {
-            perf.City    = venueInfo.city    || "";
-            perf.Country = venueInfo.country || "";
+            perf.City    = venueInfo.city    || '';
+            perf.Country = venueInfo.country || '';
         }
     });
 
@@ -111,14 +155,65 @@ export const loadAppData = async (user) => {
 };
 
 /**
- * Calculates unique songs for the current band in band mode.
+ * Loads the venue lookup from Supabase.
+ * Falls back to the CSV file if Supabase is unavailable.
  */
+export const loadVenues = async () => {
+    // Try Supabase first
+    const { data, error } = await supabase.from('venues').select('*');
+
+    if (!error && data && data.length > 0) {
+        const lookup = {};
+        data.forEach(v => {
+            if (v.official_name) {
+                lookup[v.official_name] = {
+                    lat:      parseFloat(v.latitude)  || null,
+                    lng:      parseFloat(v.longitude) || null,
+                    city:     v.city     || 'Unknown City',
+                    country:  v.country  || 'Unknown Country',
+                    capacity: v.capacity || 'Unknown'
+                };
+            }
+        });
+        window.allVenues = lookup;
+        return lookup;
+    }
+
+    // Fallback to CSV if Supabase unavailable
+    console.warn('Venues: Supabase unavailable, falling back to CSV');
+    return new Promise((resolve, reject) => {
+        Papa.parse('data/venues.csv', {
+            download: true,
+            header: true,
+            skipEmptyLines: true,
+            complete: (results) => {
+                const lookup = {};
+                results.data.forEach(v => {
+                    if (v.OfficialName) {
+                        lookup[v.OfficialName] = {
+                            lat:      parseFloat(v.Latitude),
+                            lng:      parseFloat(v.Longitude),
+                            city:     v.City_y || v.City_x || v.District || 'Unknown City',
+                            country:  v.Country  || 'Unknown Country',
+                            capacity: v.Capacity || 'Unknown'
+                        };
+                    }
+                });
+                window.allVenues = lookup;
+                resolve(lookup);
+            },
+            error: (err) => reject(err)
+        });
+    });
+};
+
+
+
 export const getUniqueSongCount = (filteredGigs) => {
     const perfs = window.performanceData || [];
     if (perfs.length === 0) return 0;
 
-    const user = JSON.parse(localStorage.getItem('gv_user'));
-    const currentArtist = (user?.UserName || user?.user_name || "").toLowerCase();
+    const currentArtist = (window.currentArtist || '').toLowerCase();
 
     const activeKeys = new Set(
         filteredGigs.map(g => (g['Journal Key'] || g['JournalKey'] || "").trim())
@@ -205,38 +300,6 @@ export const filterGigs = (query, data, includeFuture = false) => {
             _visible:        isVisible
         };
     }).filter(r => r._visible);
-};
-
-/**
- * Loads and indexes the venue database.
- * Called once inside loadAppData; the result is also stored as window.venueLookup
- * by app.js so subsequent calls are not needed.
- */
-export const loadVenues = async () => {
-    return new Promise((resolve, reject) => {
-        Papa.parse('data/venues.csv', {
-            download: true,
-            header: true,
-            skipEmptyLines: true,
-            complete: (results) => {
-                const lookup = {};
-                results.data.forEach(v => {
-                    if (v.OfficialName) {
-                        lookup[v.OfficialName] = {
-                            lat:      parseFloat(v.Latitude),
-                            lng:      parseFloat(v.Longitude),
-                            city:     v.City_y || v.City_x || v.District || "Unknown City",
-                            country:  v.Country  || "Unknown Country",
-                            capacity: v.Capacity || "Unknown"
-                        };
-                    }
-                });
-                window.allVenues = lookup;
-                resolve(lookup);
-            },
-            error: (err) => reject(err)
-        });
-    });
 };
 
 /**

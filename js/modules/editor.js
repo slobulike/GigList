@@ -8,6 +8,7 @@
  */
 
 import { parseDate } from './utils.js';
+import { supabase } from './supabase.js';
 
 // ─── STATE ────────────────────────────────────────────────────────────────────
 
@@ -216,7 +217,7 @@ window.editorToggleFestival = () => {
 
 // ─── SAVE ─────────────────────────────────────────────────────────────────────
 
-window.saveGig = () => {
+window.saveGig = async () => {
     const dateStr    = _get('editor-date').trim();
     const band       = _get('editor-band').trim();
     const venue      = _get('editor-venue').trim();
@@ -261,7 +262,6 @@ window.saveGig = () => {
     const journal = window.journalData || [];
 
     if (editingKey) {
-        // Replace existing entry
         const idx = journal.findIndex(
             g => (g['Journal Key'] || '').toString().trim() === editingKey.toString().trim()
         );
@@ -271,13 +271,46 @@ window.saveGig = () => {
             journal.push(gigRow);
         }
     } else {
-        // Check for duplicate key
         if (journal.some(g => g['Journal Key'] === journalKey)) {
             _showError(`A show already exists with this date and venue.\nJournal Key: ${journalKey}`);
             return;
         }
         journal.push(gigRow);
     }
+
+    // ── Phase 3: write to Supabase ────────────────────────────────────────────
+    // Build the Supabase row (snake_case columns, boolean festival field)
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) {
+        const supabaseRow = {
+            user_id:           session.user.id,
+            journal_key:       journalKey,
+            date:              dateStr,
+            band:              band,
+            official_venue:    venue,
+            venue:             venue,
+            festival:          isFest === 'Y',
+            festival_lineups:  _get('editor-lineups').trim(),
+            notable_support:   _get('editor-support').trim(),
+            went_with:         _get('editor-went-with').trim(),
+            comments:          _get('editor-comments').trim(),
+            price:             _get('editor-price').trim(),
+            photos:            _get('editor-photos').trim(),
+            year:              parseInt(y),
+            month:             parseInt(m),
+            day:               parseInt(d),
+        };
+
+        const { error } = await supabase
+            .from('journals')
+            .upsert(supabaseRow, { onConflict: 'user_id,journal_key' });
+
+        if (error) {
+            _showError(`Saved locally but database write failed: ${error.message}`);
+            // Don't return — still update in-memory and refresh UI
+        }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
     window.journalData = journal;
     setDirty(true);
@@ -339,7 +372,7 @@ export const exportCSV = () => {
 
     // Filename includes today's date so you always know which version you downloaded
     const today = new Date().toISOString().slice(0, 10);
-    const user  = JSON.parse(localStorage.getItem('gv_user'));
+    const user  = window.currentUser;
     a.download  = `${user?.JournalFile?.replace('.csv', '') || 'journal'}_${today}.csv`;
 
     document.body.appendChild(a);

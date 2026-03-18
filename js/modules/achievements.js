@@ -243,8 +243,8 @@ export const renderBandBadges = (performanceData) => {
     const badgeContainer = document.getElementById('badges-grid');
     if (!badgeContainer || !performanceData) return;
 
-    const user = JSON.parse(localStorage.getItem('gv_user'));
-    const bandName = user?.Subject?.trim();
+    // Use window.currentArtist set by app.js — works with both localStorage (Phase 1/2) and Supabase auth (Phase 3)
+    const bandName = (window.currentArtist || '').trim();
 
     if (!bandName) {
         badgeContainer.innerHTML = `<p class="col-span-full text-center py-10 text-slate-400 italic">User context missing.</p>`;

@@ -3,163 +3,268 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gig List - Profile Selection</title>
+    <title>Gig List</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎸</text></svg>">
     <link rel="icon" type="image/png" href="assets/icon-512.png">
-
     <link rel="manifest" href="./manifest.json">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="GigVault">
+    <meta name="apple-mobile-web-app-title" content="GigList">
     <link rel="apple-touch-icon" href="assets/icon-512.png">
-
     <script>tailwind = { corePlugins: { preflight: true } };</script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
-
     <style>
         body { font-family: 'Inter', sans-serif; }
-        .user-card:active { transform: scale(0.98); }
-        /* Ensure focus states are visible for keyboard users */
-        .user-card:focus-visible {
-            outline: 3px solid #4f46e5;
-            outline-offset: 4px;
-        }
+        .fade-in { animation: fadeIn 0.3s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        input:focus { outline: none; }
     </style>
 </head>
 
 <body class="bg-slate-50 flex flex-col items-center justify-center min-h-screen p-6">
 
-<main class="w-full max-w-sm mx-auto space-y-8 pt-12" role="main">
+<main class="w-full max-w-sm mx-auto space-y-8 pt-8" role="main">
+
     <header class="text-center space-y-2">
         <div class="inline-flex items-center justify-center w-20 h-20 bg-indigo-600 rounded-[2rem] shadow-xl shadow-indigo-200 mb-4 rotate-3" aria-hidden="true">
             <span class="text-4xl">🎸</span>
         </div>
         <h1 class="text-5xl font-black italic tracking-tighter text-slate-900 uppercase">GIG LIST</h1>
-        <p id="instruction" class="text-slate-400 font-bold text-sm uppercase tracking-widest">
-            Select Archive Mode
-        </p>
+        <p id="instruction" class="text-slate-400 font-bold text-sm uppercase tracking-widest">Your Musical Journey</p>
     </header>
 
-    <div id="modeSelection" class="space-y-4">
-        <button onclick="window.location.href='index.html?mode=Individual'"
-                aria-label="Select Individual mode — Personal Memories"
-                class="w-full p-8 bg-white border-2 border-slate-100 rounded-[2.5rem] shadow-lg hover:border-indigo-500 transition-all text-center">
-            <span class="block text-2xl font-black uppercase italic">Individual</span>
+    <!-- Screen 1: Mode selection -->
+    <div id="screen-mode" class="space-y-4 fade-in">
+        <button onclick="window.showScreen('screen-auth')"
+                aria-label="Sign in to your personal archive"
+                class="w-full p-8 bg-white border-2 border-slate-100 rounded-[2.5rem] shadow-lg hover:border-indigo-500 transition-all text-center active:scale-[0.98]">
+            <span class="block text-2xl font-black uppercase italic">My Gig List</span>
             <span class="block text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Personal Memories</span>
         </button>
 
         <button onclick="window.location.href='index.html?mode=Band'"
-                aria-label="Select Band mode — Official Archives"
-                class="w-full p-8 bg-slate-900 text-white rounded-[2.5rem] shadow-lg hover:ring-4 ring-indigo-500/20 transition-all text-center">
+                aria-label="Browse band archives — no sign in required"
+                class="w-full p-8 bg-slate-900 text-white rounded-[2.5rem] shadow-lg hover:ring-4 ring-indigo-500/20 transition-all text-center active:scale-[0.98]">
             <span class="block text-2xl font-black uppercase italic">Band Mode</span>
             <span class="block text-[10px] text-indigo-300 font-bold uppercase tracking-widest mt-1">Official Archives</span>
         </button>
     </div>
 
-    <div id="userListSection" class="hidden space-y-4">
-        <div class="flex justify-between items-center mb-2">
-            <button onclick="window.location.href='index.html'" class="text-[10px] font-black text-indigo-600 uppercase tracking-widest flex items-center gap-1">
-                ← Back to Modes
-            </button>
-        </div>
-
-        <div id="userList" class="space-y-3" role="list" aria-live="polite">
-            <div id="loadingSkeleton" class="animate-pulse space-y-3">
+    <!-- Screen 2: Band picker -->
+    <div id="screen-bands" class="hidden space-y-4 fade-in">
+        <button onclick="window.showScreen('screen-mode')" class="text-[10px] font-black text-indigo-600 uppercase tracking-widest flex items-center gap-1" aria-label="Back to mode selection">
+            &larr; Back
+        </button>
+        <div id="band-list" class="space-y-3" role="list" aria-live="polite">
+            <div class="animate-pulse space-y-3">
                 <div class="h-20 bg-slate-100 rounded-[2rem] w-full"></div>
                 <div class="h-20 bg-slate-100 rounded-[2rem] w-full"></div>
             </div>
         </div>
     </div>
 
-    <footer class="pt-8 text-center">
-        <p class="text-[10px] text-slate-300 font-black uppercase tracking-widest">
-            &copy; 2026 Strictly GigList
+    <!-- Screen 3: Sign in -->
+    <div id="screen-auth" class="hidden space-y-5 fade-in">
+        <button onclick="window.showScreen('screen-mode')" class="text-[10px] font-black text-indigo-600 uppercase tracking-widest flex items-center gap-1" aria-label="Back to mode selection">
+            &larr; Back
+        </button>
+
+        <div id="auth-error" class="hidden bg-red-50 border border-red-200 text-red-700 text-xs font-bold px-4 py-3 rounded-2xl" role="alert"></div>
+
+        <!-- Google OAuth button -->
+        <button id="btn-google"
+                aria-label="Sign in with Google"
+                class="w-full flex items-center justify-center gap-3 p-4 bg-white border-2 border-slate-200 rounded-2xl font-bold text-slate-700 hover:border-indigo-400 hover:text-indigo-700 transition-all active:scale-[0.98] shadow-sm">
+            <svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true">
+                <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+                <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+                <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+                <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+            </svg>
+            Continue with Google
+        </button>
+
+        <div class="flex items-center gap-3">
+            <div class="flex-1 h-px bg-slate-200"></div>
+            <span class="text-[10px] font-black text-slate-400 uppercase tracking-widest">or</span>
+            <div class="flex-1 h-px bg-slate-200"></div>
+        </div>
+
+        <!-- Email / password -->
+        <div class="space-y-3">
+            <div>
+                <label for="auth-email" class="block text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-2">Email</label>
+                <input type="email" id="auth-email"
+                       placeholder="you@giglist.app"
+                       autocomplete="email"
+                       class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 transition-all">
+            </div>
+            <div>
+                <label for="auth-password" class="block text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-2">Password</label>
+                <input type="password" id="auth-password"
+                       placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;"
+                       autocomplete="current-password"
+                       class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 transition-all">
+            </div>
+            <button id="btn-email-signin"
+                    class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black uppercase tracking-widest rounded-2xl transition-all active:scale-[0.98] text-sm">
+                Sign In
+            </button>
+        </div>
+
+        <div class="text-center pt-2">
+            <button onclick="window.location.href='index.html?mode=Band'"
+                    class="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-slate-600 transition-colors">
+                Maybe Later &mdash; Browse Band Archives
+            </button>
+        </div>
+
+        <p class="text-center text-[10px] text-slate-300 font-bold uppercase tracking-widest">
+            No account yet? Get in touch with Rich.
         </p>
+    </div>
+
+    <!-- Loading screen -->
+    <div id="screen-loading" class="hidden text-center py-8 fade-in">
+        <div class="inline-block w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-4"></div>
+        <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Signing you in&hellip;</p>
+    </div>
+
+    <footer class="pt-4 text-center">
+        <p class="text-[10px] text-slate-300 font-black uppercase tracking-widest">&copy; 2026 Strictly GigList</p>
     </footer>
 </main>
 
-<script>
-    document.addEventListener('DOMContentLoaded', () => {
-        const urlParams = new URLSearchParams(window.location.search);
-        const requestedMode = urlParams.get('mode');
+<script type="module">
+    import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 
-        const modeSelection = document.getElementById('modeSelection');
-        const userListSection = document.getElementById('userListSection');
-        const instruction = document.getElementById('instruction');
+    const supabase = createClient(
+        'https://adlzxihwskrfcjpbtrgj.supabase.co',
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFkbHp4aWh3c2tyZmNqcGJ0cmdqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2MTUwNDIsImV4cCI6MjA4OTE5MTA0Mn0.rSCjSNy6KvsjRTLyg6SprobSQA0PbxDHjbk8X75InpU'
+    );
 
-        if (requestedMode) {
-            modeSelection.classList.add('hidden');
-            userListSection.classList.remove('hidden');
-            instruction.innerText = `Select ${requestedMode} Profile`;
-            loadUsers(requestedMode);
+    const SCREENS = ['screen-mode','screen-auth','screen-bands','screen-loading'];
+
+    window.showScreen = (id) => {
+        SCREENS.forEach(s => {
+            const el = document.getElementById(s);
+            if (el) { el.classList.add('hidden'); el.classList.remove('fade-in'); }
+        });
+        const target = document.getElementById(id);
+        if (target) {
+            target.classList.remove('hidden');
+            // Trigger reflow so the animation re-runs
+            void target.offsetWidth;
+            target.classList.add('fade-in');
+        }
+    };
+
+    const showAuthError = (msg) => {
+        const el = document.getElementById('auth-error');
+        if (el) { el.textContent = msg; el.classList.remove('hidden'); }
+        window.showScreen('screen-auth');
+    };
+
+    // ── Initialise ────────────────────────────────────────────────────────────
+    (async () => {
+        window.showScreen('screen-loading');
+
+        const mode = new URLSearchParams(window.location.search).get('mode');
+
+        // Check session — but don't redirect authenticated users away from Band mode
+        // since that's a legitimate destination even when logged in
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session && mode !== 'Band') {
+            window.location.href = 'vault.html';
+            return;
         }
 
-        function loadUsers(mode) {
-            const csvPath = `data/users.csv?v=${new Date().getTime()}`;
-
-            Papa.parse(csvPath, {
-                download: true,
-                header: true,
-                skipEmptyLines: true,
-                complete: function(results) {
-                    const container = document.getElementById('userList');
-                    const skeleton = document.getElementById('loadingSkeleton');
-                    container.innerHTML = '';
-                    if(skeleton) skeleton.classList.add('hidden');
-
-                    const filtered = results.data.filter(u => {
-                        if (!u.UserName && !u.user_name) return false;
-                        const rawType = (u.Type || '').trim().toLowerCase();
-                        const targetMode = mode.toLowerCase();
-
-                        // Map 'Individual' request to 'Personal' CSV data
-                        if (targetMode === 'individual') {
-                            return rawType === 'personal';
-                        }
-                        return rawType === targetMode;
-                    });
-
-                    if (filtered.length === 0) {
-                        container.innerHTML = `<p class="text-center text-slate-400 font-bold py-10">No ${mode} profiles found.</p>`;
-                        return;
-                    }
-
-                    filtered.forEach(user => {
-                        const name = user.UserName || user.user_name;
-                        const btn = document.createElement('button');
-                        btn.className = "w-full p-6 bg-white border-2 border-white hover:border-indigo-100 shadow-sm hover:shadow-xl transition-all duration-300 rounded-[2rem] flex justify-between items-center group";
-
-                        btn.innerHTML = `
-                            <div class="flex flex-col items-start text-left">
-                                <span class="text-[10px] text-slate-400 font-black uppercase tracking-widest mb-1 group-hover:text-indigo-600 transition-colors">
-                                    Archive
-                                </span>
-                                <span class="text-2xl font-black text-slate-900 tracking-tighter">${name}</span>
-                            </div>
-                            <div class="bg-slate-50 group-hover:bg-indigo-600 w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-300" aria-hidden="true">
-                                <span class="text-slate-400 group-hover:text-white font-black">→</span>
-                            </div>
-                        `;
-
-                        btn.onclick = () => {
-                            localStorage.setItem('gv_user', JSON.stringify(user));
-                            window.location.href = 'vault.html';
-                        };
-
-                        container.appendChild(btn);
-                    });
-                }
-            });
+        if (mode === 'Band') {
+            await loadBands();
+            window.showScreen('screen-bands');
+        } else {
+            window.showScreen('screen-mode');
         }
+    })();
+
+    // ── Band list ─────────────────────────────────────────────────────────────
+    async function loadBands() {
+        const container = document.getElementById('band-list');
+        const { data, error } = await supabase.from('bands').select('*').order('rank');
+
+        if (error || !data?.length) {
+            container.innerHTML = '<p class="text-center text-slate-400 font-bold py-10">No band archives found.</p>';
+            return;
+        }
+
+        container.innerHTML = '';
+        data.forEach(band => {
+            const btn = document.createElement('button');
+            btn.className = "w-full p-6 bg-white border-2 border-white hover:border-indigo-100 shadow-sm hover:shadow-xl transition-all duration-300 rounded-[2rem] flex justify-between items-center group";
+            btn.setAttribute('aria-label', `Browse ${band.name} archive`);
+            btn.innerHTML = `
+                <div class="flex flex-col items-start text-left">
+                    <span class="text-[10px] text-slate-400 font-black uppercase tracking-widest mb-1 group-hover:text-indigo-600 transition-colors">Band Archive</span>
+                    <span class="text-2xl font-black text-slate-900 tracking-tighter">${band.name}</span>
+                </div>
+                <div class="bg-slate-50 group-hover:bg-indigo-600 w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-300" aria-hidden="true">
+                    <span class="text-slate-400 group-hover:text-white font-black">&rarr;</span>
+                </div>
+            `;
+            btn.onclick = () => {
+                window.location.href = `vault.html?band=${encodeURIComponent(band.name)}`;
+            };
+            container.appendChild(btn);
+        });
+    }
+
+    // ── Google OAuth ──────────────────────────────────────────────────────────
+    document.getElementById('btn-google').addEventListener('click', async () => {
+        window.showScreen('screen-loading');
+        const { error } = await supabase.auth.signInWithOAuth({
+            provider: 'google',
+            options: { redirectTo: window.location.origin + window.location.pathname.replace(/index.html$/, '') }
+        });
+        if (error) showAuthError('Google sign-in failed. Please try again.');
+    });
+
+    // ── Email / password ──────────────────────────────────────────────────────
+    const doEmailSignIn = async () => {
+        const email    = document.getElementById('auth-email').value.trim();
+        const password = document.getElementById('auth-password').value;
+
+        if (!email || !password) {
+            showAuthError('Please enter your email and password.');
+            return;
+        }
+
+        window.showScreen('screen-loading');
+
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+
+        if (error) {
+            showAuthError(
+                error.message === 'Invalid login credentials'
+                    ? 'Incorrect email or password. Please try again.'
+                    : error.message
+            );
+            return;
+        }
+
+        window.location.href = 'vault.html';
+    };
+
+    document.getElementById('btn-email-signin').addEventListener('click', doEmailSignIn);
+    document.getElementById('auth-password').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') doEmailSignIn();
     });
 </script>
 <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./sw.js');
+        navigator.serviceWorker.register('./sw.js');
     }
 </script>
 </body>

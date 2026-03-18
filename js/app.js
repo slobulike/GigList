@@ -1,11 +1,11 @@
 /**
  * Gig List Core Engine
-  V2.8.0 - Release Date 2026-03-15
+  V3.0.0 - Release Date 2026-03-18
           * -------------------------------------------------------------------
-  [FEATURE] Added editor.js to allow users to add new shows and amend existing shows
-  [REFACTOR] Aligned format of setlist.fm journal files and original user files
-
+  [REFACTOR] Moved all backend data to Supabase
+  [REFACTOR] Added Google OAuth
 */
+
 
 import * as Data from './modules/data.js';
 import * as Charts from './modules/charts.js';
@@ -17,12 +17,13 @@ import './modules/quiz.js';
 import * as Games from './modules/games.js';
 import { GigPuzzle } from './modules/puzzle.js';
 import { initEditor, exportCSV } from './modules/editor.js';
+import { supabase } from './modules/supabase.js';
 
-let currentUser = JSON.parse(localStorage.getItem('gv_user'));
+let currentUser = null;
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "2.8.1";
+const APP_VERSION = "3.0.0";
 
 window.toggleListView = UI.toggleListView;
 window.activeView = window.activeView || 'list';
@@ -33,13 +34,59 @@ window.switchGame = Games.switchGame;
 window.startNewPuzzle = Games.startNewPuzzle;
 
 export async function initApp() {
-    if (!currentUser) {
+    // Check for band param FIRST — authenticated users can browse band archives too
+    const params    = new URLSearchParams(window.location.search);
+    const bandParam = params.get('band');
+
+    // 1. Check Supabase auth session
+    const { data: { session } } = await supabase.auth.getSession();
+
+    if (bandParam) {
+        // Band archive — accessible with or without auth
+        const { data: bandRow } = await supabase
+            .from('bands')
+            .select('*')
+            .ilike('name', bandParam)
+            .single();
+
+        if (!bandRow) {
+            window.location.href = 'index.html';
+            return;
+        }
+        currentUser = {
+            UserName:    bandRow.name,
+            Type:        'Band',
+            Subject:     bandRow.subject || bandRow.name,
+            id:          session?.user?.id || null,
+            isAuthUser:  !!session   // track whether viewer is logged in for switcher
+        };
+    } else if (!session) {
         window.location.href = 'index.html';
         return;
+    } else {
+        // Authenticated personal user
+        const { data: profile } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', session.user.id)
+            .single();
+
+        if (!profile) {
+            window.location.href = 'index.html';
+            return;
+        }
+        currentUser = {
+            ...profile,
+            UserName:   profile.username,
+            Type:       'Personal',
+            id:         session.user.id,
+            isAuthUser: true
+        };
     }
 
     // 1. Load Data
     const data = await Data.loadAppData(currentUser);
+    window.currentUser = currentUser; // expose for modules that need user context
     window.journalData = data.journalData;
     window.performanceData = data.performanceData;
     window.filteredResults = [...data.journalData];
@@ -108,7 +155,8 @@ export async function initApp() {
     // 4. Initial Render & Listeners
     refreshUI();
     initEventListeners();
-    initEditor(); // wire combobox autocomplete now that journalData is loaded
+    initEditor();
+    initModeSwitcher(); // build the logo dropdown switcher
 }
 
 function refreshUI() {
@@ -332,16 +380,6 @@ window.openSettings = function() {
     modal.classList.remove('hidden');
     modal.setAttribute('aria-hidden', 'false');
 
-    const switchUserBtn = document.getElementById('settings-switch-user');
-    if (switchUserBtn) {
-        const mode = window.isBandMode ? 'Band' : 'Individual';
-        switchUserBtn.onclick = null;
-        switchUserBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            window.location.href = `index.html?mode=${mode}`;
-        }, { once: true });
-    }
-
     document.getElementById('setlistIdInput')?.focus();
     if (window.lucide) lucide.createIcons();
 };
@@ -361,6 +399,173 @@ window.syncComingSoon = function() {
         ? `Syncing for ${id} coming soon! Using the Python bridge for now.`
         : 'Please enter a Setlist.fm username.'
     );
+};
+
+// ─── MODE SWITCHER ────────────────────────────────────────────────────────────
+
+async function initModeSwitcher() {
+    if (!currentUser?.isAuthUser) return;
+
+    const { data: bands } = await supabase.from('bands').select('name, rank').order('rank');
+    window._switcherBands = bands || [];
+
+    const logoLink = document.getElementById('header-logo-link');
+    if (!logoLink) return;
+
+    logoLink.removeAttribute('href');
+    logoLink.style.cursor = 'pointer';
+    logoLink.setAttribute('role', 'button');
+    logoLink.setAttribute('aria-label', 'Switch mode');
+    logoLink.setAttribute('aria-expanded', 'false');
+    logoLink.setAttribute('aria-controls', 'mode-switcher-panel');
+
+    // Make all child elements pass clicks through to the <a>
+    logoLink.querySelectorAll('*').forEach(el => el.style.pointerEvents = 'none');
+
+    logoLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        toggleSwitcher();
+    });
+
+    // Close on outside click
+    document.addEventListener('click', (e) => {
+        const panel = document.getElementById('mode-switcher-panel');
+        if (panel && !panel.classList.contains('hidden') &&
+            !panel.contains(e.target) && !logoLink.contains(e.target)) {
+            closeSwitcher();
+        }
+    });
+}
+
+function toggleSwitcher() {
+    const panel = document.getElementById('mode-switcher-panel');
+    if (!panel) { buildSwitcherPanel(); return; }
+    if (panel.classList.contains('hidden')) {
+        openSwitcher();
+    } else {
+        closeSwitcher();
+    }
+}
+
+function openSwitcher() {
+    let panel = document.getElementById('mode-switcher-panel');
+    if (!panel) panel = buildSwitcherPanel();
+    panel.classList.remove('hidden');
+    document.getElementById('header-logo-link')?.setAttribute('aria-expanded', 'true');
+    if (window.lucide) lucide.createIcons();
+}
+
+function closeSwitcher() {
+    const panel = document.getElementById('mode-switcher-panel');
+    if (panel) panel.classList.add('hidden');
+    document.getElementById('header-logo-link')?.setAttribute('aria-expanded', 'false');
+}
+
+function buildSwitcherPanel() {
+    const isPersonal  = currentUser.Type === 'Personal';
+    const isBand      = currentUser.Type === 'Band';
+    const bands       = window._switcherBands || [];
+    const currentBand = isBand ? currentUser.UserName : null;
+
+    const panel = document.createElement('div');
+    panel.id        = 'mode-switcher-panel';
+    panel.className = 'absolute top-full left-0 mt-2 w-64 bg-white rounded-[1.5rem] shadow-2xl border border-slate-100 overflow-hidden z-[200]';
+    panel.setAttribute('role', 'menu');
+    panel.setAttribute('aria-label', 'Switch mode');
+
+    const row = (label, sublabel, active, onclick, icon = 'check') => `
+        <button onclick="${onclick}" role="menuitem"
+                class="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-colors ${active ? 'opacity-50 cursor-default pointer-events-none' : ''}">
+            <span class="w-5 flex-shrink-0 flex items-center justify-center">
+                ${active ? `<i data-lucide="${icon}" class="w-4 h-4 text-indigo-600"></i>` : ''}
+            </span>
+            <span class="flex-1 min-w-0">
+                <span class="block text-sm font-black text-slate-900 truncate">${label}</span>
+                ${sublabel ? `<span class="block text-[10px] text-slate-400 font-bold uppercase tracking-widest">${sublabel}</span>` : ''}
+            </span>
+        </button>`;
+
+    // Band section toggle state
+    const bandsExpanded = isBand; // start expanded if currently in band mode
+
+    panel.innerHTML = `
+        ${row(currentUser.isAuthUser ? (isPersonal ? currentUser.UserName : 'My Gig List') : 'My Gig List',
+              'Personal Archive',
+              isPersonal,
+              isPersonal ? '' : "window._switchToPersonal()")}
+
+        <div class="border-t border-slate-100">
+            <button onclick="window._toggleBandSection(this)" role="menuitem"
+                    class="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-colors"
+                    aria-expanded="${bandsExpanded}" aria-controls="switcher-band-list">
+                <span class="w-5 flex-shrink-0"></span>
+                <span class="flex-1 text-sm font-black text-slate-900">Band Archives</span>
+                <i data-lucide="chevron-${bandsExpanded ? 'up' : 'down'}" class="w-4 h-4 text-slate-400 pointer-events-none" aria-hidden="true"></i>
+            </button>
+            <div id="switcher-band-list" class="${bandsExpanded ? '' : 'hidden'} bg-slate-50/50">
+                ${bands.map(b => row(
+                    b.name, 'Band Archive',
+                    currentBand === b.name,
+                    `window._switchToBand('${b.name.replace(/'/g, "\\'")}')`
+                )).join('')}
+                ${bands.length === 0 ? '<p class="px-4 py-3 text-xs text-slate-400">No band archives yet.</p>' : ''}
+            </div>
+        </div>
+
+        <div class="border-t border-slate-100">
+            <button onclick="window.signOut()" role="menuitem"
+                    class="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-red-50 transition-colors group">
+                <span class="w-5 flex-shrink-0 flex items-center justify-center">
+                    <i data-lucide="log-out" class="w-4 h-4 text-slate-400 group-hover:text-red-500"></i>
+                </span>
+                <span class="text-sm font-black text-slate-500 group-hover:text-red-600">Sign Out</span>
+            </button>
+        </div>
+    `;
+
+    // Insert into header so it's positioned relative to the full header width
+    const header = document.querySelector('header');
+    header.style.position = 'relative'; // ensure header is positioning context
+    header.appendChild(panel);
+
+    if (window.lucide) lucide.createIcons();
+    return panel;
+}
+
+window._toggleBandSection = (btn) => {
+    const list = document.getElementById('switcher-band-list');
+    if (!list) return;
+    const expanding = list.classList.contains('hidden');
+    list.classList.toggle('hidden');
+    if (btn) {
+        btn.setAttribute('aria-expanded', expanding ? 'true' : 'false');
+        const chevron = btn.querySelector('[data-lucide^="chevron"]');
+        if (chevron) {
+            chevron.setAttribute('data-lucide', expanding ? 'chevron-up' : 'chevron-down');
+            if (window.lucide) lucide.createIcons();
+        }
+    }
+};
+
+window._switchToPersonal = () => {
+    closeSwitcher();
+    window.location.href = 'vault.html';
+};
+
+window._switchToBand = (bandName) => {
+    closeSwitcher();
+    window.location.href = `vault.html?band=${encodeURIComponent(bandName)}`;
+};
+
+window.signOut = async function() {
+    await supabase.auth.signOut();
+    window.location.href = 'index.html';
+};
+
+// Keep for backward compatibility — settings modal sign out
+window.browseBandMode = function() {
+    window.closeSettings();
+    window.location.href = 'index.html?mode=Band';
 };
 
 // ─── DATA CONTROLS ────────────────────────────────────────────────────────────
