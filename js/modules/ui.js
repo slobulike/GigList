@@ -194,12 +194,29 @@ export const updateTicker = (data) => {
             ? nextGig.Date
             : `${nextGig.OfficialVenue} · ${nextGig.Date}`;
 
-        card.className = 'bg-indigo-600 rounded-[1.5rem] p-4 flex items-center justify-between';
-        if (eyebrowEl) { eyebrowEl.textContent = 'Next show'; eyebrowEl.className = 'text-[9px] font-black text-indigo-300 uppercase tracking-widest mb-1'; }
-        if (mainEl)    { mainEl.textContent = mainText; mainEl.className = 'text-lg font-black text-white leading-tight'; }
-        if (subEl)     { subEl.textContent = subText;   subEl.className = 'text-[10px] font-bold text-indigo-300 mt-0.5'; }
-        if (numEl)     { numEl.textContent = days;      numEl.className = 'text-4xl font-black text-white leading-none tracking-tighter'; }
-        if (unitEl)    { unitEl.textContent = days === 1 ? 'day' : 'days'; unitEl.className = 'text-[9px] font-black text-indigo-300 uppercase tracking-widest'; }
+        if (days === 0) {
+            // ── SHOW DAY ─────────────────────────────────────────────────────
+            card.className = 'relative overflow-hidden bg-gradient-to-br from-amber-400 via-orange-400 to-pink-500 rounded-[1.5rem] p-4 flex items-center justify-between';
+            if (eyebrowEl) { eyebrowEl.textContent = 'Tonight 🎉'; eyebrowEl.className = 'text-[9px] font-black text-amber-900/70 uppercase tracking-widest mb-1'; }
+            if (mainEl)    { mainEl.textContent = mainText;  mainEl.className = 'text-lg font-black text-white leading-tight drop-shadow'; }
+            if (subEl)     { subEl.textContent = subText;    subEl.className = 'text-[10px] font-bold text-amber-900/60 mt-0.5'; }
+            if (numEl)     { numEl.textContent = '🎊';       numEl.className = 'text-4xl leading-none'; }
+            if (unitEl)    { unitEl.textContent = 'show day'; unitEl.className = 'text-[9px] font-black text-amber-900/70 uppercase tracking-widest'; }
+
+            // Fire confetti once — check flag so it only runs once per session
+            if (!window._confettiFired) {
+                window._confettiFired = true;
+                setTimeout(() => fireConfetti(), 400);
+            }
+        } else {
+            // ── UPCOMING ─────────────────────────────────────────────────────
+            card.className = 'bg-indigo-600 rounded-[1.5rem] p-4 flex items-center justify-between';
+            if (eyebrowEl) { eyebrowEl.textContent = 'Next show'; eyebrowEl.className = 'text-[9px] font-black text-indigo-300 uppercase tracking-widest mb-1'; }
+            if (mainEl)    { mainEl.textContent = mainText; mainEl.className = 'text-lg font-black text-white leading-tight'; }
+            if (subEl)     { subEl.textContent = subText;   subEl.className = 'text-[10px] font-bold text-indigo-300 mt-0.5'; }
+            if (numEl)     { numEl.textContent = days;      numEl.className = 'text-4xl font-black text-white leading-none tracking-tighter'; }
+            if (unitEl)    { unitEl.textContent = days === 1 ? 'day' : 'days'; unitEl.className = 'text-[9px] font-black text-indigo-300 uppercase tracking-widest'; }
+        }
 
     } else if (lastGig) {
         const days = Math.floor((today - parseDate(lastGig.Date)) / (1000 * 60 * 60 * 24));
@@ -215,6 +232,85 @@ export const updateTicker = (data) => {
         if (numEl)     { numEl.textContent = days;      numEl.className = 'text-4xl font-black text-white leading-none tracking-tighter'; }
         if (unitEl)    { unitEl.textContent = days === 1 ? 'day ago' : 'days ago'; unitEl.className = 'text-[9px] font-black text-slate-400 uppercase tracking-widest'; }
     }
+};
+
+/* --- CONFETTI ----------------------------------------------------------------
+   Lightweight canvas confetti — no library, ~60 lines.
+   Fires from the top of the screen, gravity + drift, fades out after 3s.
+----------------------------------------------------------------------------- */
+
+const fireConfetti = () => {
+    const canvas = document.createElement('canvas');
+    canvas.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9999;';
+    document.body.appendChild(canvas);
+
+    const ctx = canvas.getContext('2d');
+    canvas.width  = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    const COLOURS = ['#f59e0b','#ef4444','#8b5cf6','#3b82f6','#10b981','#f97316','#ec4899','#facc15'];
+    const SHAPES  = ['rect', 'circle', 'ribbon'];
+    const COUNT   = 120;
+
+    const pieces = Array.from({ length: COUNT }, () => ({
+        x:       Math.random() * canvas.width,
+        y:       -20 - Math.random() * 100,
+        w:       6 + Math.random() * 8,
+        h:       10 + Math.random() * 6,
+        colour:  COLOURS[Math.floor(Math.random() * COLOURS.length)],
+        shape:   SHAPES[Math.floor(Math.random() * SHAPES.length)],
+        vx:      (Math.random() - 0.5) * 4,
+        vy:      3 + Math.random() * 4,
+        angle:   Math.random() * Math.PI * 2,
+        spin:    (Math.random() - 0.5) * 0.3,
+        opacity: 1,
+    }));
+
+    let start = null;
+    const DURATION = 3000;
+
+    const draw = (timestamp) => {
+        if (!start) start = timestamp;
+        const elapsed = timestamp - start;
+        const progress = elapsed / DURATION;
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        pieces.forEach(p => {
+            p.x     += p.vx;
+            p.y     += p.vy;
+            p.angle += p.spin;
+            p.vy    += 0.12; // gravity
+            p.vx    *= 0.99; // drag
+            p.opacity = Math.max(0, 1 - Math.pow(progress, 2));
+
+            ctx.save();
+            ctx.globalAlpha = p.opacity;
+            ctx.translate(p.x, p.y);
+            ctx.rotate(p.angle);
+            ctx.fillStyle = p.colour;
+
+            if (p.shape === 'circle') {
+                ctx.beginPath();
+                ctx.arc(0, 0, p.w / 2, 0, Math.PI * 2);
+                ctx.fill();
+            } else if (p.shape === 'ribbon') {
+                ctx.fillRect(-p.w / 2, -p.h / 4, p.w, p.h / 2);
+            } else {
+                ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+            }
+
+            ctx.restore();
+        });
+
+        if (elapsed < DURATION) {
+            requestAnimationFrame(draw);
+        } else {
+            canvas.remove();
+        }
+    };
+
+    requestAnimationFrame(draw);
 };
 
 /* --- CAROUSEL WITH 3-TIER IMAGE LOGIC --- */
