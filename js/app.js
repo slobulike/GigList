@@ -1,11 +1,10 @@
 /**
  * Gig List Core Engine
-  V3.0.0 - Release Date 2026-03-18
+  V3.1.0 - Release Date 2026-03-18
           * -------------------------------------------------------------------
-  [REFACTOR] Moved all backend data to Supabase
-  [REFACTOR] Added Google OAuth
-*/
+  [FEATURE] Add photo storage to Supabase and photo uploader
 
+*/
 
 import * as Data from './modules/data.js';
 import * as Charts from './modules/charts.js';
@@ -401,7 +400,100 @@ window.syncComingSoon = function() {
     );
 };
 
-// ─── MODE SWITCHER ────────────────────────────────────────────────────────────
+// ─── SCRAPBOOK PHOTO UPLOAD ───────────────────────────────────────────────────
+
+window.uploadScrapbookPhoto = async (input, journalKey, formattedDate, cleanVenue) => {
+    const file = input.files?.[0];
+    if (!file) return;
+
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+
+    const userId      = session.user.id;
+    const storagePath = `${userId}/${formattedDate}-${cleanVenue}.jpg`;
+
+    // Show uploading state on the camera button
+    const btn = document.getElementById('h-camera-btn');
+    const originalHTML = btn?.innerHTML;
+    if (btn) btn.innerHTML = `<svg class="w-5 h-5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>`;
+
+    try {
+        // Convert to JPEG at reasonable quality to keep file sizes sensible
+        const compressed = await compressImage(file, 1920, 0.85);
+
+        const { error } = await supabase.storage
+            .from('gig-photos')
+            .upload(storagePath, compressed, {
+                contentType: 'image/jpeg',
+                upsert: true   // replace if photo already exists for this show
+            });
+
+        if (error) throw error;
+
+        // Get a signed URL and update the modal image immediately
+        const { data: signedData, error: signedError } = await supabase.storage
+            .from('gig-photos')
+            .createSignedUrl(storagePath, 3600);
+
+        if (!signedError && signedData?.signedUrl) {
+            const imgSupabase = document.getElementById('h-supabase');
+            if (imgSupabase) {
+                document.getElementById('h-scrapbook')?.classList.add('hidden');
+                document.getElementById('h-artist')?.classList.add('hidden');
+                const ticket = document.getElementById('h-ticket');
+                if (ticket) { ticket.classList.add('hidden'); ticket.style.display = ''; }
+
+                imgSupabase.onload = () => imgSupabase.classList.remove('hidden');
+                imgSupabase.src = signedData.signedUrl;
+            }
+        }
+
+        // Restore camera button with a success tick briefly
+        if (btn) {
+            btn.innerHTML = `<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>`;
+            setTimeout(() => { if (btn) btn.innerHTML = originalHTML; if (window.lucide) lucide.createIcons(); }, 2000);
+        }
+
+    } catch (err) {
+        console.error('Photo upload failed:', err);
+        if (btn && originalHTML) btn.innerHTML = originalHTML;
+        if (window.lucide) lucide.createIcons();
+        alert(`Upload failed: ${err.message}`);
+    }
+
+    // Reset the file input so the same file can be re-selected if needed
+    input.value = '';
+};
+
+/**
+ * Compresses an image file to a JPEG at the given max dimension and quality.
+ * Keeps aspect ratio. Returns a Blob.
+ */
+async function compressImage(file, maxDimension, quality) {
+    return new Promise((resolve) => {
+        const img = new Image();
+        const url = URL.createObjectURL(file);
+        img.onload = () => {
+            URL.revokeObjectURL(url);
+            let { width, height } = img;
+            if (width > maxDimension || height > maxDimension) {
+                if (width > height) {
+                    height = Math.round((height / width) * maxDimension);
+                    width  = maxDimension;
+                } else {
+                    width  = Math.round((width / height) * maxDimension);
+                    height = maxDimension;
+                }
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width  = width;
+            canvas.height = height;
+            canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+            canvas.toBlob(resolve, 'image/jpeg', quality);
+        };
+        img.src = url;
+    });
+}
 
 async function initModeSwitcher() {
     if (!currentUser?.isAuthUser) return;

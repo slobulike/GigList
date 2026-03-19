@@ -791,6 +791,11 @@ export const openGigModal = (key, journalData, performanceData) => {
         <div class="flex flex-col h-full max-h-[90vh]">
             <div class="flex-none bg-white rounded-t-[2.5rem] overflow-hidden border-b border-slate-100 shadow-sm z-50">
                 <div class="relative h-48 md:h-64 w-full bg-slate-900 flex items-center justify-center overflow-hidden">
+                    <img id="h-supabase"
+                         src=""
+                         alt=""
+                         class="absolute inset-0 w-full h-full object-cover z-20 hidden">
+
                     <img id="h-scrapbook"
                          src="${scrapbookPath}"
                          alt=""
@@ -805,6 +810,17 @@ export const openGigModal = (key, journalData, performanceData) => {
                          class="absolute inset-0 z-10 items-center justify-center p-6 bg-slate-50 hidden">
                         ${ticketHTML}
                     </div>
+
+                    <!-- Camera upload button — only shown for authenticated personal users -->
+                    ${window.currentUser?.Type === 'Personal' ? `
+                    <label id="h-camera-btn"
+                           aria-label="Add or replace photo for this show"
+                           class="absolute bottom-3 right-14 z-50 bg-black/40 backdrop-blur-md text-white p-2 rounded-full hover:bg-black/60 transition-all cursor-pointer">
+                        <i data-lucide="camera" class="w-5 h-5" aria-hidden="true"></i>
+                        <input type="file" accept="image/*" capture="environment"
+                               class="hidden"
+                               onchange="window.uploadScrapbookPhoto(this, '${entry['Journal Key']?.replace(/'/g, "\\'")}', '${formattedDate}', '${cleanVenue}')">
+                    </label>` : ''}
 
                     <button onclick="window.closeModal()"
                             aria-label="Close details"
@@ -861,19 +877,35 @@ export const openGigModal = (key, journalData, performanceData) => {
         </div>
     `;
 
-// --- ASSET RESOLUTION (The "Ext-Check" Waterfall) ---
+// --- ASSET RESOLUTION WATERFALL ---
+// Priority: 1. Supabase Storage (user's private scrapbook)
+//           2. Local assets/scrapbook/ (existing photos, .jpg then .JPG)
+//           3. Local assets/artists/ stock photo (.jpg then .JPG)
+//           4. Mock ticket (generated HTML)
+
+    const imgSupabase  = document.getElementById('h-supabase');
     const imgScrapbook = document.getElementById('h-scrapbook');
-    const imgArtist = document.getElementById('h-artist');
-    const divTicket = document.getElementById('h-ticket');
+    const imgArtist    = document.getElementById('h-artist');
+    const divTicket    = document.getElementById('h-ticket');
+
+    const tryLocalScrapbook = () => {
+        imgScrapbook.onload = () => imgScrapbook.classList.remove('hidden');
+        imgScrapbook.onerror = () => {
+            if (imgScrapbook.src.endsWith('.jpg')) {
+                imgScrapbook.src = scrapbookPath.replace('.jpg', '.JPG');
+            } else {
+                tryArtist();
+            }
+        };
+        imgScrapbook.src = scrapbookPath;
+    };
 
     const tryArtist = () => {
         imgArtist.onload = () => imgArtist.classList.remove('hidden');
         imgArtist.onerror = () => {
-            // If artist.jpg fails, try artist.JPG
             if (imgArtist.src.endsWith('.jpg')) {
                 imgArtist.src = artistPath.replace('.jpg', '.JPG');
             } else {
-                // Total failure - show the ticket
                 divTicket.classList.remove('hidden');
                 divTicket.style.display = 'flex';
             }
@@ -881,16 +913,29 @@ export const openGigModal = (key, journalData, performanceData) => {
         imgArtist.src = artistPath;
     };
 
-    imgScrapbook.onload = () => imgScrapbook.classList.remove('hidden');
-    imgScrapbook.onerror = () => {
-        // 1. If scrapbook.jpg fails, try scrapbook.JPG
-        if (imgScrapbook.src.endsWith('.jpg')) {
-            imgScrapbook.src = scrapbookPath.replace('.jpg', '.JPG');
-        } else {
-            // 2. If both fail, move to Artist logic
-            tryArtist();
-        }
-    };
+    // Step 1: try Supabase Storage if user is authenticated
+    const userId = window.currentUser?.id;
+    if (userId) {
+        import('./supabase.js').then(async ({ supabase }) => {
+            const storagePath = `${userId}/${formattedDate}-${cleanVenue}.jpg`;
+            // Private bucket requires a signed URL — createSignedUrl returns an error
+            // if the file doesn't exist, so no separate existence check needed
+            const { data, error } = await supabase.storage
+                .from('gig-photos')
+                .createSignedUrl(storagePath, 3600); // 1 hour expiry
+
+            if (error || !data?.signedUrl) {
+                // File doesn't exist in storage — fall through to local scrapbook
+                tryLocalScrapbook();
+            } else {
+                imgSupabase.onload = () => imgSupabase.classList.remove('hidden');
+                imgSupabase.onerror = () => tryLocalScrapbook();
+                imgSupabase.src = data.signedUrl;
+            }
+        });
+    } else {
+        tryLocalScrapbook();
+    }
 
     modal.classList.remove('hidden');
     document.body.style.overflow = 'hidden';
