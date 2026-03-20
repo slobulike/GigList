@@ -113,11 +113,53 @@ export const updateStats = (data) => {
     });
 };
 
-export const updateRank = (data) => {
-    const user = window.currentUser;
-    const rankEl = document.getElementById('stat-rank');
-    if (rankEl && user) {
-        rankEl.innerText = user.Rank || user.rank || Math.floor(data.length / 10);
+export const updateRank = async (data) => {
+    const user      = window.currentUser;
+    const rankEl    = document.getElementById('stat-rank');
+    const labelEl   = document.getElementById('stat-fourth-label');
+    const tileEl    = document.getElementById('stat-fourth-tile');
+
+    if (window.isBandMode) {
+        // Show fan count for the band
+        if (labelEl) labelEl.textContent = 'GigList Fans';
+        if (tileEl)  tileEl.setAttribute('aria-label', 'Favourite this band on GigList');
+
+        // Fetch fan count
+        const bandName = window.currentArtist;
+        const { count } = await import('./supabase.js').then(({ supabase }) =>
+            supabase.from('band_fans')
+                .select('*', { count: 'exact', head: true })
+                .eq('band_name', bandName)
+        );
+        if (rankEl) rankEl.textContent = count ?? 0;
+
+        // Check if current user has favourited this band
+        if (user?.isAuthUser && user?.id) {
+            const { supabase } = await import('./supabase.js');
+            const { data: fav } = await supabase
+                .from('band_fans')
+                .select('id')
+                .eq('band_name', bandName)
+                .eq('user_id', user.id)
+                .single();
+            window._isFavourite = !!fav;
+            if (tileEl) {
+                tileEl.classList.toggle('bg-indigo-600', !!fav);
+                tileEl.classList.toggle('bg-indigo-50\\/30', !fav);
+                if (labelEl) labelEl.classList.toggle('text-white', !!fav);
+                if (rankEl)  rankEl.classList.toggle('text-white', !!fav);
+            }
+        } else {
+            // Unauthenticated — tile is display-only, no toggle
+            if (tileEl) tileEl.style.cursor = 'default';
+        }
+    } else {
+        // Personal mode — show rank, disable tile click
+        if (labelEl) labelEl.textContent = 'Rank';
+        if (tileEl)  tileEl.style.cursor = 'default';
+        if (tileEl)  tileEl.setAttribute('aria-label', '');
+        const rank = user?.rank || user?.Rank;
+        if (rankEl) rankEl.textContent = rank ?? '--';
     }
 };
 
@@ -908,7 +950,7 @@ export const openGigModal = (key, journalData, performanceData) => {
                     </div>
 
                     <!-- Camera upload button — only shown for authenticated personal users -->
-                    ${window.currentUser?.Type === 'Personal' ? `
+                    ${window.currentUser?.Type === 'Personal' && !window.isReadOnly ? `
                     <label id="h-camera-btn"
                            aria-label="Add or replace photo for this show"
                            class="absolute bottom-3 right-14 z-50 bg-black/40 backdrop-blur-md text-white p-2 rounded-full hover:bg-black/60 transition-all cursor-pointer">
@@ -931,6 +973,7 @@ export const openGigModal = (key, journalData, performanceData) => {
                              <i data-lucide="play-circle" class="w-4 h-4" aria-hidden="true"></i> WATCH CLIPS
                         </a>
                         <button onclick="window.openEditGigModal('${entry['Journal Key']?.replace(/'/g, "\\'")}')"
+                                ${window.isReadOnly ? 'hidden' : ''}
                                 class="bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 text-slate-500 text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
                             <i data-lucide="pencil" class="w-3.5 h-3.5" aria-hidden="true"></i> EDIT
                         </button>

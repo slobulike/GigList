@@ -373,7 +373,8 @@ export const exportCSV = () => {
     // Filename includes today's date so you always know which version you downloaded
     const today = new Date().toISOString().slice(0, 10);
     const user  = window.currentUser;
-    a.download  = `${user?.JournalFile?.replace('.csv', '') || 'journal'}_${today}.csv`;
+    const name  = user?.username || user?.UserName || user?.JournalFile?.replace('.csv', '') || 'journal';
+    a.download  = `journal_${name.toLowerCase()}_${today}.csv`;
 
     document.body.appendChild(a);
     a.click();

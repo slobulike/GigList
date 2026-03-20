@@ -77,19 +77,19 @@ export const loadAppData = async (user) => {
             .select('*')
             .is('user_id', null)
             .eq('band', user.Subject || user.UserName)
-            .limit(10000);
+            .range(0, 19999);
     } else {
         journalQuery = supabase
             .from('journals')
             .select('*')
             .eq('user_id', user.id)
-            .limit(10000);
+            .range(0, 9999);
     }
 
     // Load performances in parallel with journals
     const [journalRes, perfRes] = await Promise.all([
         journalQuery,
-        supabase.from('performances').select('*').limit(50000)
+        supabase.from('performances').select('*').range(0, 99999)
     ]);
 
     if (journalRes.error) throw new Error(`Failed to load journals: ${journalRes.error.message}`);

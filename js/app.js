@@ -1,9 +1,9 @@
 /**
  * Gig List Core Engine
-  V3.2.1 - Release Date 2026-03-20
+  V3.2.2 - Release Date 2026-03-20
           * -------------------------------------------------------------------
-  ✅ Fixed duplicate entries in performance data and prevented future dupes
-  ✅ Fixed chart data to pull from all relevant journal columns to count artists
+  ✅ Added read only mode for band archives
+  ✅ Added admin profile
 
 */
 
@@ -23,7 +23,7 @@ let currentUser = null;
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "3.2.1";
+const APP_VERSION = "3.2.2";
 
 window.toggleListView = UI.toggleListView;
 window.activeView = window.activeView || 'list';
@@ -137,20 +137,57 @@ export async function initApp() {
     const versionEl = document.getElementById('app-version-display');
     if (versionEl) versionEl.innerText = APP_VERSION;
 
+    // Resolve the authenticated user's real display name.
+    // In band mode currentUser is the band, so fetch the real profile separately.
+    let authDisplayName = 'User';
+    if (currentUser.isAuthUser) {
+        if (currentUser.Type === 'Band') {
+            const { data: authProfile } = await supabase
+                .from('profiles')
+                .select('username, is_admin')
+                .eq('id', currentUser.id)
+                .single();
+            authDisplayName = authProfile?.username || 'User';
+            window.authUserProfile = authProfile;
+            currentUser.is_admin = authProfile?.is_admin || false;
+        } else {
+            authDisplayName = currentUser.UserName || currentUser.username || 'User';
+        }
+    }
+    // Expose for switcher and other modules
+    window.authDisplayName = authDisplayName;
+
     const identityEl = document.getElementById('userIdentity');
     if (identityEl) {
-        identityEl.innerText = currentUser.UserName || 'User';
-        identityEl.style.cursor = 'pointer';
-        identityEl.setAttribute('role', 'button');
-        identityEl.setAttribute('aria-label', 'Open User Settings');
-        identityEl.setAttribute('tabindex', '0');
-        identityEl.onclick = window.openSettings;
-        identityEl.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') window.openSettings(); };
+        if (!currentUser.isAuthUser) {
+            identityEl.innerText = 'Sign In';
+            identityEl.onclick = () => window.location.href = 'index.html';
+        } else {
+            identityEl.innerText = authDisplayName;
+            identityEl.style.cursor = 'pointer';
+            identityEl.setAttribute('role', 'button');
+            identityEl.setAttribute('aria-label', 'Open User Settings');
+            identityEl.setAttribute('tabindex', '0');
+            identityEl.onclick = window.openSettings;
+            identityEl.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') window.openSettings(); };
+        }
     }
 
     // loadVenues is called inside loadAppData and its result stored as window.allVenues.
     // Alias it here under the name the rest of the app expects.
     window.venueLookup = window.allVenues;
+
+    // Enforce read-only for non-admin band mode visitors
+    // Admin check relies on is_admin from profiles table — run SQL:
+    //   alter table profiles add column is_admin boolean default false;
+    //   update profiles set is_admin = true where username = 'Rich';
+    const isReadOnly = window.isBandMode && !currentUser?.is_admin;
+    window.isReadOnly = isReadOnly;
+    if (isReadOnly) {
+        // Hide edit controls — they'll also be hidden in the gig modal via window.isReadOnly
+        document.getElementById('btn-add-show')?.classList.add('hidden');
+        document.getElementById('unsaved-banner')?.classList.add('hidden');
+    }
 
     // 4. Initial Render & Listeners
     refreshUI();
@@ -170,7 +207,7 @@ function refreshUI() {
 
     UI.updateCurrentDate();
     UI.updateStats(results);
-    UI.updateRank(results);
+    UI.updateRank(results); // async — fans count fetched in background
     UI.updateTicker(results);
     UI.renderOTDBanner(results);
     UI.renderCarousel(results);
@@ -380,6 +417,15 @@ window.openSettings = function() {
     modal.classList.remove('hidden');
     modal.setAttribute('aria-hidden', 'false');
 
+    // Settings always relates to the authenticated user, not the archive being viewed.
+    // Only hide personal sections for unauthenticated band archive visitors.
+    const isUnauthenticated = !window.currentUser?.isAuthUser;
+    const exportSection  = document.getElementById('settings-export-section');
+    const setlistSection = document.getElementById('setlistIdInput')?.closest('.bg-slate-50');
+
+    if (exportSection)  exportSection.classList.toggle('hidden', isUnauthenticated);
+    if (setlistSection) setlistSection.classList.toggle('hidden', isUnauthenticated);
+
     document.getElementById('setlistIdInput')?.focus();
     if (window.lucide) lucide.createIcons();
 };
@@ -399,6 +445,34 @@ window.syncComingSoon = function() {
         ? `Syncing for ${id} coming soon! Using the Python bridge for now.`
         : 'Please enter a Setlist.fm username.'
     );
+};
+
+// ─── BAND FAVOURITE TOGGLE ────────────────────────────────────────────────────
+
+window.toggleFavourite = async () => {
+    if (!window.isBandMode) return;
+
+    if (!currentUser?.isAuthUser) {
+        window.location.href = 'index.html';
+        return;
+    }
+
+    const bandName = window.currentArtist;
+    const userId   = currentUser.id;
+
+    if (window._isFavourite) {
+        await supabase.from('band_fans')
+            .delete()
+            .eq('band_name', bandName)
+            .eq('user_id', userId);
+        window._isFavourite = false;
+    } else {
+        await supabase.from('band_fans')
+            .insert({ band_name: bandName, user_id: userId });
+        window._isFavourite = true;
+    }
+
+    UI.updateRank(window.journalData);
 };
 
 // ─── SCRAPBOOK PHOTO UPLOAD ───────────────────────────────────────────────────
@@ -582,7 +656,7 @@ function buildSwitcherPanel() {
     const bandsExpanded = isBand; // start expanded if currently in band mode
 
     panel.innerHTML = `
-        ${row(currentUser.isAuthUser ? (isPersonal ? currentUser.UserName : 'My Gig List') : 'My Gig List',
+        ${row(window.authDisplayName || 'My Gig List',
               'Personal Archive',
               isPersonal,
               isPersonal ? '' : "window._switchToPersonal()")}
