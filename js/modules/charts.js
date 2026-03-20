@@ -247,9 +247,50 @@ export const renderTopBandsChart = (journalData, performanceData, canvasId, isMo
     const existingChart = Chart.getChart(canvas);
     if (existingChart) existingChart.destroy();
 
-    const stats    = Data.getBandAppearanceStats(journalData, performanceData);
     const topLimit = isModal ? 20 : 10;
-    const topBands = Object.entries(stats)
+
+    // Always count band frequency from journalData — correct for all users
+    // regardless of whether they have matching entries in the performances table.
+    // Counts headline acts (Band), support acts (Notable Support), and
+    // festival artists (Festival Lineups) separately so all are represented.
+    const bandCounts = {};
+
+    const addBand = (name, role) => {
+        const n = (name || '').trim();
+        if (!n || n.toLowerCase() === 'nan') return;
+        if (!bandCounts[n]) bandCounts[n] = { headline: 0, support: 0, total: 0 };
+        bandCounts[n][role]++;
+        bandCounts[n].total++;
+    };
+
+    journalData.forEach(g => {
+        // Headline act — skip if festival row (Band field contains festival name, not an artist)
+        const isFest = (g['Festival?'] || g['festival'] || '').toString().toUpperCase().startsWith('Y');
+        if (!isFest) addBand(g.Band || g.band, 'headline');
+
+        // Notable support — single artist
+        if (g['Notable Support']) {
+            addBand(g['Notable Support'], 'support');
+        }
+
+        // Festival lineups — pipe or slash separated list of artists
+        const lineups = g['Festival Lineups'] || g['FestivalLineups'] || '';
+        if (lineups && lineups !== 'nan') {
+            lineups.split(/[\/|]/).forEach(artist => addBand(artist.trim(), 'support'));
+        }
+    });
+
+    // Overlay headline/support split from performanceData on a per-band basis
+    // Only update bands where perf count doesn't exceed journal count — never inflate totals
+    const perfStats = Data.getBandAppearanceStats(journalData, performanceData);
+    Object.entries(perfStats).forEach(([band, counts]) => {
+        if (bandCounts[band] && counts.total <= bandCounts[band].total) {
+            bandCounts[band].headline = counts.headline;
+            bandCounts[band].support  = counts.support;
+        }
+    });
+
+    const topBands = Object.entries(bandCounts)
         .sort((a, b) => b[1].total - a[1].total)
         .slice(0, topLimit);
 

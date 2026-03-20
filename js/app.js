@@ -1,17 +1,9 @@
 /**
  * Gig List Core Engine
-  V3.2.0 - Release Date 2026-03-19
+  V3.2.1 - Release Date 2026-03-20
           * -------------------------------------------------------------------
-  ✅ Show day confetti celebration
-  ✅ Photo upload via camera directly in the gig modal (Supabase Storage, private per user)
-  ✅ Mode switcher on the logo with expandable band archives
-  ✅ Band archive accessible to authenticated users via ?band= param
-  ✅ Proper sign-in flow (Google OAuth + email/password + maybe later)
-  ✅ No-zoom viewport for accidental pinch prevention
-  ✅ Venetia's 25 shows synced correctly
-  ✅ Top bands chart fixed to count from journal data directly
-  ✅ Festival row consolidation script
-  ✅ Safe journal sync script with duplicate protection
+  ✅ Fixed duplicate entries in performance data and prevented future dupes
+  ✅ Fixed chart data to pull from all relevant journal columns to count artists
 
 */
 
@@ -31,7 +23,7 @@ let currentUser = null;
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "3.2.0";
+const APP_VERSION = "3.2.1";
 
 window.toggleListView = UI.toggleListView;
 window.activeView = window.activeView || 'list';
