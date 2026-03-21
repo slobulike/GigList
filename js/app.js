@@ -1,10 +1,8 @@
 /**
  * Gig List Core Engine
-  V3.2.3 - Release Date 2026-03-21
+  V3.2.4 - Release Date 2026-03-21
           * -------------------------------------------------------------------
-  ✅ Add "Favourite" to band archive
-  ✅ Added concert, setlist.fm and weezerpedia links to band modal
-  ✅ Fixed admin access to allow edit of photos
+  ✅ Fix slide puzzle to cut image correctly
 */
 
 
@@ -24,7 +22,7 @@ let currentUser = null;
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "3.0.0";
+const APP_VERSION = "3.2.4";
 
 window.toggleListView = UI.toggleListView;
 window.activeView = window.activeView || 'list';

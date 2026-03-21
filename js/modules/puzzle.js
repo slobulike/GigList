@@ -101,7 +101,7 @@ export class GigPuzzle {
 
                 tile.className = 'relative aspect-square border border-white/10 cursor-pointer overflow-hidden rounded-sm hover:brightness-110 transition-all active:scale-95';
                 tile.style.backgroundImage    = `url(${this.imageUrl})`;
-                tile.style.backgroundSize     = `${this.size * 100}%`;
+                tile.style.backgroundSize     = `${this.size * 100}% ${this.size * 100}%`;
                 tile.style.backgroundPosition = `${posX}% ${posY}%`;
 
                 // Keyboard accessibility — tiles are interactive controls
