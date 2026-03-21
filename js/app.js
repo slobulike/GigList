@@ -1,11 +1,12 @@
 /**
  * Gig List Core Engine
-  V3.2.2 - Release Date 2026-03-20
+  V3.2.3 - Release Date 2026-03-21
           * -------------------------------------------------------------------
-  ✅ Added read only mode for band archives
-  ✅ Added admin profile
-
+  ✅ Add "Favourite" to band archive
+  ✅ Added concert, setlist.fm and weezerpedia links to band modal
+  ✅ Fixed admin access to allow edit of photos
 */
+
 
 import * as Data from './modules/data.js';
 import * as Charts from './modules/charts.js';
@@ -23,7 +24,7 @@ let currentUser = null;
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "3.2.2";
+const APP_VERSION = "3.0.0";
 
 window.toggleListView = UI.toggleListView;
 window.activeView = window.activeView || 'list';
@@ -129,6 +130,7 @@ export async function initApp() {
             if (badge) {
                 badge.style.color = 'white';
                 badge.style.backgroundColor = 'rgba(255,255,255,0.2)';
+                badge.innerText = '...'; // placeholder until profile fetch resolves
             }
         }
     }
@@ -142,14 +144,27 @@ export async function initApp() {
     let authDisplayName = 'User';
     if (currentUser.isAuthUser) {
         if (currentUser.Type === 'Band') {
-            const { data: authProfile } = await supabase
+            // Select only username first — is_admin column may not exist yet
+            const { data: authProfile, error: profileErr } = await supabase
                 .from('profiles')
                 .select('username, is_admin')
                 .eq('id', currentUser.id)
                 .single();
-            authDisplayName = authProfile?.username || 'User';
-            window.authUserProfile = authProfile;
-            currentUser.is_admin = authProfile?.is_admin || false;
+            if (profileErr) {
+                // Fallback: try without is_admin in case column not yet added
+                const { data: basicProfile } = await supabase
+                    .from('profiles')
+                    .select('username')
+                    .eq('id', currentUser.id)
+                    .single();
+                authDisplayName = basicProfile?.username || 'User';
+                window.authUserProfile = basicProfile;
+                currentUser.is_admin = false;
+            } else {
+                authDisplayName = authProfile?.username || 'User';
+                window.authUserProfile = authProfile;
+                currentUser.is_admin = authProfile?.is_admin || false;
+            }
         } else {
             authDisplayName = currentUser.UserName || currentUser.username || 'User';
         }
@@ -207,7 +222,8 @@ function refreshUI() {
 
     UI.updateCurrentDate();
     UI.updateStats(results);
-    UI.updateRank(results); // async — fans count fetched in background
+    UI.updateRank(results);
+    UI.updateFavouriteButton(); // async — fetches fan count and favourite state
     UI.updateTicker(results);
     UI.renderOTDBanner(results);
     UI.renderCarousel(results);
@@ -459,33 +475,56 @@ window.toggleFavourite = async () => {
 
     const bandName = window.currentArtist;
     const userId   = currentUser.id;
+    const btn      = document.getElementById('btn-favourite');
+    const label    = document.getElementById('btn-favourite-label');
+    const countEl  = document.getElementById('btn-favourite-count');
+    const rankEl   = document.getElementById('stat-rank');
+
+    // Optimistic UI — update immediately, sync with server after
+    const wasFavourite = window._isFavourite;
+    window._isFavourite = !wasFavourite;
+
+    const currentCount = parseInt(rankEl?.textContent || '0', 10) || 0;
+    const newCount     = wasFavourite ? Math.max(0, currentCount - 1) : currentCount + 1;
+    if (rankEl)  rankEl.textContent  = newCount;
+    if (countEl) countEl.textContent = newCount ? `· ${newCount} fan${newCount !== 1 ? 's' : ''}` : '';
 
     if (window._isFavourite) {
-        await supabase.from('band_fans')
-            .delete()
-            .eq('band_name', bandName)
-            .eq('user_id', userId);
-        window._isFavourite = false;
+        if (label) label.textContent = `Favourited ${bandName}`;
+        btn?.classList.add('border-pink-400', 'text-pink-500', 'bg-pink-50');
+        const icon = btn?.querySelector('[data-lucide]');
+        if (icon) icon.style.fill = 'currentColor';
+    } else {
+        if (label) label.textContent = `Add ${bandName} to Favourites`;
+        btn?.classList.remove('border-pink-400', 'text-pink-500', 'bg-pink-50');
+        const icon = btn?.querySelector('[data-lucide]');
+        if (icon) icon.style.fill = 'none';
+    }
+
+    // Sync with server
+    if (wasFavourite) {
+        await supabase.from('band_fans').delete()
+            .eq('band_name', bandName).eq('user_id', userId);
     } else {
         await supabase.from('band_fans')
             .insert({ band_name: bandName, user_id: userId });
-        window._isFavourite = true;
     }
-
-    UI.updateRank(window.journalData);
 };
 
 // ─── SCRAPBOOK PHOTO UPLOAD ───────────────────────────────────────────────────
 
-window.uploadScrapbookPhoto = async (input, journalKey, formattedDate, cleanVenue) => {
+window.uploadScrapbookPhoto = async (input, journalKey, formattedDate, cleanVenue, isBandMode = false) => {
     const file = input.files?.[0];
     if (!file) return;
 
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
 
-    const userId      = session.user.id;
-    const storagePath = `${userId}/${formattedDate}-${cleanVenue}.jpg`;
+    const userId = session.user.id;
+    const bucket = isBandMode ? 'band-photos' : 'gig-photos';
+    const storagePath = isBandMode
+        ? `${(window.currentArtist || 'band').toLowerCase().replace(/[^a-z0-9]/g, '-')}/${formattedDate}-${cleanVenue}.jpg`
+        : `${userId}/${formattedDate}-${cleanVenue}.jpg`;
 
     // Show uploading state on the camera button
     const btn = document.getElementById('h-camera-btn');
@@ -497,7 +536,7 @@ window.uploadScrapbookPhoto = async (input, journalKey, formattedDate, cleanVenu
         const compressed = await compressImage(file, 1920, 0.85);
 
         const { error } = await supabase.storage
-            .from('gig-photos')
+            .from(bucket)
             .upload(storagePath, compressed, {
                 contentType: 'image/jpeg',
                 upsert: true   // replace if photo already exists for this show
@@ -506,11 +545,12 @@ window.uploadScrapbookPhoto = async (input, journalKey, formattedDate, cleanVenu
         if (error) throw error;
 
         // Get a signed URL and update the modal image immediately
-        const { data: signedData, error: signedError } = await supabase.storage
-            .from('gig-photos')
-            .createSignedUrl(storagePath, 3600);
+        const { data: signedData, error: signedError } = isBandMode
+            ? await supabase.storage.from('band-photos').getPublicUrl(storagePath)
+            : await supabase.storage.from('gig-photos').createSignedUrl(storagePath, 3600);
 
-        if (!signedError && signedData?.signedUrl) {
+        const imgUrl = isBandMode ? signedData?.publicUrl : signedData?.signedUrl;
+        if (imgUrl) {
             const imgSupabase = document.getElementById('h-supabase');
             if (imgSupabase) {
                 document.getElementById('h-scrapbook')?.classList.add('hidden');
@@ -519,7 +559,7 @@ window.uploadScrapbookPhoto = async (input, journalKey, formattedDate, cleanVenu
                 if (ticket) { ticket.classList.add('hidden'); ticket.style.display = ''; }
 
                 imgSupabase.onload = () => imgSupabase.classList.remove('hidden');
-                imgSupabase.src = signedData.signedUrl;
+                imgSupabase.src = imgUrl;
             }
         }
 
@@ -690,10 +730,12 @@ function buildSwitcherPanel() {
         </div>
     `;
 
-    // Insert into header so it's positioned relative to the full header width
-    const header = document.querySelector('header');
-    header.style.position = 'relative'; // ensure header is positioning context
-    header.appendChild(panel);
+    // Insert panel into body as fixed-position element anchored below the logo
+    panel.style.position = 'fixed';
+    panel.style.top = '64px'; // height of header — adjust if header height changes
+    panel.style.left = '12px';
+    panel.classList.remove('absolute', 'top-full');
+    document.body.appendChild(panel);
 
     if (window.lucide) lucide.createIcons();
     return panel;

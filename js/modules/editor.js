@@ -178,6 +178,7 @@ const renderEditorModal = (entry) => {
     _val('editor-comments',   entry.Comments   || '');
     _val('editor-price',      entry.Price      || '');
     _val('editor-photos',     entry.Photos     || '');
+    _val('editor-review',     entry['Review URL'] || entry.review_url || '');
     _check('editor-festival', isFest);
 
     toggleFestivalFields(isFest);
@@ -252,6 +253,7 @@ window.saveGig = async () => {
         'Comments':          _get('editor-comments').trim(),
         'Price':             _get('editor-price').trim(),
         'Photos':            _get('editor-photos').trim(),
+        'Review URL':        _get('editor-review').trim(),
         'Year':              y,
         'Month':             m,
         'Day':               d,
@@ -278,42 +280,56 @@ window.saveGig = async () => {
         journal.push(gigRow);
     }
 
-    // ── Phase 3: write to Supabase ────────────────────────────────────────────
-    // Build the Supabase row (snake_case columns, boolean festival field)
+    // ── Write to Supabase (primary store) ────────────────────────────────────
     const { data: { session } } = await supabase.auth.getSession();
-    if (session) {
-        const supabaseRow = {
-            user_id:           session.user.id,
-            journal_key:       journalKey,
-            date:              dateStr,
-            band:              band,
-            official_venue:    venue,
-            venue:             venue,
-            festival:          isFest === 'Y',
-            festival_lineups:  _get('editor-lineups').trim(),
-            notable_support:   _get('editor-support').trim(),
-            went_with:         _get('editor-went-with').trim(),
-            comments:          _get('editor-comments').trim(),
-            price:             _get('editor-price').trim(),
-            photos:            _get('editor-photos').trim(),
-            year:              parseInt(y),
-            month:             parseInt(m),
-            day:               parseInt(d),
-        };
+    if (!session) {
+        _showError('You must be signed in to save a show.');
+        return;
+    }
 
+    const supabaseRow = {
+        user_id:           session.user.id,
+        journal_key:       journalKey,
+        date:              dateStr,
+        band:              band,
+        official_venue:    venue,
+        venue:             venue,
+        festival:          isFest === 'Y',
+        festival_lineups:  _get('editor-lineups').trim(),
+        notable_support:   _get('editor-support').trim(),
+        went_with:         _get('editor-went-with').trim(),
+        comments:          _get('editor-comments').trim(),
+        price:             _get('editor-price').trim(),
+        photos:            _get('editor-photos').trim(),
+        review_url:        _get('editor-review').trim(),
+    };
+
+    let dbError = null;
+    if (editingKey) {
+        // Update existing row
         const { error } = await supabase
             .from('journals')
-            .upsert(supabaseRow, { onConflict: 'user_id,journal_key' });
+            .update(supabaseRow)
+            .eq('user_id', session.user.id)
+            .eq('journal_key', editingKey);
+        dbError = error;
+    } else {
+        // Insert new row
+        const { error } = await supabase
+            .from('journals')
+            .insert(supabaseRow);
+        dbError = error;
+    }
 
-        if (error) {
-            _showError(`Saved locally but database write failed: ${error.message}`);
-            // Don't return — still update in-memory and refresh UI
-        }
+    if (dbError) {
+        _showError(`Save failed: ${dbError.message}`);
+        return;
     }
     // ─────────────────────────────────────────────────────────────────────────
 
+    // Update in-memory data so UI reflects change without a full reload
     window.journalData = journal;
-    setDirty(true);
+    // Do NOT call setDirty — Supabase is now the source of truth, no CSV needed
     closeEditorModal();
 
     // If the saved show is in the future, make sure the upcoming toggle is on
@@ -347,7 +363,7 @@ export const exportCSV = () => {
     const columns = [
         'Date', 'Band', 'Notable Support', 'Venue', 'Price',
         'Comments', 'Went With', 'Festival?', 'Festival Lineups',
-        'Photos', 'Journal Key', 'OfficialVenue', 'Year', 'Month', 'Day'
+        'Photos', 'Review URL', 'Journal Key', 'OfficialVenue', 'Year', 'Month', 'Day'
     ];
 
     const escape = (val) => {

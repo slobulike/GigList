@@ -111,6 +111,7 @@ export const loadAppData = async (user) => {
         'Went With':       row.went_with        || row['Went With']     || '',
         Comments:          row.comments         || row.Comments         || '',
         Photos:            row.photos           || row.Photos           || '',
+        'Review URL':      row.review_url       || row['Review URL']    || '',
         Price:             row.price            || row.Price            || '',
         Date:              row.date             || row.Date             || '',
         Year:              row.year             || row.Year             || '',

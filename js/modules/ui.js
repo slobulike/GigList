@@ -113,53 +113,74 @@ export const updateStats = (data) => {
     });
 };
 
-export const updateRank = async (data) => {
-    const user      = window.currentUser;
-    const rankEl    = document.getElementById('stat-rank');
-    const labelEl   = document.getElementById('stat-fourth-label');
-    const tileEl    = document.getElementById('stat-fourth-tile');
+export const updateRank = (data) => {
+    const user    = window.currentUser;
+    const rankEl  = document.getElementById('stat-rank');
+    const labelEl = document.getElementById('stat-fourth-label');
 
     if (window.isBandMode) {
-        // Show fan count for the band
         if (labelEl) labelEl.textContent = 'GigList Fans';
-        if (tileEl)  tileEl.setAttribute('aria-label', 'Favourite this band on GigList');
-
-        // Fetch fan count
-        const bandName = window.currentArtist;
-        const { count } = await import('./supabase.js').then(({ supabase }) =>
-            supabase.from('band_fans')
-                .select('*', { count: 'exact', head: true })
-                .eq('band_name', bandName)
-        );
-        if (rankEl) rankEl.textContent = count ?? 0;
-
-        // Check if current user has favourited this band
-        if (user?.isAuthUser && user?.id) {
-            const { supabase } = await import('./supabase.js');
-            const { data: fav } = await supabase
-                .from('band_fans')
-                .select('id')
-                .eq('band_name', bandName)
-                .eq('user_id', user.id)
-                .single();
-            window._isFavourite = !!fav;
-            if (tileEl) {
-                tileEl.classList.toggle('bg-indigo-600', !!fav);
-                tileEl.classList.toggle('bg-indigo-50\\/30', !fav);
-                if (labelEl) labelEl.classList.toggle('text-white', !!fav);
-                if (rankEl)  rankEl.classList.toggle('text-white', !!fav);
-            }
-        } else {
-            // Unauthenticated — tile is display-only, no toggle
-            if (tileEl) tileEl.style.cursor = 'default';
-        }
+        // Count is populated by updateFavouriteButton — start with --
+        if (rankEl) rankEl.textContent = '--';
     } else {
-        // Personal mode — show rank, disable tile click
         if (labelEl) labelEl.textContent = 'Rank';
-        if (tileEl)  tileEl.style.cursor = 'default';
-        if (tileEl)  tileEl.setAttribute('aria-label', '');
         const rank = user?.rank || user?.Rank;
         if (rankEl) rankEl.textContent = rank ?? '--';
+    }
+};
+
+export const updateFavouriteButton = async () => {
+    const btn       = document.getElementById('btn-favourite');
+    const label     = document.getElementById('btn-favourite-label');
+    const countEl   = document.getElementById('btn-favourite-count');
+    const rankEl    = document.getElementById('stat-rank');
+    if (!btn) return;
+
+    if (!window.isBandMode) { btn.classList.add('hidden'); return; }
+
+    btn.classList.remove('hidden');
+    const bandName = window.currentArtist;
+    const user     = window.currentUser;
+
+    const { supabase } = await import('./supabase.js');
+
+    // Get fan count
+    const { count } = await supabase
+        .from('band_fans')
+        .select('*', { count: 'exact', head: true })
+        .eq('band_name', bandName);
+
+    if (rankEl)   rankEl.textContent  = count ?? 0;
+    if (countEl)  countEl.textContent = count ? `· ${count} fan${count !== 1 ? 's' : ''}` : '';
+
+    if (!user?.isAuthUser) {
+        // Unauthenticated — show count but clicking goes to sign in
+        if (label) label.textContent = `Sign in to Favourite ${bandName}`;
+        btn.classList.remove('border-pink-400', 'text-pink-500', 'bg-pink-50');
+        return;
+    }
+
+    // Check if current user has favourited
+    const { data: fav } = await supabase
+        .from('band_fans')
+        .select('id')
+        .eq('band_name', bandName)
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+    window._isFavourite = !!fav;
+
+    if (fav) {
+        if (label) label.textContent = `Favourited ${bandName}`;
+        btn.classList.add('border-pink-400', 'text-pink-500', 'bg-pink-50');
+        // Replace heart with filled heart
+        const icon = btn.querySelector('[data-lucide]');
+        if (icon) { icon.setAttribute('data-lucide', 'heart'); icon.style.fill = 'currentColor'; }
+    } else {
+        if (label) label.textContent = `Add ${bandName} to Favourites`;
+        btn.classList.remove('border-pink-400', 'text-pink-500', 'bg-pink-50');
+        const icon = btn.querySelector('[data-lucide]');
+        if (icon) { icon.setAttribute('data-lucide', 'heart'); icon.style.fill = 'none'; }
     }
 };
 
@@ -874,6 +895,25 @@ export const openGigModal = (key, journalData, performanceData) => {
     const artistPath = `assets/artists/${entry.Band.toLowerCase().replace(/ /g, '_')}_stock_photo.jpg`;
     const youtubeLink = `https://www.youtube.com/results?search_query=${encodeURIComponent(`${entry.Band} live ${entry.OfficialVenue} ${entry.Date}`)}`;
 
+    // --- EXTERNAL LINKS ---
+    // Photos album URL (user-supplied)
+    const photosUrl = (entry.Photos || '').trim();
+    const hasPhotos = photosUrl && photosUrl !== 'nan';
+
+    // Review URL — user-supplied, or auto-generated for Weezer via Weezerpedia
+    let reviewUrl = (entry.review_url || entry['Review URL'] || '').trim();
+    if (!reviewUrl && window.isBandMode && (window.currentArtist || '').toLowerCase() === 'weezer') {
+        // Weezerpedia uses MM/DD/YYYY — our data is DD/MM/YYYY so swap day and month
+        const [dd, mm, yyyy] = entry.Date.split('/');
+        reviewUrl = `https://www.weezerpedia.com/w/index.php?title=Weezer_concert:_${mm}/${dd}/${yyyy}`;
+    }
+    const hasReview = !!reviewUrl;
+
+    // Setlist.fm URL — from performances data
+    const setlistUrl = sets.find(s => s.SetlistURL || s.setlist_url)?.SetlistURL ||
+                       sets.find(s => s.setlist_url)?.setlist_url || '';
+    const hasSetlist = !!setlistUrl;
+
     // --- ENHANCED TICKET LOGIC ---
     const style = getTicketStyle(key);
     const isLandscape = style.type === 'landscape';
@@ -949,15 +989,15 @@ export const openGigModal = (key, journalData, performanceData) => {
                         ${ticketHTML}
                     </div>
 
-                    <!-- Camera upload button — only shown for authenticated personal users -->
-                    ${window.currentUser?.Type === 'Personal' && !window.isReadOnly ? `
+                    <!-- Camera upload button — personal users + band admins -->
+                    ${(!window.isReadOnly && (window.currentUser?.Type === 'Personal' || (window.isBandMode && window.currentUser?.is_admin))) ? `
                     <label id="h-camera-btn"
                            aria-label="Add or replace photo for this show"
                            class="absolute bottom-3 right-14 z-50 bg-black/40 backdrop-blur-md text-white p-2 rounded-full hover:bg-black/60 transition-all cursor-pointer">
                         <i data-lucide="camera" class="w-5 h-5" aria-hidden="true"></i>
-                        <input type="file" accept="image/*" capture="environment"
+                        <input type="file" accept="image/*"
                                class="hidden"
-                               onchange="window.uploadScrapbookPhoto(this, '${entry['Journal Key']?.replace(/'/g, "\\'")}', '${formattedDate}', '${cleanVenue}')">
+                               onchange="window.uploadScrapbookPhoto(this, '${entry['Journal Key']?.replace(/'/g, "\\'")}', '${formattedDate}', '${cleanVenue}', ${window.isBandMode})">
                     </label>` : ''}
 
                     <button onclick="window.closeModal()"
@@ -979,6 +1019,28 @@ export const openGigModal = (key, journalData, performanceData) => {
                         </button>
                         ${isFestival ? '<span class="bg-amber-400 text-black text-[8px] font-black px-2 py-1 rounded uppercase">Festival</span>' : ''}
                     </div>
+                    <!-- External links row: photos, review, setlist.fm -->
+                    ${(hasPhotos || hasReview || hasSetlist) ? `
+                    <div class="flex items-center gap-4 mb-3 pb-3 border-b border-slate-50">
+                        ${hasPhotos ? `<a href="${photosUrl}" target="_blank" rel="noopener"
+                            class="flex items-center gap-1.5 text-[10px] font-black text-slate-400 hover:text-indigo-600 transition-colors"
+                            title="View photo album">
+                            <i data-lucide="camera" class="w-3.5 h-3.5" aria-hidden="true"></i>
+                            <span class="uppercase tracking-widest">Photos</span>
+                        </a>` : ''}
+                        ${hasReview ? `<a href="${reviewUrl}" target="_blank" rel="noopener"
+                            class="flex items-center gap-1.5 text-[10px] font-black text-slate-400 hover:text-indigo-600 transition-colors"
+                            title="Read review or show page">
+                            <i data-lucide="newspaper" class="w-3.5 h-3.5" aria-hidden="true"></i>
+                            <span class="uppercase tracking-widest">${window.isBandMode && (window.currentArtist||'').toLowerCase() === 'weezer' ? 'Weezerpedia' : 'Review'}</span>
+                        </a>` : ''}
+                        ${hasSetlist ? `<a href="${setlistUrl}" target="_blank" rel="noopener"
+                            class="flex items-center gap-1.5 text-[10px] font-black text-slate-400 hover:text-indigo-600 transition-colors"
+                            title="View on setlist.fm">
+                            <i data-lucide="list-music" class="w-3.5 h-3.5" aria-hidden="true"></i>
+                            <span class="uppercase tracking-widest">Setlist.fm</span>
+                        </a>` : ''}
+                    </div>` : ''}
                     <h2 id="modal-title" tabindex="-1" class="text-4xl font-black italic uppercase leading-none text-slate-900 mb-3 outline-none">${entry.Band}</h2>
                     <div class="flex gap-4 text-slate-400 text-[10px] font-bold uppercase tracking-widest">
                         <span class="flex items-center gap-1.5"><i data-lucide="calendar" class="w-3.5 h-3.5 text-indigo-500"></i> <time datetime="${formattedDate}">${entry.Date}</time></span>
@@ -1052,29 +1114,43 @@ export const openGigModal = (key, journalData, performanceData) => {
         imgArtist.src = artistPath;
     };
 
-    // Step 1: try Supabase Storage if user is authenticated
+    // Step 1: try Supabase Storage
     const userId = window.currentUser?.id;
-    if (userId) {
-        import('./supabase.js').then(async ({ supabase }) => {
+    import('./supabase.js').then(async ({ supabase }) => {
+        if (window.isBandMode) {
+            // Band archive — check public band-photos bucket
+            const bandSlug = (window.currentArtist || 'band').toLowerCase().replace(/[^a-z0-9]/g, '-');
+            const storagePath = `${bandSlug}/${formattedDate}-${cleanVenue}.jpg`;
+            const { data } = supabase.storage.from('band-photos').getPublicUrl(storagePath);
+            // Public bucket — probe with HEAD to check existence
+            fetch(data.publicUrl, { method: 'HEAD' })
+                .then(res => {
+                    if (res.ok) {
+                        imgSupabase.onload = () => imgSupabase.classList.remove('hidden');
+                        imgSupabase.onerror = () => tryLocalScrapbook();
+                        imgSupabase.src = data.publicUrl;
+                    } else {
+                        tryLocalScrapbook();
+                    }
+                })
+                .catch(() => tryLocalScrapbook());
+        } else if (userId) {
+            // Personal archive — private gig-photos bucket, needs signed URL
             const storagePath = `${userId}/${formattedDate}-${cleanVenue}.jpg`;
-            // Private bucket requires a signed URL — createSignedUrl returns an error
-            // if the file doesn't exist, so no separate existence check needed
             const { data, error } = await supabase.storage
                 .from('gig-photos')
-                .createSignedUrl(storagePath, 3600); // 1 hour expiry
-
+                .createSignedUrl(storagePath, 3600);
             if (error || !data?.signedUrl) {
-                // File doesn't exist in storage — fall through to local scrapbook
                 tryLocalScrapbook();
             } else {
                 imgSupabase.onload = () => imgSupabase.classList.remove('hidden');
                 imgSupabase.onerror = () => tryLocalScrapbook();
                 imgSupabase.src = data.signedUrl;
             }
-        });
-    } else {
-        tryLocalScrapbook();
-    }
+        } else {
+            tryLocalScrapbook();
+        }
+    });
 
     modal.classList.remove('hidden');
     document.body.style.overflow = 'hidden';
