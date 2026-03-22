@@ -66,6 +66,12 @@
             </div>
         </div>
 
+        <!-- Follow-back prompt — shown when someone follows you and you don't follow back -->
+        <div id="follow-back-banner" class="hidden bg-indigo-50 border border-indigo-200 rounded-[1.5rem] p-4" role="alert">
+            <p class="text-[10px] font-black uppercase text-indigo-400 tracking-widest mb-2">Following You</p>
+            <div id="follow-back-list" class="space-y-2"></div>
+        </div>
+
         <!-- On This Day banner — only rendered when a matching anniversary exists -->
         <div id="otd-banner" class="hidden bg-amber-50 border border-amber-200 rounded-[1.5rem] p-4 flex items-center gap-3" role="status" aria-label="On This Day anniversary">
             <div class="w-10 h-10 bg-white border border-amber-200 rounded-xl flex items-center justify-center flex-shrink-0">
@@ -351,13 +357,14 @@
 </nav>
 
 <div id="settingsModal"
-     class="fixed inset-0 bg-slate-900/60 backdrop-blur-md hidden z-[110] flex items-center justify-center p-4"
+     class="fixed inset-0 bg-slate-900/60 backdrop-blur-md hidden z-[110] flex items-start justify-center p-4 overflow-y-auto"
      role="dialog"
      aria-modal="true"
      aria-labelledby="settingsTitle"
-     aria-hidden="true">
+     aria-hidden="true"
+     onclick="if(event.target===this) window.closeSettings()">
 
-    <div class="bg-white rounded-[3rem] w-full max-w-md p-10 relative shadow-2xl">
+    <div class="bg-white rounded-[3rem] w-full max-w-md p-10 relative shadow-2xl my-auto">
         <button onclick="window.closeSettings()"
                 class="absolute top-6 right-6 text-slate-400 hover:text-slate-600 transition-colors"
                 aria-label="Close Settings">
@@ -373,31 +380,67 @@
         </div>
 
         <div class="space-y-6">
+
+            <!-- 1. FRIENDS — most used, always at top -->
+            <div id="settings-friends-section" class="bg-slate-50 p-6 rounded-[2rem] border border-slate-100 space-y-4">
+                <p class="text-[10px] font-black uppercase text-indigo-500 tracking-widest">Friends</p>
+
+                <div class="relative">
+                    <input type="text" id="friend-search-input"
+                           placeholder="Search by username…"
+                           aria-label="Search for a friend by username"
+                           autocomplete="off"
+                           class="w-full bg-white border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all">
+                    <button onclick="window.searchFriends()"
+                            class="absolute right-2 top-1/2 -translate-y-1/2 bg-indigo-600 text-white p-2 rounded-xl hover:bg-indigo-700 transition-colors">
+                        <i data-lucide="search" class="w-4 h-4" aria-hidden="true"></i>
+                    </button>
+                </div>
+                <div id="friend-search-results" class="hidden space-y-2"></div>
+
+                <div id="following-list" class="space-y-2">
+                    <p class="text-[10px] font-black uppercase text-slate-400 tracking-widest">Following</p>
+                    <div id="following-users" class="space-y-2">
+                        <p class="text-xs text-slate-400 italic">Loading…</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2. PRIVACY -->
+            <div id="settings-privacy-section" class="bg-slate-50 p-6 rounded-[2rem] border border-slate-100">
+                <p class="text-[10px] font-black uppercase text-indigo-500 mb-4 tracking-widest">Privacy</p>
+                <div class="flex items-center justify-between gap-4">
+                    <div>
+                        <p class="text-sm font-black text-slate-800">Public Profile</p>
+                        <p class="text-[10px] text-slate-400 mt-0.5 leading-relaxed">Anyone can follow you without approval. Off = follow requests need your approval.</p>
+                    </div>
+                    <button id="privacy-toggle"
+                            onclick="window.togglePrivacy()"
+                            role="switch"
+                            aria-checked="false"
+                            class="relative flex-shrink-0 w-12 h-6 rounded-full transition-colors duration-200 bg-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
+                        <span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 translate-x-0" id="privacy-knob"></span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 3. SYNC SETLIST.FM -->
             <div class="bg-slate-50 p-6 rounded-[2rem] border border-slate-100">
                 <label for="setlistIdInput" class="block text-[10px] font-black uppercase text-indigo-500 mb-3 tracking-widest">Sync Setlist.fm</label>
-
                 <div class="flex gap-2">
                     <input type="text" id="setlistIdInput"
                            placeholder="Enter Username (e.g. Tragicgurl)"
                            class="flex-1 bg-white px-4 py-3 rounded-xl text-sm font-bold border-none shadow-sm outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800">
-
                     <button onclick="window.syncComingSoon()"
                             aria-label="Run Sync"
                             class="bg-indigo-600 text-white px-4 py-3 rounded-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200">
                         <i data-lucide="refresh-cw" class="w-5 h-5"></i>
                     </button>
                 </div>
-
                 <p class="text-[10px] text-slate-400 mt-3 italic leading-relaxed">This will pull your history, venues, and setlists.</p>
             </div>
 
-            <button onclick="window.signOut()"
-                    class="w-full py-4 text-red-400 font-bold text-sm hover:text-red-600 transition-colors flex items-center justify-center gap-2">
-                <i data-lucide="log-out" class="w-4 h-4" aria-hidden="true"></i>
-                Sign Out
-            </button>
-
-            <!-- Export — only shown in personal mode -->
+            <!-- 4. EXPORT -->
             <div id="settings-export-section" class="bg-slate-50 p-6 rounded-[2rem] border border-slate-100">
                 <p class="text-[10px] font-black uppercase text-indigo-500 mb-3 tracking-widest">Export Your Archive</p>
                 <button onclick="window.exportCSV()"
@@ -407,6 +450,13 @@
                 </button>
                 <p class="text-[10px] text-slate-400 mt-3 italic leading-relaxed">Downloads your full gig history as a CSV file. Your data, always yours.</p>
             </div>
+
+            <!-- 5. SIGN OUT — least used, always last -->
+            <button onclick="window.signOut()"
+                    class="w-full py-4 text-red-400 font-bold text-sm hover:text-red-600 transition-colors flex items-center justify-center gap-2">
+                <i data-lucide="log-out" class="w-4 h-4" aria-hidden="true"></i>
+                Sign Out
+            </button>
 
             <div class="pt-6 border-t border-slate-100 flex justify-between items-center opacity-40">
                 <p class="text-[9px] font-black uppercase tracking-widest text-slate-500">GigList</p>
@@ -510,9 +560,7 @@
             <!-- Date -->
             <div>
                 <label for="editor-date" class="block text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-2">Date <span aria-hidden="true">*</span></label>
-                <input type="text" id="editor-date"
-                       placeholder="DD/MM/YYYY"
-                       maxlength="10"
+                <input type="date" id="editor-date"
                        class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                        aria-required="true">
             </div>
@@ -621,14 +669,23 @@
         </div>
 
         <!-- Footer actions -->
-        <div class="flex gap-3 px-6 py-5 border-t border-slate-100 flex-shrink-0">
-            <button onclick="window.closeEditorModal()"
-                    class="flex-1 py-3 text-sm font-black text-slate-500 bg-slate-100 hover:bg-slate-200 rounded-2xl transition-all active:scale-95 uppercase tracking-widest">
-                Cancel
-            </button>
-            <button onclick="window.saveGig()"
-                    class="flex-2 flex-grow py-3 text-sm font-black text-white bg-indigo-600 hover:bg-indigo-700 rounded-2xl transition-all active:scale-95 uppercase tracking-widest">
-                Save Show
+        <div class="flex flex-col gap-3 px-6 py-5 border-t border-slate-100 flex-shrink-0">
+            <div class="flex gap-3">
+                <button onclick="window.closeEditorModal()"
+                        class="flex-1 py-3 text-sm font-black text-slate-500 bg-slate-100 hover:bg-slate-200 rounded-2xl transition-all active:scale-95 uppercase tracking-widest">
+                    Cancel
+                </button>
+                <button onclick="window.saveGig()"
+                        class="flex-2 flex-grow py-3 text-sm font-black text-white bg-indigo-600 hover:bg-indigo-700 rounded-2xl transition-all active:scale-95 uppercase tracking-widest">
+                    Save Show
+                </button>
+            </div>
+            <!-- Delete — only shown when editing an existing show, hidden for new shows -->
+            <button id="btn-delete-show"
+                    onclick="window.deleteGig()"
+                    class="hidden w-full py-2.5 text-[11px] font-black text-red-400 hover:text-red-600 hover:bg-red-50 rounded-2xl transition-all active:scale-95 uppercase tracking-widest">
+                <i data-lucide="trash-2" class="w-3.5 h-3.5 inline-block mr-1.5 align-middle" aria-hidden="true"></i>
+                Remove Show
             </button>
         </div>
     </div>
@@ -642,6 +699,9 @@
         initApp();
     }
 </script>
+
+<!-- Toast notification container -->
+<div id="toast-container" class="fixed bottom-24 left-1/2 -translate-x-1/2 z-[500] flex flex-col items-center gap-2 pointer-events-none" aria-live="polite" aria-atomic="false"></div>
 
 </body>
 </html>

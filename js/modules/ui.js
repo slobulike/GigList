@@ -430,7 +430,8 @@ export const renderCarouselItem = (index, carouselData, fullData) => {
 
     card.innerHTML = `
         <div class="relative h-full w-full overflow-hidden rounded-[2.5rem] bg-slate-900 shadow-2xl">
-            <img src="${item.isCTA ? "https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?auto=format&fit=crop&q=80" : scrapbookPath}"
+            <img id="carousel-img-${index}"
+                 src="${item.isCTA ? "https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?auto=format&fit=crop&q=80" : scrapbookPath}"
                  class="absolute inset-0 w-full h-full object-cover opacity-60 transition-opacity duration-500"
                  alt=""
                  onerror="this.onerror=function(){this.src='${fallback}';this.onerror=null;}; this.src='${artistPath}';">
@@ -470,6 +471,51 @@ export const renderCarouselItem = (index, carouselData, fullData) => {
                 </div>
             </div>
         </div>`;
+
+    // Async: check Supabase Storage for a photo — swaps in if found, otherwise keeps fallback chain result
+    if (!item.isCTA && item.Date && item.OfficialVenue) {
+        const imgEl = document.getElementById(`carousel-img-${index}`);
+        if (imgEl) {
+            const scrapbookFile = scrapbookPath.split('/').pop();
+            import('./supabase.js').then(async ({ supabase }) => {
+                let storageUrl = null;
+
+                if (window.isBandMode) {
+                    const bandSlug = (window.currentArtist || '').toLowerCase().replace(/[^a-z0-9]/g, '-');
+                    const { data: listed } = await supabase.storage
+                        .from('band-photos')
+                        .list(bandSlug, { search: scrapbookFile });
+                    if (listed?.length) {
+                        const { data } = supabase.storage.from('band-photos').getPublicUrl(`${bandSlug}/${scrapbookFile}`);
+                        storageUrl = data.publicUrl;
+                    }
+                } else {
+                    const userId = window.currentUser?.id;
+                    if (userId) {
+                        // Check existence first to avoid noisy 400 errors
+                        const { data: listed } = await supabase.storage
+                            .from('gig-photos')
+                            .list(userId, { search: scrapbookFile });
+                        if (listed?.length) {
+                            const { data, error } = await supabase.storage
+                                .from('gig-photos')
+                                .createSignedUrl(`${userId}/${scrapbookFile}`, 3600);
+                            if (!error && data?.signedUrl) storageUrl = data.signedUrl;
+                        }
+                    }
+                }
+
+                if (storageUrl) {
+                    const current = document.getElementById(`carousel-img-${index}`);
+                    if (current) {
+                        const probe = new Image();
+                        probe.onload = () => { current.src = storageUrl; };
+                        probe.src = storageUrl;
+                    }
+                }
+            });
+        }
+    }
 };
 
 /* --- TABLE & CALENDAR VIEWS --- */
@@ -516,9 +562,9 @@ export const renderTable = (data) => {
                         const hasPhotoURL = photoLink.trim() !== "" && photoLink !== "nan";
                         const cameraIcon = hasPhotoURL ? `
                             <a href="${photoLink}" target="_blank" onclick="event.stopPropagation()"
-                               class="inline-flex items-center text-indigo-400 hover:text-indigo-600 transition-colors" title="View Photo">
+                               class="flex-shrink-0 text-indigo-300 hover:text-indigo-500 transition-colors ml-auto" title="View photo album">
                                 <i data-lucide="camera" class="w-3.5 h-3.5"></i>
-                            </a>` : '';
+                            </a>` : '<span class="ml-auto w-3.5"></span>';
 
                         // --- MATCH LABELS LOGIC ---
                         let matchLabels = '';
@@ -551,8 +597,8 @@ export const renderTable = (data) => {
                             <td class="p-4 text-xs font-medium text-slate-500 font-mono tracking-tighter">${gig.Date}</td>
                             <td class="p-4 leading-tight">
                                 <div class="flex flex-col gap-1">
-                                    <div class="flex items-center gap-2">
-                                        ${mainContent}
+                                    <div class="flex items-start gap-2 w-full">
+                                        <div class="flex-1 min-w-0">${mainContent}</div>
                                         ${cameraIcon}
                                     </div>
                                     ${matchLabels}
@@ -1050,13 +1096,19 @@ export const openGigModal = (key, journalData, performanceData) => {
             </div>
 
             <div class="flex-grow overflow-y-auto custom-modal-scroll p-6 md:p-8 pt-4">
-                <div class="flex items-center gap-2 mb-6 pb-4 border-b border-slate-50">
-                    <i data-lucide="users" class="w-4 h-4 text-slate-300"></i>
-                    <div class="flex flex-wrap gap-1.5">${
-                        entry['Went With'] && entry['Went With'] !== "nan" && entry['Went With'] !== "Alone"
-                        ? entry['Went With'].split(/[,\/&]/).map(n => `<span class="bg-slate-100 text-slate-600 text-[9px] px-2 py-1 rounded-md font-bold uppercase tracking-wider border border-slate-200">${n.trim()}</span>`).join('')
-                        : `<span class="text-[9px] opacity-60 italic text-slate-400">Solo Mission</span>`
-                    }</div>
+                <div class="flex items-start gap-2 mb-6 pb-4 border-b border-slate-50">
+                    <i data-lucide="users" class="w-4 h-4 text-slate-300 mt-0.5 flex-shrink-0"></i>
+                    <div class="flex-1 min-w-0">
+                        <div class="flex flex-wrap gap-1.5 mb-2">${
+                            entry['Went With'] && entry['Went With'] !== "nan" && entry['Went With'] !== "Alone"
+                            ? entry['Went With'].split(/[,\/&]/).map(n => `<span class="bg-slate-100 text-slate-600 text-[9px] px-2 py-1 rounded-md font-bold uppercase tracking-wider border border-slate-200">${n.trim()}</span>`).join('')
+                            : `<span class="text-[9px] opacity-60 italic text-slate-400">Solo Mission</span>`
+                        }</div>
+                        <div id="modal-giglist-attendees-${entry['Journal Key']?.replace(/[^a-z0-9]/gi,'_')}" class="hidden">
+                            <p class="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-1">Also on GigList</p>
+                            <div class="flex flex-wrap gap-1.5" id="modal-giglist-attendees-list-${entry['Journal Key']?.replace(/[^a-z0-9]/gi,'_')}"></div>
+                        </div>
+                    </div>
                 </div>
 
                 ${entry.Comments && entry.Comments !== "nan" ? `<div class="p-5 bg-amber-50/50 border-l-4 border-amber-400 italic text-slate-700 text-sm rounded-r-2xl mb-8">"${entry.Comments}"</div>` : ''}
@@ -1069,7 +1121,10 @@ export const openGigModal = (key, journalData, performanceData) => {
                                 <span class="text-[7px] font-black px-2 py-0.5 bg-slate-50 rounded text-slate-400 uppercase">${s.Role}</span>
                             </div>
                             <div class="text-[11px] text-slate-500 leading-relaxed font-medium">
-                                ${(s.Setlist || "No setlist found").replace(/\|/g, '<br>')}
+                                ${(s.Setlist || '').replace(/^NOT_FOUND$/i, '')
+                                    ? (s.Setlist).replace(/\|/g, '<br>')
+                                    : '<span class="text-slate-300 italic text-xs">No setlist recorded</span>'
+                                }
                             </div>
                         </div>
                     `).join('')}
@@ -1118,34 +1173,39 @@ export const openGigModal = (key, journalData, performanceData) => {
     const userId = window.currentUser?.id;
     import('./supabase.js').then(async ({ supabase }) => {
         if (window.isBandMode) {
-            // Band archive — check public band-photos bucket
+            // Band archive — use storage.list() to check existence, no noisy 404/400 errors
             const bandSlug = (window.currentArtist || 'band').toLowerCase().replace(/[^a-z0-9]/g, '-');
-            const storagePath = `${bandSlug}/${formattedDate}-${cleanVenue}.jpg`;
-            const { data } = supabase.storage.from('band-photos').getPublicUrl(storagePath);
-            // Public bucket — probe with HEAD to check existence
-            fetch(data.publicUrl, { method: 'HEAD' })
-                .then(res => {
-                    if (res.ok) {
-                        imgSupabase.onload = () => imgSupabase.classList.remove('hidden');
-                        imgSupabase.onerror = () => tryLocalScrapbook();
-                        imgSupabase.src = data.publicUrl;
-                    } else {
-                        tryLocalScrapbook();
-                    }
-                })
-                .catch(() => tryLocalScrapbook());
-        } else if (userId) {
-            // Personal archive — private gig-photos bucket, needs signed URL
-            const storagePath = `${userId}/${formattedDate}-${cleanVenue}.jpg`;
-            const { data, error } = await supabase.storage
-                .from('gig-photos')
-                .createSignedUrl(storagePath, 3600);
-            if (error || !data?.signedUrl) {
-                tryLocalScrapbook();
-            } else {
+            const fileName  = `${formattedDate}-${cleanVenue}.jpg`;
+            const { data: listed } = await supabase.storage
+                .from('band-photos')
+                .list(bandSlug, { search: fileName });
+            if (listed?.length) {
+                const { data } = supabase.storage.from('band-photos').getPublicUrl(`${bandSlug}/${fileName}`);
                 imgSupabase.onload = () => imgSupabase.classList.remove('hidden');
                 imgSupabase.onerror = () => tryLocalScrapbook();
-                imgSupabase.src = data.signedUrl;
+                imgSupabase.src = data.publicUrl;
+            } else {
+                tryLocalScrapbook();
+            }
+        } else if (userId) {
+            // Personal archive — check file exists first to avoid noisy 400 errors
+            const storagePath = `${userId}/${formattedDate}-${cleanVenue}.jpg`;
+            const { data: listed } = await supabase.storage
+                .from('gig-photos')
+                .list(userId, { search: `${formattedDate}-${cleanVenue}.jpg` });
+            if (!listed?.length) {
+                tryLocalScrapbook();
+            } else {
+                const { data, error } = await supabase.storage
+                    .from('gig-photos')
+                    .createSignedUrl(storagePath, 3600);
+                if (error || !data?.signedUrl) {
+                    tryLocalScrapbook();
+                } else {
+                    imgSupabase.onload = () => imgSupabase.classList.remove('hidden');
+                    imgSupabase.onerror = () => tryLocalScrapbook();
+                    imgSupabase.src = data.signedUrl;
+                }
             }
         } else {
             tryLocalScrapbook();

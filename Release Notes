@@ -1,4 +1,16 @@
   /**
+
+    V3.3.2 - Release Date 2026-03-22
+  * -------------------------------------------------------------------
+    ✅ Added first social features including follow and went with tagging
+    ✅ Waiting list
+    ✅ Added privacy options for social features
+
+    V3.2.4 - Release Date 2026-03-21
+             * -------------------------------------------------------------------
+     ✅ Fix slide puzzle to cut image correctly
+     ✅ Significant refactor of backend data
+
   V3.0.0 - Release Date 2026-03-18
             * -------------------------------------------------------------------
    [REFACTOR] Moved all backend data to Supabase

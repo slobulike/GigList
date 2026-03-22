@@ -1,10 +1,30 @@
 /**
- * Gig List Core Engine
-  V3.2.4 - Release Date 2026-03-21
-          * -------------------------------------------------------------------
-  ✅ Fix slide puzzle to cut image correctly
-*/
-
+ * GigList Core Engine
+ * v3.1.0 — 2026-03-22
+ * -------------------------------------------------------------------
+ * [FEATURE] Friends / follow system — search users, follow/unfollow,
+ *           follow-back prompts, pending follow requests
+ * [FEATURE] Privacy model — public/private profiles, pending follows
+ *           require approval; RLS enforces accepted-only journal access
+ * [FEATURE] Friend journal view — read-only vault.html?friend= mode
+ *           with indigo header branding and full journal access
+ * [FEATURE] "Also on GigList" in gig modal — shows other users who
+ *           attended the same show, with inline +follow buttons
+ * [FEATURE] Band photo support — band-photos Supabase Storage bucket,
+ *           admin camera upload in band gig modals
+ * [FEATURE] External links row in gig modal — Photos, Review/Weezerpedia,
+ *           Setlist.fm icons auto-generated from data
+ * [FEATURE] Waitlist signup on index.html
+ * [FEATURE] Toast notification system — replaces all alert()/confirm()
+ * [FEATURE] Admin band journal writes — Add/Edit/Delete in band mode
+ *           writes to band journal (user_id=null), not personal journal
+ * [FIX]     Mode switcher Following section visible in all modes,
+ *           collapsible, correctly ordered below Personal Archive
+ * [FIX]     initSocial awaited before switcher builds — follow state
+ *           correct on first load with no reload required
+ * [FIX]     Settings modal reordered by frequency of use; scrollable;
+ *           click-outside to close
+ */
 
 import * as Data from './modules/data.js';
 import * as Charts from './modules/charts.js';
@@ -18,11 +38,52 @@ import { GigPuzzle } from './modules/puzzle.js';
 import { initEditor, exportCSV } from './modules/editor.js';
 import { supabase } from './modules/supabase.js';
 
+// ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
+
+window.showToast = (message, type = 'info', duration = 3500) => {
+    const container = document.getElementById('toast-container');
+    if (!container) { console.warn(message); return; }
+
+    const colours = {
+        info:    'bg-slate-800 text-white',
+        success: 'bg-emerald-600 text-white',
+        error:   'bg-red-500 text-white',
+        warning: 'bg-amber-500 text-white',
+    };
+
+    const icons = {
+        info:    'info',
+        success: 'check-circle',
+        error:   'alert-circle',
+        warning: 'alert-triangle',
+    };
+
+    const toast = document.createElement('div');
+    toast.className = `pointer-events-auto flex items-center gap-2.5 px-5 py-3 rounded-2xl shadow-xl text-sm font-bold max-w-xs text-center transition-all duration-300 translate-y-2 opacity-0 ${colours[type] || colours.info}`;
+    toast.innerHTML = `<i data-lucide="${icons[type] || 'info'}" class="w-4 h-4 flex-shrink-0" aria-hidden="true"></i><span>${message}</span>`;
+    container.appendChild(toast);
+    if (window.lucide) lucide.createIcons();
+
+    // Animate in
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            toast.classList.remove('translate-y-2', 'opacity-0');
+        });
+    });
+
+    // Auto-dismiss
+    setTimeout(() => {
+        toast.classList.add('translate-y-2', 'opacity-0');
+        setTimeout(() => toast.remove(), 300);
+    }, duration);
+};
+
+
 let currentUser = null;
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "3.2.4";
+const APP_VERSION = "3.1.0";
 
 window.toggleListView = UI.toggleListView;
 window.activeView = window.activeView || 'list';
@@ -33,14 +94,26 @@ window.switchGame = Games.switchGame;
 window.startNewPuzzle = Games.startNewPuzzle;
 
 export async function initApp() {
-    // Check for band param FIRST — authenticated users can browse band archives too
-    const params    = new URLSearchParams(window.location.search);
-    const bandParam = params.get('band');
+    // Check URL params FIRST
+    const params      = new URLSearchParams(window.location.search);
+    const bandParam   = params.get('band');
+    const friendParam = params.get('friend');
+    const friendName  = params.get('friendName') || 'Friend';
 
     // 1. Check Supabase auth session
     const { data: { session } } = await supabase.auth.getSession();
 
-    if (bandParam) {
+    if (friendParam && session) {
+        // Viewing a friend's journal — must be authenticated
+        currentUser = {
+            ...( (await supabase.from('profiles').select('*').eq('id', session.user.id).single()).data || {} ),
+            UserName:    decodeURIComponent(friendName),
+            Type:        'Friend',
+            friendId:    friendParam,
+            id:          session.user.id,
+            isAuthUser:  true
+        };
+    } else if (bandParam) {
         // Band archive — accessible with or without auth
         const { data: bandRow } = await supabase
             .from('bands')
@@ -91,10 +164,28 @@ export async function initApp() {
     window.filteredResults = [...data.journalData];
 
     // Set Mode Flags
-    window.isBandMode = data.user.Type === 'Band';
+    window.isBandMode   = data.user.Type === 'Band';
+    window.isFriendMode  = data.user.Type === 'Friend';
     window.currentArtist = data.user.UserName;
 
-    // 2. Apply Band Mode Branding
+    // 2. Apply Band Mode / Friend Mode Branding
+    if (window.isFriendMode) {
+        document.body.classList.add('band-mode'); // reuse band-mode styles
+        const topHeader = document.querySelector('header');
+        if (topHeader) {
+            topHeader.classList.add('bg-indigo-600', 'border-b-2', 'border-black/10');
+            topHeader.classList.remove('bg-white/80', 'backdrop-blur-xl');
+            const logoIcon = document.getElementById('header-logo-icon');
+            if (logoIcon) { logoIcon.style.backgroundColor = 'rgba(255,255,255,0.2)'; logoIcon.style.boxShadow = 'none'; }
+            const titleEl = document.getElementById('header-page-title');
+            if (titleEl) { titleEl.textContent = `${currentUser.UserName}'s Gig List`; titleEl.style.color = 'white'; }
+            const dateEl = document.getElementById('header-date-display');
+            if (dateEl) dateEl.style.color = 'rgba(255,255,255,0.7)';
+            const badge = document.getElementById('userIdentity');
+            if (badge) { badge.style.color = 'white'; badge.style.backgroundColor = 'rgba(255,255,255,0.2)'; badge.innerText = '...'; }
+        }
+    }
+
     if (window.isBandMode) {
         document.body.classList.add('band-mode');
 
@@ -194,7 +285,7 @@ export async function initApp() {
     // Admin check relies on is_admin from profiles table — run SQL:
     //   alter table profiles add column is_admin boolean default false;
     //   update profiles set is_admin = true where username = 'Rich';
-    const isReadOnly = window.isBandMode && !currentUser?.is_admin;
+    const isReadOnly = (window.isBandMode && !currentUser?.is_admin) || window.isFriendMode;
     window.isReadOnly = isReadOnly;
     if (isReadOnly) {
         // Hide edit controls — they'll also be hidden in the gig modal via window.isReadOnly
@@ -206,7 +297,13 @@ export async function initApp() {
     refreshUI();
     initEventListeners();
     initEditor();
-    initModeSwitcher(); // build the logo dropdown switcher
+
+    // Load social data FIRST so _following is ready when the switcher panel builds
+    if (currentUser?.isAuthUser && (currentUser?.Type === 'Personal' || currentUser?.Type === 'Friend')) {
+        await initSocial(); // populates _following before switcher is built
+    }
+
+    initModeSwitcher(); // build the logo dropdown switcher (uses _following)
 }
 
 function refreshUI() {
@@ -409,6 +506,10 @@ function initEventListeners() {
 
 window.viewGigDetails = (key) => {
     UI.openGigModal(key, window.journalData, window.performanceData);
+    // Load GigList attendees async after modal renders
+    if (currentUser?.isAuthUser && !window.isBandMode) {
+        setTimeout(() => window.loadGigAttendees(key), 100);
+    }
 };
 window.openGigModal = window.viewGigDetails;
 
@@ -436,11 +537,31 @@ window.openSettings = function() {
     const isUnauthenticated = !window.currentUser?.isAuthUser;
     const exportSection  = document.getElementById('settings-export-section');
     const setlistSection = document.getElementById('setlistIdInput')?.closest('.bg-slate-50');
+    const friendsSection = document.getElementById('settings-friends-section');
+    const privacySection = document.getElementById('settings-privacy-section');
 
     if (exportSection)  exportSection.classList.toggle('hidden', isUnauthenticated);
     if (setlistSection) setlistSection.classList.toggle('hidden', isUnauthenticated);
+    if (friendsSection) friendsSection.classList.toggle('hidden', isUnauthenticated);
+    if (privacySection) privacySection.classList.toggle('hidden', isUnauthenticated);
+
+    // Refresh the following list and privacy toggle whenever settings opens
+    if (!isUnauthenticated) {
+        renderFollowingList?.();
+        loadPrivacySetting?.();
+    }
 
     document.getElementById('setlistIdInput')?.focus();
+
+    // Wire Enter key on friend search (safe to add multiple times — same handler)
+    const friendInput = document.getElementById('friend-search-input');
+    if (friendInput && !friendInput._enterWired) {
+        friendInput._enterWired = true;
+        friendInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') window.searchFriends();
+        });
+    }
+
     if (window.lucide) lucide.createIcons();
 };
 
@@ -459,6 +580,386 @@ window.syncComingSoon = function() {
         ? `Syncing for ${id} coming soon! Using the Python bridge for now.`
         : 'Please enter a Setlist.fm username.'
     );
+};
+
+// ─── SOCIAL / FRIENDS ────────────────────────────────────────────────────────
+
+// ─── PRIVACY TOGGLE ──────────────────────────────────────────────────────────
+
+window.togglePrivacy = async () => {
+    const btn   = document.getElementById('privacy-toggle');
+    const knob  = document.getElementById('privacy-knob');
+    const isNowPublic = btn?.getAttribute('aria-checked') !== 'true';
+
+    const { error } = await supabase
+        .from('profiles')
+        .update({ is_public: isNowPublic })
+        .eq('id', currentUser.id);
+
+    if (error) { window.showToast('Could not update privacy setting', 'error'); return; }
+
+    btn?.setAttribute('aria-checked', String(isNowPublic));
+    if (btn)  btn.classList.toggle('bg-indigo-600', isNowPublic);
+    if (btn)  btn.classList.toggle('bg-slate-200',  !isNowPublic);
+    if (knob) knob.style.transform = isNowPublic ? 'translateX(1.5rem)' : 'translateX(0)';
+
+    window.showToast(
+        isNowPublic ? 'Profile set to public — anyone can follow you' : 'Profile set to private — follows need your approval',
+        'info', 4000
+    );
+};
+
+async function loadPrivacySetting() {
+    const { data } = await supabase
+        .from('profiles')
+        .select('is_public')
+        .eq('id', currentUser.id)
+        .single();
+
+    const isPublic = data?.is_public || false;
+    const btn  = document.getElementById('privacy-toggle');
+    const knob = document.getElementById('privacy-knob');
+    if (btn)  btn.setAttribute('aria-checked', String(isPublic));
+    if (btn)  btn.classList.toggle('bg-indigo-600', isPublic);
+    if (btn)  btn.classList.toggle('bg-slate-200',  !isPublic);
+    if (knob) knob.style.transform = isPublic ? 'translateX(1.5rem)' : 'translateX(0)';
+}
+
+let _following = []; // cache: [{id, username}] of users I follow
+let _followers = []; // cache: [{id, username}] of users who follow me
+
+async function initSocial() {
+    // Step 1: get raw follow IDs (accepted only for the journal-access list)
+    const [followingRes, followersRes, pendingRes] = await Promise.all([
+        supabase.from('follows').select('following_id').eq('follower_id', currentUser.id).eq('status', 'accepted'),
+        supabase.from('follows').select('follower_id').eq('following_id', currentUser.id).eq('status', 'accepted'),
+        supabase.from('follows').select('follower_id').eq('following_id', currentUser.id).eq('status', 'pending')
+    ]);
+
+    const followingIds = (followingRes.data || []).map(r => r.following_id).filter(Boolean);
+    const followerIds  = (followersRes.data || []).map(r => r.follower_id).filter(Boolean);
+
+    // Step 2: look up usernames from profiles (no join ambiguity)
+    const [followingProfiles, followerProfiles] = await Promise.all([
+        followingIds.length
+            ? supabase.from('profiles').select('id, username').in('id', followingIds)
+            : Promise.resolve({ data: [] }),
+        followerIds.length
+            ? supabase.from('profiles').select('id, username').in('id', followerIds)
+            : Promise.resolve({ data: [] })
+    ]);
+
+    _following = (followingProfiles.data || []).map(r => ({ id: r.id, username: r.username }));
+    _followers = (followerProfiles.data  || []).map(r => ({ id: r.id, username: r.username }));
+
+    window._following = _following;
+    window._followers = _followers;
+
+    // Pending requests — people who want to follow me but I haven't accepted yet
+    const pendingRequestIds = (pendingRes.data || []).map(r => r.follower_id).filter(Boolean);
+    let pendingRequestProfiles = [];
+    if (pendingRequestIds.length) {
+        const { data: pp } = await supabase.from('profiles').select('id, username').in('id', pendingRequestIds);
+        pendingRequestProfiles = pp || [];
+    }
+    window._pendingRequests = pendingRequestProfiles;
+
+    // Show follow-back prompt for accepted followers I don't follow back
+    const followingSet = new Set(_following.map(f => f.id));
+    const pendingFollowBack = _followers.filter(f => !followingSet.has(f.id));
+
+    const allPrompts = [
+        ...pendingRequestProfiles.map(f => ({ ...f, type: 'request' })),
+        ...pendingFollowBack.map(f => ({ ...f, type: 'followback' }))
+    ];
+
+    if (allPrompts.length > 0) {
+        const banner = document.getElementById('follow-back-banner');
+        const list   = document.getElementById('follow-back-list');
+        if (banner && list) {
+            list.innerHTML = allPrompts.map(f => f.type === 'request' ? `
+                <div class="flex items-center justify-between gap-3">
+                    <span class="text-sm font-black text-indigo-900">${f.username} wants to follow you</span>
+                    <div class="flex gap-2 flex-shrink-0">
+                        <button onclick="window.acceptFollowRequest('${f.id}', '${f.username}', this.closest('.flex'))"
+                                class="bg-indigo-600 text-white text-[10px] font-black px-3 py-1.5 rounded-full hover:bg-indigo-700 transition-all active:scale-95 uppercase tracking-widest">
+                            Accept
+                        </button>
+                        <button onclick="window.declineFollowRequest('${f.id}', this.closest('.flex'))"
+                                class="text-slate-400 text-[10px] font-black px-3 py-1.5 rounded-full hover:text-slate-600 transition-colors uppercase tracking-widest">
+                            Decline
+                        </button>
+                    </div>
+                </div>` : `
+                <div class="flex items-center justify-between gap-3">
+                    <span class="text-sm font-black text-indigo-900">${f.username} is following you</span>
+                    <div class="flex gap-2 flex-shrink-0">
+                        <button onclick="window.followUser('${f.id}', '${f.username}', this.closest('div[data-user]'))"
+                                data-user="${f.id}"
+                                class="bg-indigo-600 text-white text-[10px] font-black px-3 py-1.5 rounded-full hover:bg-indigo-700 transition-all active:scale-95 uppercase tracking-widest">
+                            Follow Back
+                        </button>
+                        <button onclick="this.closest('[data-dismiss]').remove()"
+                                data-dismiss="${f.id}"
+                                class="text-slate-400 text-[10px] font-black px-3 py-1.5 rounded-full hover:text-slate-600 transition-colors uppercase tracking-widest">
+                            Not Now
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+            banner.classList.remove('hidden');
+        }
+    }
+
+    // Populate following list in settings
+    renderFollowingList();
+    loadPrivacySetting();
+}
+
+function renderFollowingList() {
+    const container = document.getElementById('following-users');
+    if (!container) return;
+
+    if (_following.length === 0) {
+        container.innerHTML = '<p class="text-xs text-slate-400 italic">Not following anyone yet — search above to find friends.</p>';
+        return;
+    }
+
+    container.innerHTML = _following.map(f => `
+        <div class="flex items-center justify-between gap-2">
+            <button onclick="window._switchToFriend('${f.id}', '${f.username}')"
+                    class="text-sm font-black text-slate-700 hover:text-indigo-600 transition-colors text-left">
+                ${f.username}
+            </button>
+            <button onclick="window.unfollowUser('${f.id}', '${f.username}')"
+                    class="text-[10px] font-bold text-slate-400 hover:text-red-500 transition-colors uppercase tracking-widest">
+                Unfollow
+            </button>
+        </div>
+    `).join('');
+}
+
+// Search for users by username
+window.searchFriends = async () => {
+    const input   = document.getElementById('friend-search-input');
+    const results = document.getElementById('friend-search-results');
+    const q       = input?.value.trim();
+    if (!q || !results) return;
+
+    results.innerHTML = '<p class="text-xs text-slate-400 italic">Searching…</p>';
+    results.classList.remove('hidden');
+
+    const { data, error } = await supabase
+        .from('profiles')
+        .select('id, username')
+        .ilike('username', `%${q}%`)
+        .neq('id', currentUser.id)
+        .limit(8);
+
+    if (error || !data?.length) {
+        results.innerHTML = '<p class="text-xs text-slate-400 italic">No users found.</p>';
+        return;
+    }
+
+    const followingIds = new Set(_following.map(f => f.id));
+
+    results.innerHTML = data.map(u => {
+        const isFollowing = followingIds.has(u.id);
+        return `
+        <div class="flex items-center justify-between gap-2 py-1">
+            <span class="text-sm font-black text-slate-700">${u.username}</span>
+            ${isFollowing
+                ? `<span class="text-[10px] font-bold text-indigo-400 uppercase tracking-widest">Following</span>`
+                : `<button onclick="window.followUser('${u.id}', '${u.username}', this)"
+                          class="bg-indigo-600 text-white text-[10px] font-black px-3 py-1.5 rounded-full hover:bg-indigo-700 transition-all active:scale-95 uppercase tracking-widest">
+                       Follow
+                   </button>`
+            }
+        </div>`;
+    }).join('');
+};
+
+window.followUser = async (userId, username, btn) => {
+    // Check if target user has a public profile (auto-accept) or private (pending)
+    const { data: targetProfile } = await supabase
+        .from('profiles')
+        .select('is_public')
+        .eq('id', userId)
+        .single();
+
+    const followStatus = targetProfile?.is_public ? 'accepted' : 'pending';
+
+    const { error } = await supabase.from('follows').insert({
+        follower_id:  currentUser.id,
+        following_id: userId,
+        status:       followStatus
+    });
+    if (error) {
+        const msg = error.code === '23505'
+            ? `You're already following ${username}`
+            : `Couldn't follow ${username} — try again`;
+        window.showToast(msg, 'warning');
+        if (error.code === '23505' && !_following.find(f => f.id === userId)) {
+            _following.push({ id: userId, username });
+            window._following = _following;
+            renderFollowingList();
+            rebuildSwitcherPanel();
+        }
+        return;
+    }
+
+    if (followStatus === 'pending') {
+        window.showToast(`Follow request sent to ${username}`, 'info');
+        // Update button to show pending state
+        if (btn) {
+            const el = btn.tagName === 'BUTTON' ? btn : btn.querySelector('button');
+            if (el) el.outerHTML = `<span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Requested</span>`;
+        }
+        return; // Don't add to _following yet — not accepted
+    }
+
+    // Update cache
+    _following.push({ id: userId, username });
+    window._following = _following;
+
+    // Update button to "Following"
+    if (btn) {
+        const el = btn.tagName === 'BUTTON' ? btn : btn.querySelector('button');
+        if (el) {
+            el.outerHTML = `<span class="text-[10px] font-bold text-indigo-400 uppercase tracking-widest">Following</span>`;
+        }
+    }
+
+    renderFollowingList();
+    rebuildSwitcherPanel();
+
+    // Remove from follow-back banner if present
+    const bannerRow = document.querySelector(`[data-user="${userId}"]`);
+    bannerRow?.closest('[data-dismiss]')?.remove() ||
+    bannerRow?.closest('.flex')?.remove();
+
+    // Update any +follow buttons in the currently open gig modal
+    document.querySelectorAll(`button[onclick*="followUser('${userId}"]`).forEach(b => {
+        b.outerHTML = `<span class="text-indigo-300 text-[9px] font-black">✓</span>`;
+    });
+};
+
+window.unfollowUser = async (userId, username) => {
+    // Show inline confirmation toast instead of blocking confirm()
+    const confirmed = await new Promise(resolve => {
+        const container = document.getElementById('toast-container');
+        if (!container) { resolve(window.confirm('Unfollow ' + username + '?')); return; }
+        const toast = document.createElement('div');
+        toast.className = 'pointer-events-auto flex items-center gap-3 bg-white border border-slate-200 shadow-xl px-5 py-3 rounded-2xl text-sm font-bold text-slate-700 max-w-xs';
+        const yesId = 'toast-yes-' + Date.now();
+        const noId  = 'toast-no-'  + Date.now();
+        toast.innerHTML =
+            '<span class="flex-1">Unfollow <strong>' + username + '</strong>?</span>' +
+            '<button id="' + yesId + '" class="bg-red-500 text-white px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-red-600 transition-colors">Yes</button>' +
+            '<button id="' + noId  + '" class="bg-slate-100 text-slate-600 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-colors">No</button>';
+        container.appendChild(toast);
+        document.getElementById(yesId).onclick = () => { toast.remove(); resolve(true); };
+        document.getElementById(noId).onclick  = () => { toast.remove(); resolve(false); };
+    });
+    if (!confirmed) return;
+    const { error } = await supabase.from('follows')
+        .delete()
+        .eq('follower_id', currentUser.id)
+        .eq('following_id', userId);
+    if (error) { window.showToast(`Couldn't unfollow ${username} — try again`, 'error'); return; }
+
+    _following = _following.filter(f => f.id !== userId);
+    window._following = _following;
+    renderFollowingList();
+    rebuildSwitcherPanel();
+};
+
+window.acceptFollowRequest = async (userId, username, rowEl) => {
+    const { error } = await supabase.from('follows')
+        .update({ status: 'accepted' })
+        .eq('follower_id', userId)
+        .eq('following_id', currentUser.id);
+    if (error) { window.showToast('Could not accept request', 'error'); return; }
+    rowEl?.remove();
+    window.showToast(`You're now connected with ${username}`, 'success');
+    // Hide banner if no more prompts
+    const list = document.getElementById('follow-back-list');
+    if (list && !list.children.length) {
+        document.getElementById('follow-back-banner')?.classList.add('hidden');
+    }
+};
+
+window.declineFollowRequest = async (userId, rowEl) => {
+    const { error } = await supabase.from('follows')
+        .delete()
+        .eq('follower_id', userId)
+        .eq('following_id', currentUser.id);
+    if (error) { window.showToast('Could not decline request', 'error'); return; }
+    rowEl?.remove();
+    const list = document.getElementById('follow-back-list');
+    if (list && !list.children.length) {
+        document.getElementById('follow-back-banner')?.classList.add('hidden');
+    }
+};
+
+// Rebuild the switcher panel after follow state changes
+function rebuildSwitcherPanel() {
+    const existing = document.getElementById('mode-switcher-panel');
+    if (existing) existing.remove();
+    window._switcherPanelBuilt = false;
+}
+
+// Switch to a friend's journal
+window._switchToFriend = (userId, username) => {
+    closeSwitcher();
+    window.location.href = `vault.html?friend=${userId}&friendName=${encodeURIComponent(username)}`;
+};
+
+// Load GigList attendees for a show — called from openGigModal
+window.loadGigAttendees = async (journalKey) => {
+    if (!currentUser?.isAuthUser) return;
+
+    const safeKey   = journalKey.replace(/[^a-z0-9]/gi, '_');
+    const container = document.getElementById(`modal-giglist-attendees-${safeKey}`);
+    const list      = document.getElementById(`modal-giglist-attendees-list-${safeKey}`);
+    if (!container || !list) return;
+
+    // Query the show_attendance view (exposes only user_id + journal_key, no private data)
+    const { data: attendees, error } = await supabase
+        .from('show_attendance')
+        .select('user_id')
+        .eq('journal_key', journalKey)
+        .neq('user_id', currentUser.id);
+
+    if (error) { console.warn('loadGigAttendees:', error.message); return; }
+    if (!attendees?.length) return;
+
+    const otherIds = attendees.map(r => r.user_id);
+
+    // Look up usernames from profiles
+    const { data: profiles } = await supabase
+        .from('profiles')
+        .select('id, username')
+        .in('id', otherIds);
+
+    if (!profiles?.length) return;
+
+    const followingIds = new Set((_following || []).map(f => f.id));
+
+    list.innerHTML = profiles.map(p => {
+        const isFollowing = followingIds.has(p.id);
+        return `
+            <span class="inline-flex items-center gap-1.5 bg-indigo-50 border border-indigo-200 text-indigo-700 text-[9px] px-2 py-1 rounded-md font-black uppercase tracking-wider">
+                <i data-lucide="music" class="w-2.5 h-2.5" aria-hidden="true"></i>
+                ${p.username}
+                ${!isFollowing
+                    ? `<button onclick="window.followUser('${p.id}', '${p.username}', this)" class="ml-0.5 text-indigo-400 hover:text-indigo-700 font-black transition-colors">+follow</button>`
+                    : ''}
+            </span>`;
+    }).join('');
+
+    container.classList.remove('hidden');
+    if (window.lucide) lucide.createIcons();
 };
 
 // ─── BAND FAVOURITE TOGGLE ────────────────────────────────────────────────────
@@ -571,7 +1072,7 @@ window.uploadScrapbookPhoto = async (input, journalKey, formattedDate, cleanVenu
         console.error('Photo upload failed:', err);
         if (btn && originalHTML) btn.innerHTML = originalHTML;
         if (window.lucide) lucide.createIcons();
-        alert(`Upload failed: ${err.message}`);
+        window.showToast('Photo upload failed — try again', 'error');
     }
 
     // Reset the file input so the same file can be re-selected if needed
@@ -690,14 +1191,36 @@ function buildSwitcherPanel() {
             </span>
         </button>`;
 
-    // Band section toggle state
-    const bandsExpanded = isBand; // start expanded if currently in band mode
+    const isFriend      = currentUser.Type === 'Friend';
+    const currentFriend = isFriend ? currentUser.friendId : null;
+    const following     = window._following || [];
+    // Section toggle states — start expanded if currently in that mode
+    const bandsExpanded     = isBand;
+    const followingExpanded = isFriend || (following.length > 0 && !isBand);
 
     panel.innerHTML = `
-        ${row(window.authDisplayName || 'My Gig List',
+        ${row(isFriend ? 'My Gig List' : (window.authDisplayName || 'My Gig List'),
               'Personal Archive',
               isPersonal,
               isPersonal ? '' : "window._switchToPersonal()")}
+
+        ${following.length > 0 ? `
+        <div class="border-t border-slate-100">
+            <button onclick="window._toggleFollowingSection(this)" role="menuitem"
+                    class="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-colors"
+                    aria-expanded="${followingExpanded}" aria-controls="switcher-following-list">
+                <span class="w-5 flex-shrink-0"></span>
+                <span class="flex-1 text-sm font-black text-slate-900">Following</span>
+                <i data-lucide="chevron-${followingExpanded ? 'up' : 'down'}" class="w-4 h-4 text-slate-400 pointer-events-none" aria-hidden="true"></i>
+            </button>
+            <div id="switcher-following-list" class="${followingExpanded ? '' : 'hidden'} bg-slate-50/50">
+                ${following.map(f => row(
+                    f.username, 'Personal Archive',
+                    f.id === currentFriend,
+                    f.id === currentFriend ? '' : `window._switchToFriend('${f.id}', '${f.username.replace(/'/g, "\'")}')`
+                )).join('')}
+            </div>
+        </div>` : ''}
 
         <div class="border-t border-slate-100">
             <button onclick="window._toggleBandSection(this)" role="menuitem"
@@ -741,6 +1264,21 @@ function buildSwitcherPanel() {
 
 window._toggleBandSection = (btn) => {
     const list = document.getElementById('switcher-band-list');
+    if (!list) return;
+    const expanding = list.classList.contains('hidden');
+    list.classList.toggle('hidden');
+    if (btn) {
+        btn.setAttribute('aria-expanded', expanding ? 'true' : 'false');
+        const chevron = btn.querySelector('[data-lucide^="chevron"]');
+        if (chevron) {
+            chevron.setAttribute('data-lucide', expanding ? 'chevron-up' : 'chevron-down');
+            if (window.lucide) lucide.createIcons();
+        }
+}
+};
+
+window._toggleFollowingSection = (btn) => {
+    const list = document.getElementById('switcher-following-list');
     if (!list) return;
     const expanding = list.classList.contains('hidden');
     list.classList.toggle('hidden');

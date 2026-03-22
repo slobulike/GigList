@@ -78,6 +78,13 @@ export const loadAppData = async (user) => {
             .is('user_id', null)
             .eq('band', user.Subject || user.UserName)
             .range(0, 19999);
+    } else if (user.Type === 'Friend') {
+        // Viewing a friend's journal — query by their user id (RLS allows this via follows policy)
+        journalQuery = supabase
+            .from('journals')
+            .select('*')
+            .eq('user_id', user.friendId)
+            .range(0, 9999);
     } else {
         journalQuery = supabase
             .from('journals')

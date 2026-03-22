@@ -1,7 +1,19 @@
 # GigList — Roadmap
 
+## Mission
+
+**GigList helps people remember, celebrate, and share the live music that has shaped their life — and inspires them to make more of it.**
+
+The north star is driving live music attendance, not time on platform. Every feature should pass the test: *does this make someone more likely to go to a show, or remember why they love going?*
+
+GigList's competitive advantage is not data or discovery (Setlist.fm, Songkick and Bandsintown have those). It's the feeling — the relationship between a person and their live music history. Features that deepen that feeling are on-mission. Features that optimise for engagement metrics are off-mission.
+
+**On social features:** Friends/follow, companion tagging, and band fan counts are mission-aligned because they drive discovery and attendance. A real-time feed optimised for engagement, vanity follower counts, or likes on individual shows would not be.
+
+---
+
 ## Current State
-Production PWA hosted on GitHub Pages. No backend. All data loaded from CSV files at runtime.
+Production PWA on GitHub Pages + Supabase backend. Google OAuth + email/password auth. Per-user journals in Supabase with RLS. Band archives publicly readable. Photo upload to Supabase Storage.
 
 **Tech stack:**
 - Frontend: Vanilla JS (ES6 modules), Tailwind CSS (CDN), Chart.js, Leaflet
@@ -218,6 +230,8 @@ await supabase.from('journals').upsert(gigRow);
 ---
 
 ## Future Ideas (post Phase 4)
+
+- **"Went With" → Companion tagging** — the most underleveraged field in the data. Currently a free-text list of names. With real user accounts this becomes powerful: tag linked GigList accounts (the show appears in both users' timelines), surface friends you went to shows with before they had an account ("You went to 12 shows with Stem before he joined — send him an invite"), and prompt non-members with a personalised invite ("Rich saw Weezer with you at Brixton — join GigList to see your shared history"). This is mission-aligned social — it drives attendance and reconnects people with shared musical memories rather than optimising for engagement.
 
 - **Gmail ticket search** — MCP OAuth connection to search for "ticket confirmation" emails from ticket sellers. Auto-populate the add-show form. Good for onboarding users who haven't kept records.
 - **On This Day push notifications** — service worker already registered. Anniversary banner exists in app. Extend to background push.

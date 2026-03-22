@@ -122,9 +122,24 @@
             </button>
         </div>
 
-        <p class="text-center text-[10px] text-slate-300 font-bold uppercase tracking-widest">
-            No account yet? Get in touch with Rich.
-        </p>
+        <div class="text-center pt-2">
+            <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-2">No account yet?</p>
+            <button onclick="document.getElementById('waitlist-form').classList.toggle('hidden')"
+                    class="text-[10px] font-black text-indigo-500 uppercase tracking-widest hover:text-indigo-700 transition-colors">
+                Join the Waitlist →
+            </button>
+            <div id="waitlist-form" class="hidden mt-3 space-y-2">
+                <input type="email" id="waitlist-email"
+                       placeholder="your@email.com"
+                       aria-label="Your email address"
+                       class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all">
+                <button onclick="window.joinWaitlist()"
+                        class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black uppercase tracking-widest rounded-2xl transition-all active:scale-[0.98] text-sm">
+                    Request Access
+                </button>
+                <p id="waitlist-msg" class="text-[10px] text-slate-400 italic hidden"></p>
+            </div>
+        </div>
     </div>
 
     <!-- Loading screen -->
@@ -220,6 +235,25 @@
             container.appendChild(btn);
         });
     }
+
+    // ── Waitlist ──────────────────────────────────────────────────────────────
+    window.joinWaitlist = async () => {
+        const email = document.getElementById('waitlist-email')?.value.trim();
+        const msg   = document.getElementById('waitlist-msg');
+        if (!email) return;
+
+        const { error } = await supabase.from('waitlist').insert({ email });
+        if (msg) {
+            msg.classList.remove('hidden');
+            if (error && error.code === '23505') {
+                msg.textContent = "You're already on the list!";
+            } else if (error) {
+                msg.textContent = 'Something went wrong — try again.';
+            } else {
+                msg.textContent = "You're on the list! We'll be in touch.";
+            }
+        }
+    };
 
     // ── Google OAuth ──────────────────────────────────────────────────────────
     document.getElementById('btn-google').addEventListener('click', async () => {

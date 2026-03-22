@@ -134,6 +134,22 @@ const getSupportOptions = () => getArtistOptions();
 
 // ─── JOURNAL KEY GENERATION ───────────────────────────────────────────────────
 
+// Convert DD/MM/YYYY → YYYY-MM-DD for native date input
+const toInputDate = (ddmmyyyy) => {
+    if (!ddmmyyyy) return '';
+    const parts = ddmmyyyy.split('/');
+    if (parts.length !== 3) return '';
+    return `${parts[2]}-${parts[1].padStart(2,'0')}-${parts[0].padStart(2,'0')}`;
+};
+
+// Convert YYYY-MM-DD (native date input) → DD/MM/YYYY (app format)
+const fromInputDate = (yyyymmdd) => {
+    if (!yyyymmdd) return '';
+    const parts = yyyymmdd.split('-');
+    if (parts.length !== 3) return '';
+    return `${parts[2].padStart(2,'0')}/${parts[1].padStart(2,'0')}/${parts[0]}`;
+};
+
 const buildJournalKey = (dateStr, officialVenue) => {
     // Format: DD/MM/YYYYOfficialVenue  e.g. "27/08/1999Little John's Farm"
     return `${dateStr}${officialVenue}`;
@@ -162,14 +178,20 @@ const renderEditorModal = (entry) => {
     if (!modal) { console.error('Editor: #editor-modal not found in DOM'); return; }
 
     const isEdit  = !!editingKey;
-    const title   = isEdit ? 'Edit Show' : 'Add Show';
+    const isBandWrite = window.isBandMode && window.currentUser?.is_admin;
+    const context = isBandWrite ? ` · ${window.currentArtist || 'Band'} Archive` : '';
+    const title   = (isEdit ? 'Edit Show' : 'Add Show') + context;
     const festVal = (entry['Festival?'] || entry['Festival? Y/N'] || 'N').toString().trim().toUpperCase();
     const isFest  = festVal === 'Y';
 
     document.getElementById('editor-modal-title').textContent = title;
 
+    // Show delete button only when editing an existing show
+    const deleteBtn = document.getElementById('btn-delete-show');
+    if (deleteBtn) deleteBtn.classList.toggle('hidden', !isEdit);
+
     // Populate fields
-    _val('editor-date',       entry.Date       || '');
+    _val('editor-date',       toInputDate(entry.Date || ''));
     _val('editor-band',       entry.Band       || '');
     _val('editor-venue',      entry.OfficialVenue || '');
     _val('editor-went-with',  entry['Went With'] || '');
@@ -219,7 +241,7 @@ window.editorToggleFestival = () => {
 // ─── SAVE ─────────────────────────────────────────────────────────────────────
 
 window.saveGig = async () => {
-    const dateStr    = _get('editor-date').trim();
+    const dateStr    = fromInputDate(_get('editor-date').trim());
     const band       = _get('editor-band').trim();
     const venue      = _get('editor-venue').trim();
 
@@ -273,11 +295,7 @@ window.saveGig = async () => {
             journal.push(gigRow);
         }
     } else {
-        if (journal.some(g => g['Journal Key'] === journalKey)) {
-            _showError(`A show already exists with this date and venue.\nJournal Key: ${journalKey}`);
-            return;
-        }
-        journal.push(gigRow);
+        journal.push(gigRow); // duplicate check happens via Supabase insert below
     }
 
     // ── Write to Supabase (primary store) ────────────────────────────────────
@@ -287,18 +305,23 @@ window.saveGig = async () => {
         return;
     }
 
+    // In band mode, admin writes to band journal (user_id = null)
+    // In personal mode, writes to user's own journal
+    const isBandWrite = window.isBandMode && window.currentUser?.is_admin;
+    const writeUserId = isBandWrite ? null : session.user.id;
+
     const supabaseRow = {
-        user_id:           session.user.id,
+        user_id:           writeUserId,
         journal_key:       journalKey,
         date:              dateStr,
-        band:              band,
+        band:              isBandWrite ? (window.currentArtist || band) : band,
         official_venue:    venue,
         venue:             venue,
         festival:          isFest === 'Y',
         festival_lineups:  _get('editor-lineups').trim(),
         notable_support:   _get('editor-support').trim(),
         went_with:         _get('editor-went-with').trim(),
-        comments:          _get('editor-comments').trim(),
+        comments:          isBandWrite ? 'Historical Artist Entry' : _get('editor-comments').trim(),
         price:             _get('editor-price').trim(),
         photos:            _get('editor-photos').trim(),
         review_url:        _get('editor-review').trim(),
@@ -306,11 +329,11 @@ window.saveGig = async () => {
 
     let dbError = null;
     if (editingKey) {
-        // Update existing row
+        // Update existing row — match on user_id (null for band, uuid for personal)
         const { error } = await supabase
             .from('journals')
             .update(supabaseRow)
-            .eq('user_id', session.user.id)
+            .is('user_id', writeUserId)
             .eq('journal_key', editingKey);
         dbError = error;
     } else {
@@ -322,15 +345,22 @@ window.saveGig = async () => {
     }
 
     if (dbError) {
-        _showError(`Save failed: ${dbError.message}`);
+        if (dbError.code === '23505') {
+            _showError('A show already exists with this date and venue.');
+        } else {
+            _showError(`Save failed: ${dbError.message}`);
+        }
         return;
     }
     // ─────────────────────────────────────────────────────────────────────────
 
     // Update in-memory data so UI reflects change without a full reload
     window.journalData = journal;
-    // Do NOT call setDirty — Supabase is now the source of truth, no CSV needed
     closeEditorModal();
+    if (window.showToast) window.showToast(
+        editingKey ? 'Show updated ✓' : 'Show added ✓',
+        'success'
+    );
 
     // If the saved show is in the future, make sure the upcoming toggle is on
     // so the user can immediately see the show they just added
@@ -356,7 +386,8 @@ window.saveGig = async () => {
 export const exportCSV = () => {
     const data = window.journalData;
     if (!data || data.length === 0) {
-        alert('No data to export.');
+        if (window.showToast) window.showToast('No data to export.', 'warning');
+        else alert('No data to export.');
         return;
     }
 
@@ -402,6 +433,68 @@ export const exportCSV = () => {
 };
 
 window.exportCSV      = exportCSV;
+
+// ─── DELETE GIG ───────────────────────────────────────────────────────────────
+
+window.deleteGig = async () => {
+    if (!editingKey) return;
+
+    // Toast-based confirmation
+    const confirmed = await new Promise(resolve => {
+        const container = document.getElementById('toast-container');
+        if (!container) { resolve(window.confirm('Remove this show permanently?')); return; }
+        const toast = document.createElement('div');
+        toast.className = 'pointer-events-auto flex items-center gap-3 bg-white border border-slate-200 shadow-xl px-5 py-3 rounded-2xl text-sm font-bold text-slate-700 max-w-xs';
+        const yesId = 'del-yes-' + Date.now();
+        const noId  = 'del-no-'  + Date.now();
+        toast.innerHTML =
+            '<span class="flex-1">Remove this show permanently?</span>' +
+            '<button id="' + yesId + '" class="bg-red-500 text-white px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-red-600 transition-colors">Remove</button>' +
+            '<button id="' + noId  + '" class="bg-slate-100 text-slate-600 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-colors">Cancel</button>';
+        container.appendChild(toast);
+        document.getElementById(yesId).onclick = () => { toast.remove(); resolve(true); };
+        document.getElementById(noId).onclick  = () => { toast.remove(); resolve(false); };
+    });
+
+    if (!confirmed) return;
+
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+
+    const isBandWrite = window.isBandMode && window.currentUser?.is_admin;
+
+    let dbError;
+    if (isBandWrite) {
+        const { error } = await supabase
+            .from('journals')
+            .delete()
+            .is('user_id', null)
+            .eq('journal_key', editingKey);
+        dbError = error;
+    } else {
+        const { error } = await supabase
+            .from('journals')
+            .delete()
+            .eq('user_id', session.user.id)
+            .eq('journal_key', editingKey);
+        dbError = error;
+    }
+
+    if (dbError) {
+        if (window.showToast) window.showToast('Delete failed: ' + dbError.message, 'error');
+        return;
+    }
+
+    // Remove from in-memory data
+    window.journalData = (window.journalData || []).filter(
+        g => g['Journal Key'] !== editingKey
+    );
+
+    closeEditorModal();
+    if (window.closeModal) window.closeModal(); // also close the gig detail modal behind it
+    if (window.showToast) window.showToast('Show removed', 'info');
+    if (window.refreshUI) window.refreshUI();
+};
 window.openAddGigModal  = openAddGigModal;
 window.openEditGigModal = openEditGigModal;
 
@@ -417,6 +510,8 @@ const _showError = (msg) => {
         el.textContent = msg;
         el.classList.remove('hidden');
         setTimeout(() => el.classList.add('hidden'), 4000);
+    } else if (window.showToast) {
+        window.showToast(msg, 'error');
     }
 };
 
