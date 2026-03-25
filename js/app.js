@@ -1,29 +1,10 @@
 /**
  * GigList Core Engine
- * v3.1.0 — 2026-03-22
- * -------------------------------------------------------------------
- * [FEATURE] Friends / follow system — search users, follow/unfollow,
- *           follow-back prompts, pending follow requests
- * [FEATURE] Privacy model — public/private profiles, pending follows
- *           require approval; RLS enforces accepted-only journal access
- * [FEATURE] Friend journal view — read-only vault.html?friend= mode
- *           with indigo header branding and full journal access
- * [FEATURE] "Also on GigList" in gig modal — shows other users who
- *           attended the same show, with inline +follow buttons
- * [FEATURE] Band photo support — band-photos Supabase Storage bucket,
- *           admin camera upload in band gig modals
- * [FEATURE] External links row in gig modal — Photos, Review/Weezerpedia,
- *           Setlist.fm icons auto-generated from data
- * [FEATURE] Waitlist signup on index.html
- * [FEATURE] Toast notification system — replaces all alert()/confirm()
- * [FEATURE] Admin band journal writes — Add/Edit/Delete in band mode
- *           writes to band journal (user_id=null), not personal journal
- * [FIX]     Mode switcher Following section visible in all modes,
- *           collapsible, correctly ordered below Personal Archive
- * [FIX]     initSocial awaited before switcher builds — follow state
- *           correct on first load with no reload required
- * [FIX]     Settings modal reordered by frequency of use; scrollable;
- *           click-outside to close
+   V3.4.0 - Release Date 2026-03-25
+  * -------------------------------------------------------------------
+    ✅ Cloudflare worked added allowing users to sync setlist.fm data directly from the app
+    ✅ Added event tracking and admin dashboard (local only)
+    ✅ Added user high scores table to puzzle game
  */
 
 import * as Data from './modules/data.js';
@@ -37,6 +18,7 @@ import * as Games from './modules/games.js';
 import { GigPuzzle } from './modules/puzzle.js';
 import { initEditor, exportCSV } from './modules/editor.js';
 import { supabase } from './modules/supabase.js';
+import { runSetlistSync } from './modules/setlist-sync.js';
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
@@ -83,7 +65,7 @@ let currentUser = null;
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "3.1.0";
+const APP_VERSION = "3.4.0";
 
 window.toggleListView = UI.toggleListView;
 window.activeView = window.activeView || 'list';
@@ -280,6 +262,10 @@ export async function initApp() {
     // loadVenues is called inside loadAppData and its result stored as window.allVenues.
     // Alias it here under the name the rest of the app expects.
     window.venueLookup = window.allVenues;
+    window.track('app_load', {
+        mode:     currentUser.Type,
+        is_admin: currentUser.is_admin || false
+    });
 
     // Enforce read-only for non-admin band mode visitors
     // Admin check relies on is_admin from profiles table — run SQL:
@@ -304,6 +290,21 @@ export async function initApp() {
     }
 
     initModeSwitcher(); // build the logo dropdown switcher (uses _following)
+
+    // New user onboarding — open settings modal pre-focused on setlist.fm sync
+    const isNewUser = new URLSearchParams(window.location.search).get('new') === 'true';
+    if (isNewUser && currentUser?.Type === 'Personal') {
+        setTimeout(() => {
+            window.openSettings();
+            const input = document.getElementById('setlistIdInput');
+            const hint  = document.getElementById('sync-status');
+            if (input) input.focus();
+            if (hint) {
+                hint.textContent = 'Welcome! Enter your setlist.fm username to import your gig history.';
+                hint.className = 'text-[10px] mt-3 leading-relaxed text-indigo-500 font-black not-italic';
+            }
+        }, 600);
+    }
 }
 
 function refreshUI() {
@@ -506,10 +507,11 @@ function initEventListeners() {
 
 window.viewGigDetails = (key) => {
     UI.openGigModal(key, window.journalData, window.performanceData);
-    // Load GigList attendees async after modal renders
     if (currentUser?.isAuthUser && !window.isBandMode) {
         setTimeout(() => window.loadGigAttendees(key), 100);
     }
+    const entry = (window.journalData || []).find(g => g['Journal Key'] === key);
+    window.track('gig_modal_open', { band: entry?.Band, venue: entry?.OfficialVenue, key });
 };
 window.openGigModal = window.viewGigDetails;
 
@@ -526,6 +528,7 @@ window.closeModal = () => {
 // ─── SETTINGS MODAL ───────────────────────────────────────────────────────────
 
 window.openSettings = function() {
+    window.track('settings_open');
     const modal = document.getElementById('settingsModal');
     if (!modal) return;
 
@@ -574,15 +577,186 @@ window.closeSettings = function() {
     }
 };
 
-window.syncComingSoon = function() {
-    const id = document.getElementById('setlistIdInput')?.value;
-    alert(id
-        ? `Syncing for ${id} coming soon! Using the Python bridge for now.`
-        : 'Please enter a Setlist.fm username.'
-    );
+window.syncSetlistFm = async function() {
+    const username = document.getElementById('setlistIdInput')?.value?.trim();
+    if (!username) {
+        window.showToast('Please enter your setlist.fm username.', 'warning');
+        return;
+    }
+
+    // UI elements in the settings modal
+    const btn        = document.querySelector('[onclick="window.syncSetlistFm()"]');
+    const statusEl   = document.getElementById('sync-status');
+    const progressEl = document.getElementById('sync-progress');
+
+    const setStatus = (msg, type = 'info') => {
+        if (statusEl) {
+            statusEl.textContent = msg;
+            statusEl.className = `text-[10px] mt-3 italic leading-relaxed ${
+                type === 'error'   ? 'text-red-500' :
+                type === 'success' ? 'text-emerald-600 font-black not-italic' :
+                'text-slate-400'
+            }`;
+        }
+    };
+
+    const setProgress = (val) => {
+        if (progressEl) {
+            progressEl.style.width = val + '%';
+            progressEl.parentElement?.classList.toggle('hidden', val === 0);
+        }
+    };
+
+    // Disable button while running
+    if (btn) { btn.disabled = true; btn.classList.add('opacity-50', 'cursor-not-allowed'); }
+    setProgress(5);
+    setStatus('Connecting to setlist.fm\u2026');
+    window.track('setlist_sync_start', { username });
+
+    await runSetlistSync(username, {
+        onProgress({ page, fetched, journalInserted, status }) {
+            const msg = status === 'rate_limited'
+                ? 'Rate limited \u2014 waiting 20s before page ' + page + '\u2026'
+                : 'Page ' + page + ' \u2014 ' + fetched + ' shows fetched, ' + journalInserted + ' added\u2026';
+            setStatus(msg);
+            setProgress(Math.min(90, 5 + page * 8));
+        },
+
+        onComplete({ journalInserted, journalSkipped, newVenues, pages }) {
+            setProgress(100);
+            const parts = [journalInserted + ' shows added'];
+            if (journalSkipped)  parts.push(journalSkipped + ' already in your list');
+            if (newVenues)       parts.push(newVenues + ' new venues discovered');
+            setStatus('\u2713 Sync complete \u2014 ' + parts.join(', ') + '.', 'success');
+            if (btn) { btn.disabled = false; btn.classList.remove('opacity-50', 'cursor-not-allowed'); }
+
+            window.track('setlist_sync_complete', { journalInserted, journalSkipped, newVenues, pages });
+
+            if (journalInserted > 0) {
+                setTimeout(async () => {
+                    const data = await Data.loadAppData(currentUser);
+                    window.journalData     = data.journalData;
+                    window.performanceData = data.performanceData;
+                    window.filteredResults = [...data.journalData];
+                    refreshUI();
+                    window.showToast(journalInserted + ' shows synced from setlist.fm!', 'success');
+                }, 800);
+            }
+
+            // If this is a new user (?new=true), trigger the connections banner
+            const isNewUser = new URLSearchParams(window.location.search).get('new') === 'true';
+            if (isNewUser && journalInserted > 0) {
+                setTimeout(() => checkGigOverlap(), 1500);
+            }
+        },
+
+        onError(msg) {
+            setProgress(0);
+            setStatus('Sync failed: ' + msg, 'error');
+            if (btn) { btn.disabled = false; btn.classList.remove('opacity-50', 'cursor-not-allowed'); }
+            window.showToast('Sync failed \u2014 see settings for details.', 'error');
+            window.track('setlist_sync_error', { username, msg });
+        },
+    });
 };
 
 // ─── SOCIAL / FRIENDS ────────────────────────────────────────────────────────
+
+// ─── GIG OVERLAP / CONNECTIONS BANNER ────────────────────────────────────────
+
+async function checkGigOverlap() {
+    if (!currentUser?.isAuthUser || currentUser?.Type !== 'Personal') return;
+
+    const banner = document.getElementById('connections-banner');
+    if (!banner) return;
+
+    // Don't re-show if dismissed this session
+    if (sessionStorage.getItem('connections_dismissed')) return;
+
+    const { data: myJournals, error: myErr } = await supabase
+        .from('journals')
+        .select('journal_key')
+        .eq('user_id', currentUser.id);
+
+    if (myErr || !myJournals?.length) return;
+
+    const myKeys = myJournals.map(j => j.journal_key);
+
+    const { data: matches, error: matchErr } = await supabase
+        .from('journals')
+        .select('user_id, journal_key, band, official_venue, date')
+        .in('journal_key', myKeys)
+        .neq('user_id', currentUser.id)
+        .not('user_id', 'is', null);
+
+    if (matchErr || !matches?.length) return;
+
+    // Group by user_id and count shared shows
+    const byUser = new Map();
+    for (const row of matches) {
+        if (!byUser.has(row.user_id)) byUser.set(row.user_id, { userId: row.user_id, shows: [] });
+        byUser.get(row.user_id).shows.push(row);
+    }
+    if (!byUser.size) return;
+
+    const { data: profiles } = await supabase
+        .from('profiles')
+        .select('id, username')
+        .in('id', [...byUser.keys()]);
+
+    if (!profiles?.length) return;
+
+    const connections = profiles.map(p => ({
+        ...p,
+        shows: byUser.get(p.id)?.shows || [],
+        count: byUser.get(p.id)?.shows.length || 0,
+    })).sort((a, b) => b.count - a.count);
+
+    const followingSet = new Set((window._following || []).map(f => f.id));
+    const list = document.getElementById('connections-list');
+    if (!list) return;
+
+    list.innerHTML = connections.map(c => {
+        const alreadyFollowing = followingSet.has(c.id);
+        const ex = c.shows[0];
+        const example = ex ? ex.band + ' at ' + ex.official_venue : '';
+        return `
+        <div class="flex items-start justify-between gap-3" data-user-id="${c.id}">
+            <div class="flex-1 min-w-0">
+                <p class="text-sm font-black text-indigo-900">${c.username}</p>
+                <p class="text-[10px] text-indigo-500 mt-0.5">
+                    ${c.count} show${c.count !== 1 ? 's' : ''} in common${example ? ' &mdash; incl. ' + example : ''}
+                </p>
+            </div>
+            ${alreadyFollowing
+                ? '<span class="text-[10px] font-black text-emerald-600 uppercase tracking-widest flex-shrink-0 pt-0.5">Following</span>'
+                : `<button onclick="window.followUser('${c.id}', '${c.username}', this.closest('[data-user-id]'))"
+                          class="flex-shrink-0 bg-indigo-600 text-white text-[10px] font-black px-3 py-1.5 rounded-full hover:bg-indigo-700 transition-all active:scale-95 uppercase tracking-widest">
+                       Follow
+                   </button>`
+            }
+        </div>`;
+    }).join('');
+
+    banner.classList.remove('hidden');
+    window.track('connections_banner_shown', { count: connections.length });
+}
+
+window.dismissConnectionsBanner = function() {
+    document.getElementById('connections-banner')?.classList.add('hidden');
+    sessionStorage.setItem('connections_dismissed', '1');
+    window.track('connections_banner_dismissed');
+};
+
+// ─── ANALYTICS ───────────────────────────────────────────────────────────────
+
+window.track = (event, properties = {}) => {
+    const userId = window.currentUser?.id;
+    if (!userId) return;
+    // Fire and forget — never blocks UI
+    supabase.from('events').insert({ user_id: userId, event, properties })
+        .then(({ error }) => { if (error) console.debug('track:', error.message); });
+};
 
 // ─── PRIVACY TOGGLE ──────────────────────────────────────────────────────────
 
@@ -808,6 +982,7 @@ window.followUser = async (userId, username, btn) => {
         return;
     }
 
+    window.track('follow_user', { target: username, status: followStatus });
     if (followStatus === 'pending') {
         window.showToast(`Follow request sent to ${username}`, 'info');
         // Update button to show pending state
@@ -1303,6 +1478,7 @@ window._switchToBand = (bandName) => {
 };
 
 window.signOut = async function() {
+    window.track('sign_out');
     await supabase.auth.signOut();
     window.location.href = 'index.html';
 };

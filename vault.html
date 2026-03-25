@@ -72,6 +72,25 @@
             <div id="follow-back-list" class="space-y-2"></div>
         </div>
 
+        <!-- Connections banner — shown after first setlist.fm sync to surface shared shows -->
+        <div id="connections-banner"
+             class="hidden bg-indigo-600 rounded-[1.5rem] p-5 space-y-3"
+             role="status">
+            <div class="flex items-start justify-between gap-3">
+                <div>
+                    <p class="text-[10px] font-black uppercase text-indigo-300 tracking-widest mb-1">You're Not Alone</p>
+                    <p class="text-sm font-black text-white leading-snug">Looks like you've been to some of the same shows as other GigList users.</p>
+                </div>
+                <button onclick="window.dismissConnectionsBanner()"
+                        aria-label="Dismiss"
+                        class="flex-shrink-0 text-indigo-300 hover:text-white transition-colors mt-0.5">
+                    <i data-lucide="x" class="w-4 h-4"></i>
+                </button>
+            </div>
+            <div id="connections-list" class="space-y-3 bg-white/10 rounded-2xl p-3"></div>
+            <p class="text-[10px] text-indigo-300 italic">Follow them to see what else they've been listening to.</p>
+        </div>
+
         <!-- On This Day banner — only rendered when a matching anniversary exists -->
         <div id="otd-banner" class="hidden bg-amber-50 border border-amber-200 rounded-[1.5rem] p-4 flex items-center gap-3" role="status" aria-label="On This Day anniversary">
             <div class="w-10 h-10 bg-white border border-amber-200 rounded-xl flex items-center justify-center flex-shrink-0">
@@ -429,15 +448,24 @@
                 <label for="setlistIdInput" class="block text-[10px] font-black uppercase text-indigo-500 mb-3 tracking-widest">Sync Setlist.fm</label>
                 <div class="flex gap-2">
                     <input type="text" id="setlistIdInput"
-                           placeholder="Enter Username (e.g. Tragicgurl)"
+                           placeholder="Your setlist.fm username"
+                           autocomplete="off"
+                           autocorrect="off"
+                           autocapitalize="off"
+                           spellcheck="false"
                            class="flex-1 bg-white px-4 py-3 rounded-xl text-sm font-bold border-none shadow-sm outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800">
-                    <button onclick="window.syncComingSoon()"
+                    <button onclick="window.syncSetlistFm()"
                             aria-label="Run Sync"
                             class="bg-indigo-600 text-white px-4 py-3 rounded-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200">
                         <i data-lucide="refresh-cw" class="w-5 h-5"></i>
                     </button>
                 </div>
-                <p class="text-[10px] text-slate-400 mt-3 italic leading-relaxed">This will pull your history, venues, and setlists.</p>
+                <!-- Progress bar — hidden until sync starts -->
+                <div class="hidden mt-3 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                    <div id="sync-progress" class="h-full bg-indigo-500 rounded-full transition-all duration-500" style="width:0%"></div>
+                </div>
+                <!-- Status text — updated by syncSetlistFm() -->
+                <p id="sync-status" class="text-[10px] text-slate-400 mt-3 italic leading-relaxed">This will pull your full history, venues, and setlists.</p>
             </div>
 
             <!-- 4. EXPORT -->

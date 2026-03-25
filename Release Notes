@@ -1,5 +1,11 @@
   /**
 
+   V3.4.0 - Release Date 2026-03-25
+  * -------------------------------------------------------------------
+    ✅ Cloudflare worked added allowing users to sync setlist.fm data directly from the app
+    ✅ Added event tracking and admin dashboard (local only)
+    ✅ Added user high scores table to puzzle game
+
     V3.3.2 - Release Date 2026-03-22
   * -------------------------------------------------------------------
     ✅ Added first social features including follow and went with tagging

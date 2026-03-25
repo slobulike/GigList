@@ -357,6 +357,8 @@ window.saveGig = async () => {
     // Update in-memory data so UI reflects change without a full reload
     window.journalData = journal;
     closeEditorModal();
+    const action = editingKey ? 'show_updated' : 'show_added';
+    window.track?.(action, { band, venue, is_band_mode: !!window.isBandMode });
     if (window.showToast) window.showToast(
         editingKey ? 'Show updated ✓' : 'Show added ✓',
         'success'

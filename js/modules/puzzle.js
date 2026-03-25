@@ -6,6 +6,8 @@ export class GigPuzzle {
         this.size      = gridSize;
         this.tiles     = [];
         this.emptyIndex = (gridSize * gridSize) - 1;
+        this.moves     = 0;
+        this.startTime = Date.now();
 
         // Guard against missing container before doing anything
         if (!this.container) {
@@ -53,6 +55,7 @@ export class GigPuzzle {
         if (this.getNeighbors(index).includes(this.emptyIndex)) {
             this.swap(index, this.emptyIndex);
             this.emptyIndex = index;
+            this.moves++;
             this.render();
             this.checkWin();
         }
@@ -65,18 +68,65 @@ export class GigPuzzle {
     }
 
     showWinMessage() {
-        // Replace the grid with an in-page win message rather than a blocking alert()
+        const moves    = this.moves;
+        const timeSecs = Math.round((Date.now() - this.startTime) / 1000);
+
+        // Track and save score
+        window.track?.('puzzle_solved', { moves, time_seconds: timeSecs, grid: this.size });
+        this._savePuzzleScore(moves);
+
         this.container.innerHTML = `
             <div class="col-span-4 flex flex-col items-center justify-center h-full text-center p-6 gap-4">
                 <p class="text-4xl">🎉</p>
                 <p class="text-white font-black italic uppercase tracking-tighter text-xl">Memory Restored!</p>
-                <p class="text-white/60 text-xs font-bold uppercase tracking-widest">Gig Puzzle Solved!</p>
+                <p class="text-white/60 text-xs font-bold uppercase tracking-widest">Solved in ${moves} moves · ${timeSecs}s</p>
                 <button onclick="window.startNewPuzzle()"
                         class="mt-2 bg-indigo-500 hover:bg-indigo-600 text-white px-6 py-2 rounded-full font-black uppercase text-xs tracking-widest transition-all active:scale-95">
                     New Puzzle
                 </button>
             </div>
         `;
+    }
+
+    async _savePuzzleScore(moves) {
+        const userId = window.currentUser?.id;
+        if (!userId) return;
+        try {
+            const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm');
+            // Use the already-initialised supabase from the module
+            const { supabase } = await import('./supabase.js');
+
+            // Upsert: increment total_solved, update best_moves if better
+            const { data: existing } = await supabase
+                .from('puzzle_scores')
+                .select('total_solved, best_moves')
+                .eq('user_id', userId)
+                .single();
+
+            const newTotal = (existing?.total_solved || 0) + 1;
+            const newBest  = existing?.best_moves
+                ? Math.min(existing.best_moves, moves)
+                : moves;
+
+            await supabase.from('puzzle_scores').upsert({
+                user_id:      userId,
+                total_solved: newTotal,
+                best_moves:   newBest,
+                updated_at:   new Date().toISOString()
+            }, { onConflict: 'user_id' });
+
+            // Check for puzzle achievement milestones
+            if ([1, 5, 10, 25, 50].includes(newTotal)) {
+                window.showToast?.(
+                    newTotal === 1
+                        ? '🧩 First puzzle solved!'
+                        : `🧩 Puzzler milestone — ${newTotal} puzzles solved!`,
+                    'success', 5000
+                );
+            }
+        } catch (e) {
+            console.debug('puzzle score save:', e);
+        }
     }
 
     render() {

@@ -169,7 +169,7 @@ Options:
 
 ---
 
-## Phase 3 — Wire App to Supabase (a weekend)
+## Phase 3 — Wire App to Supabase (a weekend)  ✅ COMPLETE
 
 > Goal: app reads from and writes to Supabase instead of CSVs. CSV export remains as the data portability/backup mechanism.
 
@@ -231,7 +231,12 @@ await supabase.from('journals').upsert(gigRow);
 
 ## Future Ideas (post Phase 4)
 
-- **"Went With" → Companion tagging** — the most underleveraged field in the data. Currently a free-text list of names. With real user accounts this becomes powerful: tag linked GigList accounts (the show appears in both users' timelines), surface friends you went to shows with before they had an account ("You went to 12 shows with Stem before he joined — send him an invite"), and prompt non-members with a personalised invite ("Rich saw Weezer with you at Brixton — join GigList to see your shared history"). This is mission-aligned social — it drives attendance and reconnects people with shared musical memories rather than optimising for engagement.
+- **"Went With" → Companion tagging**
+- — the most underleveraged field in the data. Currently a free-text list of names. With real user accounts this becomes powerful:
+- tag linked GigList accounts (the show appears in both users' timelines),
+- surface friends you went to shows with before they had an account ("You went to 12 shows with Stem before he joined — send him an invite"), 
+- and prompt non-members with a personalised invite ("Rich saw Weezer with you at Brixton — join GigList to see your shared history"). 
+- This is mission-aligned social — it drives attendance and reconnects people with shared musical memories rather than optimising for engagement.
 
 - **Gmail ticket search** — MCP OAuth connection to search for "ticket confirmation" emails from ticket sellers. Auto-populate the add-show form. Good for onboarding users who haven't kept records.
 - **On This Day push notifications** — service worker already registered. Anniversary banner exists in app. Extend to background push.
