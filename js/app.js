@@ -1,15 +1,15 @@
 /**
  * GigList Core Engine
-   V3.4.0 - Release Date 2026-03-25
-  * -------------------------------------------------------------------
-    ✅ Cloudflare worked added allowing users to sync setlist.fm data directly from the app
-    ✅ Added event tracking and admin dashboard (local only)
-    ✅ Added user high scores table to puzzle game
+ * v3.5.0 — 2026-03-27
+ * -------------------------------------------------------------------
+ * [FEATURE] Added band archive request flow with admin queue and nightly re-sync cron job
+ * [FEATURE] Sign up flow added, new users can now onboard themselves
  */
 
 import * as Data from './modules/data.js';
 import * as Charts from './modules/charts.js';
 import * as UI from './modules/ui.js';
+import { initArchiveButton } from './modules/ui.js';
 import { parseDate } from './modules/utils.js';
 import { renderBadges, renderBandBadges } from './modules/achievements.js';
 import { renderCalendar } from './modules/calendar.js';
@@ -65,7 +65,7 @@ let currentUser = null;
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "3.4.0";
+const APP_VERSION = "3.4.1";
 
 window.toggleListView = UI.toggleListView;
 window.activeView = window.activeView || 'list';
@@ -509,6 +509,9 @@ window.viewGigDetails = (key) => {
     UI.openGigModal(key, window.journalData, window.performanceData);
     if (currentUser?.isAuthUser && !window.isBandMode) {
         setTimeout(() => window.loadGigAttendees(key), 100);
+        // Async — renders archive status button into placeholder span
+        const entry = (window.journalData || []).find(g => g['Journal Key'] === key);
+        if (entry) setTimeout(() => initArchiveButton(entry), 150);
     }
     const entry = (window.journalData || []).find(g => g['Journal Key'] === key);
     window.track('gig_modal_open', { band: entry?.Band, venue: entry?.OfficialVenue, key });

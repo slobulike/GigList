@@ -20,6 +20,10 @@
  *     GET /?endpoint=artist-setlists&mbid=abc-123&page=1
  *     → proxies: GET /rest/1.0/artist/{mbid}/setlists?p={page}
  *
+ *   Artist search by name (returns list with MBIDs):
+ *     GET /?endpoint=artist-search&name=Weezer
+ *     → proxies: GET /rest/1.0/search/artists?artistName=Weezer&sort=relevance
+ *
  *   Venue lookup by setlist.fm venue ID:
  *     GET /?endpoint=venue&venueId=abc123
  *     → proxies: GET /rest/1.0/venue/{venueId}
@@ -101,7 +105,14 @@ function buildSetlistFmUrl(params) {
         return { url: `${SETLISTFM_BASE}/venue/${encodeURIComponent(venueId)}` };
     }
 
-    return { error: `Unknown endpoint: "${endpoint}". Valid values: user-setlists, artist-setlists, venue` };
+    if (endpoint === 'artist-search') {
+        const name = params.get('name');
+        const page = params.get('page') || '1';
+        if (!name) return { error: 'Missing required param: name' };
+        return { url: `${SETLISTFM_BASE}/search/artists?artistName=${encodeURIComponent(name)}&sort=relevance&p=${page}` };
+    }
+
+    return { error: `Unknown endpoint: "${endpoint}". Valid values: user-setlists, artist-setlists, artist-search, venue` };
 }
 
 // ─── Main handler ─────────────────────────────────────────────────────────────

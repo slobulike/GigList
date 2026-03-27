@@ -6,6 +6,7 @@
  * GigList - UI Module
  */
 import { getGlobalSeenCount, slugify, slugifyArtist, parseDate } from './utils.js';
+import { searchArtists, getArchiveStatus, submitArchiveRequest } from './artist-sync.js';
 import { renderCalendar } from './calendar.js';
 import { sortGigs, deriveType } from './data.js';
 import { getUniqueSongCount } from './data.js';
@@ -1064,6 +1065,7 @@ export const openGigModal = (key, journalData, performanceData) => {
                             <i data-lucide="pencil" class="w-3.5 h-3.5" aria-hidden="true"></i> EDIT
                         </button>
                         ${isFestival ? '<span class="bg-amber-400 text-black text-[8px] font-black px-2 py-1 rounded uppercase">Festival</span>' : ''}
+                        <span id="modal-archive-btn-wrap-${entry['Journal Key']?.replace(/[^a-z0-9]/gi,'_')}"></span>
                     </div>
                     <!-- External links row: photos, review, setlist.fm -->
                     ${(hasPhotos || hasReview || hasSetlist) ? `
@@ -1216,4 +1218,146 @@ export const openGigModal = (key, journalData, performanceData) => {
     document.body.style.overflow = 'hidden';
     setTimeout(() => document.getElementById('modal-title')?.focus(), 100);
     if (window.lucide) lucide.createIcons();
+};
+
+// ─── ARCHIVE REQUEST BUTTON ───────────────────────────────────────────────────
+
+/**
+ * Called by openGigModal after the modal HTML is in the DOM.
+ * Checks whether the band is already archived, has a pending request, or
+ * is new — and renders the appropriate button/link into the placeholder span.
+ */
+export async function initArchiveButton(entry) {
+    // Only show for authenticated personal users, not in band/friend mode
+    if (!window.currentUser?.isAuthUser || window.currentUser?.Type !== 'Personal') return;
+
+    const bandName   = entry.Band || entry.band || '';
+    const safeKey    = (entry['Journal Key'] || '').replace(/[^a-z0-9]/gi, '_');
+    const wrap       = document.getElementById(`modal-archive-btn-wrap-${safeKey}`);
+    if (!wrap) return;
+
+    const status = await getArchiveStatus(bandName);
+
+    if (status === 'archived') {
+        // Link through to the existing band archive
+        const bandParam = encodeURIComponent(bandName);
+        wrap.innerHTML = `
+            <a href="vault.html?band=${bandParam}"
+               class="bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 text-slate-500 text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
+                <i data-lucide="archive" class="w-3.5 h-3.5" aria-hidden="true"></i> VIEW ARCHIVE
+            </a>`;
+    } else if (status === 'pending') {
+        wrap.innerHTML = `
+            <span class="bg-amber-50 text-amber-600 text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 border border-amber-200">
+                <i data-lucide="clock" class="w-3.5 h-3.5" aria-hidden="true"></i> REQUEST PENDING
+            </span>`;
+    } else {
+        // Not archived and no pending request — show the request button
+        wrap.innerHTML = `
+            <button onclick="window.openArchiveRequest('${bandName.replace(/'/g, "\'")}')"
+                    class="bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 text-slate-500 text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
+                <i data-lucide="plus-circle" class="w-3.5 h-3.5" aria-hidden="true"></i> ADD TO ARCHIVE
+            </button>`;
+    }
+    if (window.lucide) lucide.createIcons();
+}
+
+/**
+ * Opens the archive request flow inline in the gig modal.
+ * Searches setlist.fm for the artist, presents candidates, and on confirm
+ * submits to band_requests.
+ */
+window.openArchiveRequest = async function(bandName) {
+    // Find or create the request UI container below the action row
+    let container = document.getElementById('archive-request-container');
+    if (!container) {
+        const modalBody = document.querySelector('.flex-grow.overflow-y-auto');
+        if (!modalBody) return;
+        container = document.createElement('div');
+        container.id = 'archive-request-container';
+        container.className = 'mb-6 bg-indigo-50 border border-indigo-100 rounded-[1.5rem] p-5 space-y-3';
+        modalBody.prepend(container);
+    }
+
+    container.innerHTML = `
+        <p class="text-[10px] font-black uppercase text-indigo-500 tracking-widest">Request Archive</p>
+        <div class="flex gap-2">
+            <input id="archive-search-input"
+                   type="text"
+                   value="${bandName.replace(/"/g, '&quot;')}"
+                   placeholder="Artist name…"
+                   class="flex-1 bg-white border border-indigo-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-400">
+            <button onclick="window.runArchiveSearch()"
+                    class="bg-indigo-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase hover:bg-indigo-700 transition-colors">
+                Search
+            </button>
+        </div>
+        <div id="archive-search-results" class="space-y-2 text-sm"></div>`;
+
+    document.getElementById('archive-search-input')?.focus();
+    if (window.lucide) lucide.createIcons();
+};
+
+window.runArchiveSearch = async function() {
+    const input   = document.getElementById('archive-search-input');
+    const results = document.getElementById('archive-search-results');
+    if (!input || !results) return;
+
+    const name = input.value.trim();
+    if (!name) return;
+
+    results.innerHTML = '<p class="text-[10px] text-slate-400 italic">Searching setlist.fm…</p>';
+
+    try {
+        const candidates = await searchArtists(name);
+
+        if (!candidates.length) {
+            results.innerHTML = '<p class="text-[10px] text-red-400 italic">No artists found — try a different spelling.</p>';
+            return;
+        }
+
+        results.innerHTML = candidates.map(c => `
+            <div class="flex items-center justify-between gap-3 bg-white rounded-2xl px-4 py-3 border border-slate-100">
+                <div class="flex-1 min-w-0">
+                    <p class="text-sm font-black text-slate-800 truncate">${c.name}</p>
+                    ${c.disambiguation ? `<p class="text-[10px] text-slate-400">${c.disambiguation}</p>` : ''}
+                </div>
+                <button onclick="window.confirmArchiveRequest('${c.name.replace(/'/g, "\'")}', '${c.mbid}')"
+                        class="flex-shrink-0 bg-indigo-600 text-white text-[10px] font-black px-3 py-1.5 rounded-full hover:bg-indigo-700 transition-all active:scale-95 uppercase tracking-widest">
+                    Request
+                </button>
+            </div>`).join('');
+    } catch (err) {
+        results.innerHTML = `<p class="text-[10px] text-red-400 italic">Search failed: ${err.message}</p>`;
+    }
+};
+
+window.confirmArchiveRequest = async function(artistName, mbid) {
+    const results = document.getElementById('archive-search-results');
+    if (results) results.innerHTML = '<p class="text-[10px] text-slate-400 italic">Submitting request…</p>';
+
+    const { ok, error } = await submitArchiveRequest(artistName, mbid);
+
+    if (!ok) {
+        if (results) results.innerHTML = `<p class="text-[10px] text-red-400 italic">Failed: ${error}</p>`;
+        return;
+    }
+
+    const container = document.getElementById('archive-request-container');
+    if (container) {
+        container.innerHTML = `
+            <div class="flex items-center gap-3">
+                <i data-lucide="check-circle" class="w-5 h-5 text-emerald-500 flex-shrink-0"></i>
+                <div>
+                    <p class="text-sm font-black text-slate-800">Request sent for ${artistName}</p>
+                    <p class="text-[10px] text-slate-400 mt-0.5">We'll review it and add the archive soon.</p>
+                </div>
+            </div>`;
+        if (window.lucide) lucide.createIcons();
+    }
+
+    window.showToast?.('Archive request submitted!', 'success');
+    if (typeof window.track === 'function') {
+        window.track('archive_requested', { artist: artistName, mbid });
+    }
 };

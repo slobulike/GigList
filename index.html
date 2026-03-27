@@ -124,21 +124,88 @@
 
         <div class="text-center pt-2">
             <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-2">No account yet?</p>
-            <button onclick="document.getElementById('waitlist-form').classList.toggle('hidden')"
+            <button onclick="window.showScreen('screen-signup')"
                     class="text-[10px] font-black text-indigo-500 uppercase tracking-widest hover:text-indigo-700 transition-colors">
-                Join the Waitlist →
+                Sign Up &rarr;
             </button>
-            <div id="waitlist-form" class="hidden mt-3 space-y-2">
-                <input type="email" id="waitlist-email"
-                       placeholder="your@email.com"
-                       aria-label="Your email address"
-                       class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all">
-                <button onclick="window.joinWaitlist()"
-                        class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black uppercase tracking-widest rounded-2xl transition-all active:scale-[0.98] text-sm">
-                    Request Access
-                </button>
-                <p id="waitlist-msg" class="text-[10px] text-slate-400 italic hidden"></p>
+        </div>
+    </div>
+
+    <!-- Screen 4: Sign up -->
+    <div id="screen-signup" class="hidden space-y-5 fade-in">
+        <button onclick="window.showScreen('screen-auth')" class="text-[10px] font-black text-indigo-600 uppercase tracking-widest flex items-center gap-1" aria-label="Back to sign in">
+            &larr; Back
+        </button>
+
+        <div class="text-center space-y-1">
+            <p class="text-sm font-black text-slate-800 uppercase tracking-tight">Create your account</p>
+            <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Your gig history awaits</p>
+        </div>
+
+        <div id="signup-error" class="hidden bg-red-50 border border-red-200 text-red-700 text-xs font-bold px-4 py-3 rounded-2xl" role="alert"></div>
+
+        <div class="space-y-3">
+            <div>
+                <label for="signup-username" class="block text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-2">Username</label>
+                <input type="text" id="signup-username"
+                       placeholder="e.g. TragicGurl"
+                       autocomplete="username"
+                       autocorrect="off"
+                       autocapitalize="off"
+                       spellcheck="false"
+                       class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 transition-all">
+                <p class="text-[10px] text-slate-400 mt-1.5 px-1">Use your setlist.fm username if you have one — it makes importing your history much easier.</p>
             </div>
+            <div>
+                <label for="signup-email" class="block text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-2">Email</label>
+                <input type="email" id="signup-email"
+                       placeholder="you@email.com"
+                       autocomplete="email"
+                       class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 transition-all">
+            </div>
+            <div>
+                <label for="signup-password" class="block text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-2">Password</label>
+                <input type="password" id="signup-password"
+                       placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;"
+                       autocomplete="new-password"
+                       class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 transition-all">
+            </div>
+            <button id="btn-signup"
+                    class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black uppercase tracking-widest rounded-2xl transition-all active:scale-[0.98] text-sm">
+                Create Account
+            </button>
+        </div>
+
+        <p class="text-center text-[10px] text-slate-400 leading-relaxed">
+            By signing up you agree to keep it real —<br>this is a place for genuine gig memories.
+        </p>
+    </div>
+
+    <!-- Screen 5: Username picker (Google OAuth new users) -->
+    <div id="screen-username" class="hidden space-y-5 fade-in">
+        <div class="text-center space-y-1">
+            <p class="text-sm font-black text-slate-800 uppercase tracking-tight">One last thing</p>
+            <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Choose your username</p>
+        </div>
+
+        <div id="username-error" class="hidden bg-red-50 border border-red-200 text-red-700 text-xs font-bold px-4 py-3 rounded-2xl" role="alert"></div>
+
+        <div class="space-y-3">
+            <div>
+                <label for="oauth-username" class="block text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-2">Username</label>
+                <input type="text" id="oauth-username"
+                       placeholder="e.g. TragicGurl"
+                       autocomplete="username"
+                       autocorrect="off"
+                       autocapitalize="off"
+                       spellcheck="false"
+                       class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 transition-all">
+                <p class="text-[10px] text-slate-400 mt-1.5 px-1">Use your setlist.fm username if you have one.</p>
+            </div>
+            <button id="btn-set-username"
+                    class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black uppercase tracking-widest rounded-2xl transition-all active:scale-[0.98] text-sm">
+                Let's Go
+            </button>
         </div>
     </div>
 
@@ -161,7 +228,7 @@
         'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFkbHp4aWh3c2tyZmNqcGJ0cmdqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2MTUwNDIsImV4cCI6MjA4OTE5MTA0Mn0.rSCjSNy6KvsjRTLyg6SprobSQA0PbxDHjbk8X75InpU'
     );
 
-    const SCREENS = ['screen-mode','screen-auth','screen-bands','screen-loading'];
+    const SCREENS = ['screen-mode','screen-auth','screen-bands','screen-loading','screen-signup','screen-username'];
 
     window.showScreen = (id) => {
         SCREENS.forEach(s => {
@@ -171,28 +238,66 @@
         const target = document.getElementById(id);
         if (target) {
             target.classList.remove('hidden');
-            // Trigger reflow so the animation re-runs
             void target.offsetWidth;
             target.classList.add('fade-in');
         }
     };
 
-    const showAuthError = (msg) => {
-        const el = document.getElementById('auth-error');
+    const showAuthError   = (msg) => { showFieldError('auth-error',     msg); window.showScreen('screen-auth'); };
+    const showSignupError = (msg) => { showFieldError('signup-error',   msg); };
+    const showUsernameError = (msg) => { showFieldError('username-error', msg); };
+
+    function showFieldError(id, msg) {
+        const el = document.getElementById(id);
         if (el) { el.textContent = msg; el.classList.remove('hidden'); }
-        window.showScreen('screen-auth');
-    };
+    }
+
+    function clearError(id) {
+        const el = document.getElementById(id);
+        if (el) el.classList.add('hidden');
+    }
+
+    // ── Username validation ───────────────────────────────────────────────────
+    function validateUsername(username) {
+        if (!username) return 'Please choose a username.';
+        if (username.length < 3) return 'Username must be at least 3 characters.';
+        if (username.length > 30) return 'Username must be 30 characters or fewer.';
+        if (!/^[a-zA-Z0-9_-]+$/.test(username)) return 'Username can only contain letters, numbers, hyphens and underscores.';
+        return null;
+    }
+
+    // ── Create profile row ────────────────────────────────────────────────────
+    async function createProfile(userId, username) {
+        const { error } = await supabase.from('profiles').insert({
+            id:        userId,
+            username,
+            is_public: false,
+        });
+        return error;
+    }
 
     // ── Initialise ────────────────────────────────────────────────────────────
     (async () => {
         window.showScreen('screen-loading');
 
         const mode = new URLSearchParams(window.location.search).get('mode');
-
-        // Check session — but don't redirect authenticated users away from Band mode
-        // since that's a legitimate destination even when logged in
         const { data: { session } } = await supabase.auth.getSession();
+
         if (session && mode !== 'Band') {
+            // Check if this authenticated user has a profile yet
+            // (Google OAuth users may have authed but not chosen a username)
+            const { data: profile } = await supabase
+                .from('profiles')
+                .select('id')
+                .eq('id', session.user.id)
+                .maybeSingle();
+
+            if (!profile) {
+                // New Google OAuth user — needs to pick a username
+                window.showScreen('screen-username');
+                return;
+            }
+
             window.location.href = 'vault.html';
             return;
         }
@@ -236,25 +341,6 @@
         });
     }
 
-    // ── Waitlist ──────────────────────────────────────────────────────────────
-    window.joinWaitlist = async () => {
-        const email = document.getElementById('waitlist-email')?.value.trim();
-        const msg   = document.getElementById('waitlist-msg');
-        if (!email) return;
-
-        const { error } = await supabase.from('waitlist').insert({ email });
-        if (msg) {
-            msg.classList.remove('hidden');
-            if (error && error.code === '23505') {
-                msg.textContent = "You're already on the list!";
-            } else if (error) {
-                msg.textContent = 'Something went wrong — try again.';
-            } else {
-                msg.textContent = "You're on the list! We'll be in touch.";
-            }
-        }
-    };
-
     // ── Google OAuth ──────────────────────────────────────────────────────────
     document.getElementById('btn-google').addEventListener('click', async () => {
         window.showScreen('screen-loading');
@@ -265,18 +351,14 @@
         if (error) showAuthError('Google sign-in failed. Please try again.');
     });
 
-    // ── Email / password ──────────────────────────────────────────────────────
+    // ── Email / password sign in ──────────────────────────────────────────────
     const doEmailSignIn = async () => {
         const email    = document.getElementById('auth-email').value.trim();
         const password = document.getElementById('auth-password').value;
 
-        if (!email || !password) {
-            showAuthError('Please enter your email and password.');
-            return;
-        }
+        if (!email || !password) { showAuthError('Please enter your email and password.'); return; }
 
         window.showScreen('screen-loading');
-
         const { error } = await supabase.auth.signInWithPassword({ email, password });
 
         if (error) {
@@ -294,6 +376,104 @@
     document.getElementById('btn-email-signin').addEventListener('click', doEmailSignIn);
     document.getElementById('auth-password').addEventListener('keydown', (e) => {
         if (e.key === 'Enter') doEmailSignIn();
+    });
+
+    // ── Email / password sign up ──────────────────────────────────────────────
+    const doSignUp = async () => {
+        clearError('signup-error');
+
+        const username = document.getElementById('signup-username').value.trim();
+        const email    = document.getElementById('signup-email').value.trim();
+        const password = document.getElementById('signup-password').value;
+
+        // Validate username
+        const usernameErr = validateUsername(username);
+        if (usernameErr) { showSignupError(usernameErr); return; }
+
+        if (!email)    { showSignupError('Please enter your email address.'); return; }
+        if (!password) { showSignupError('Please choose a password.'); return; }
+        if (password.length < 8) { showSignupError('Password must be at least 8 characters.'); return; }
+
+        window.showScreen('screen-loading');
+
+        // Check username isn't already taken
+        const { data: existing } = await supabase
+            .from('profiles')
+            .select('id')
+            .ilike('username', username)
+            .maybeSingle();
+
+        if (existing) {
+            showSignupError('That username is already taken — please choose another.');
+            window.showScreen('screen-signup');
+            return;
+        }
+
+        // Create auth user
+        const { data: authData, error: authErr } = await supabase.auth.signUp({ email, password });
+        if (authErr) {
+            showSignupError(authErr.message);
+            window.showScreen('screen-signup');
+            return;
+        }
+
+        // Create profile row immediately
+        const profileErr = await createProfile(authData.user.id, username);
+        if (profileErr) {
+            // Profile creation failed — still signed in, but no profile
+            // Redirect to username picker as fallback
+            window.showScreen('screen-username');
+            return;
+        }
+
+        // Success — go straight to vault with ?new=true to trigger onboarding
+        window.location.href = 'vault.html?new=true';
+    };
+
+    document.getElementById('btn-signup').addEventListener('click', doSignUp);
+    document.getElementById('signup-password').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') doSignUp();
+    });
+
+    // ── OAuth username picker ─────────────────────────────────────────────────
+    const doSetUsername = async () => {
+        clearError('username-error');
+
+        const username = document.getElementById('oauth-username').value.trim();
+        const usernameErr = validateUsername(username);
+        if (usernameErr) { showUsernameError(usernameErr); return; }
+
+        window.showScreen('screen-loading');
+
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.user) { window.showScreen('screen-auth'); return; }
+
+        // Check username isn't taken
+        const { data: existing } = await supabase
+            .from('profiles')
+            .select('id')
+            .ilike('username', username)
+            .maybeSingle();
+
+        if (existing) {
+            showUsernameError('That username is already taken — please choose another.');
+            window.showScreen('screen-username');
+            return;
+        }
+
+        const profileErr = await createProfile(session.user.id, username);
+        if (profileErr) {
+            showUsernameError('Could not save username: ' + profileErr.message);
+            window.showScreen('screen-username');
+            return;
+        }
+
+        window.location.href = 'vault.html?new=true';
+    };
+
+    document.getElementById('btn-set-username').addEventListener('click', doSetUsername);
+    document.getElementById('oauth-username').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') doSetUsername();
     });
 </script>
 <script>
