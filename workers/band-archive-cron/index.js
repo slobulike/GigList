@@ -379,11 +379,22 @@ async function run(env, bandFilter = null, maxPages = null) {
 export default {
     // Manual HTTP trigger — protected by CRON_SECRET
     async fetch(request, env) {
+        // Allow CORS from anywhere — the secret provides all the protection needed
+        const corsHeaders = {
+            'Access-Control-Allow-Origin':  '*',
+            'Access-Control-Allow-Methods': 'GET, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type',
+        };
+
+        if (request.method === 'OPTIONS') {
+            return new Response(null, { status: 204, headers: corsHeaders });
+        }
+
         const params = new URL(request.url).searchParams;
         const secret = params.get('secret');
 
         if (!secret || secret !== env.CRON_SECRET) {
-            return new Response('Unauthorized', { status: 401 });
+            return new Response('Unauthorized', { status: 401, headers: corsHeaders });
         }
 
         const bandFilter = params.get('band') || null;
@@ -395,12 +406,12 @@ export default {
         try {
             const { logs, results } = await run(env, bandFilter, maxPages);
             return new Response(JSON.stringify({ ok: true, logs, results }, null, 2), {
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', ...corsHeaders },
             });
         } catch (err) {
             return new Response(JSON.stringify({ ok: false, error: err.message }), {
                 status: 500,
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', ...corsHeaders },
             });
         }
     },

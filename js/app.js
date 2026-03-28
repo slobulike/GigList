@@ -1,9 +1,8 @@
 /**
  * GigList Core Engine
- * v3.5.0 — 2026-03-27
+ * v3.5.1 — 2026-03-28
  * -------------------------------------------------------------------
- * [FEATURE] Added band archive request flow with admin queue and nightly re-sync cron job
- * [FEATURE] Sign up flow added, new users can now onboard themselves
+ * [FIX] Band archive now runs successfully (manual trigger pulls 60 entries, overnight cron job pulls everything)
  */
 
 import * as Data from './modules/data.js';
@@ -65,7 +64,7 @@ let currentUser = null;
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "3.4.1";
+const APP_VERSION = "3.5.1";
 
 window.toggleListView = UI.toggleListView;
 window.activeView = window.activeView || 'list';
