@@ -1,3 +1,15 @@
+    * v3.5.2 — 2026-03-28
+    * -------------------------------------------------------------------
+    ✅ Worker deployed as venue-geocoder
+    ✅ First venue geocoded successfully - setlist.fm data only includes lat / long details, we now fetch city and country data and enrich the venues table
+    ✅ Manually added shows now attempt to sync with setlist.fm
+    */
+
+   * v3.5.1 — 2026-03-28
+   * -------------------------------------------------------------------
+   * [FIX] Band archive now runs successfully (manual trigger pulls 60 entries, overnight cron job pulls everything)
+   */
+
   /**
 
    V3.4.0 - Release Date 2026-03-25

@@ -9,6 +9,12 @@
 
 import { parseDate } from './utils.js';
 import { supabase } from './supabase.js';
+import {
+    groupByShow, buildJournalRow, buildVenueRow,
+    upsertVenues, upsertPerformances, upsertJournals,
+} from './setlist-sync.js';
+
+const WORKER_URL = 'https://setlistfm-proxy.richard-lipscombe.workers.dev';
 
 // ─── STATE ────────────────────────────────────────────────────────────────────
 
@@ -238,6 +244,114 @@ window.editorToggleFestival = () => {
     toggleFestivalFields(checked);
 };
 
+// ─── SETLIST.FM LOOKUP (new shows only) ───────────────────────────────────────
+
+/**
+ * Search setlist.fm for an artist by name and return the best MBID match.
+ */
+async function lookupMbid(artistName) {
+    const url = `${WORKER_URL}/?endpoint=artist-search&name=${encodeURIComponent(artistName)}`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const artists = data?.artist || [];
+    return artists[0]?.mbid || null;
+}
+
+/**
+ * Fetch setlists for an MBID and return those matching the given UK date (DD/MM/YYYY).
+ * Checks up to 3 pages (newest-first feed) with an early-exit once we pass the date.
+ */
+async function lookupSetlistsByDate(mbid, dateUK) {
+    const [d, m, y] = dateUK.split('/');
+    const targetFm  = `${d}-${m}-${y}`; // setlist.fm format: DD-MM-YYYY
+
+    const matches = [];
+    for (let page = 1; page <= 3; page++) {
+        const url = `${WORKER_URL}/?endpoint=artist-setlists&mbid=${encodeURIComponent(mbid)}&page=${page}`;
+        const res = await fetch(url);
+        if (!res.ok || res.status === 404) break;
+        const data = await res.json();
+        const setlists = data?.setlist || [];
+        if (!setlists.length) break;
+
+        for (const sl of setlists) {
+            if (sl.eventDate === targetFm) matches.push(sl);
+        }
+
+        // Feed is newest-first; once the last item on this page predates the
+        // target we won't find anything further in.
+        const lastDate = setlists[setlists.length - 1]?.eventDate;
+        if (lastDate && lastDate < targetFm) break;
+
+        await new Promise(r => setTimeout(r, 400));
+    }
+    return matches;
+}
+
+/**
+ * Renders the setlist.fm confirmation panel inside the editor modal.
+ * Resolves with the chosen setlist object, or null if the user skips.
+ */
+function showSetlistConfirmation(setlists) {
+    return new Promise((resolve) => {
+        document.getElementById('setlist-confirm-panel')?.remove();
+
+        const panel = document.createElement('div');
+        panel.id = 'setlist-confirm-panel';
+        panel.className = 'mx-0 mt-4 rounded-2xl border border-indigo-200 bg-indigo-50 p-4';
+
+        const rows = setlists.map((sl, i) => {
+            const venueName = sl.venue?.name || 'Unknown Venue';
+            const city      = sl.venue?.city?.name || '';
+            const country   = sl.venue?.city?.country?.name || '';
+            const location  = [city, country].filter(Boolean).join(', ');
+            const dateUK    = sl.eventDate.replace(/-/g, '/');
+            return `
+                <div class="flex items-center justify-between gap-3 py-2 ${i < setlists.length - 1 ? 'border-b border-indigo-100' : ''}">
+                    <div class="min-w-0">
+                        <div class="text-sm font-bold text-slate-800 truncate">${venueName}</div>
+                        <div class="text-xs text-slate-500">${location} · ${dateUK}</div>
+                    </div>
+                    <button
+                        class="flex-shrink-0 rounded-xl bg-indigo-600 px-3 py-1.5 text-[11px] font-black uppercase tracking-widest text-white hover:bg-indigo-700 transition-colors"
+                        data-idx="${i}">
+                        This one ✓
+                    </button>
+                </div>`;
+        }).join('');
+
+        panel.innerHTML = `
+            <div class="mb-2 text-xs font-black uppercase tracking-widest text-indigo-600">
+                Found on setlist.fm — is this your show?
+            </div>
+            ${rows}
+            <button id="setlist-confirm-none"
+                class="mt-3 w-full rounded-xl bg-white border border-slate-200 px-3 py-2 text-xs font-bold text-slate-500 hover:bg-slate-50 transition-colors">
+                None of these — save without setlist data
+            </button>`;
+
+        // Insert just above the error div so it sits inside the modal form area
+        const errorEl = document.getElementById('editor-error');
+        if (errorEl) {
+            errorEl.parentNode.insertBefore(panel, errorEl);
+        } else {
+            document.getElementById('editor-modal')?.appendChild(panel);
+        }
+
+        panel.querySelectorAll('button[data-idx]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                panel.remove();
+                resolve(setlists[parseInt(btn.dataset.idx)]);
+            });
+        });
+        document.getElementById('setlist-confirm-none').addEventListener('click', () => {
+            panel.remove();
+            resolve(null);
+        });
+    });
+}
+
 // ─── SAVE ─────────────────────────────────────────────────────────────────────
 
 window.saveGig = async () => {
@@ -329,28 +443,88 @@ window.saveGig = async () => {
 
     let dbError = null;
     if (editingKey) {
-        // Update existing row — match on user_id (null for band, uuid for personal)
+        // ── Edit path: straight update, no setlist.fm lookup needed ──────────
         const { error } = await supabase
             .from('journals')
             .update(supabaseRow)
             .is('user_id', writeUserId)
             .eq('journal_key', editingKey);
         dbError = error;
+
+        if (dbError) {
+            if (dbError.code === '23505') {
+                _showError('A show already exists with this date and venue.');
+            } else {
+                _showError(`Save failed: ${dbError.message}`);
+            }
+            return;
+        }
+
     } else {
-        // Insert new row
-        const { error } = await supabase
+        // ── New show path: write journal first, then try setlist.fm lookup ───
+
+        const { error: insertError } = await supabase
             .from('journals')
             .insert(supabaseRow);
-        dbError = error;
-    }
 
-    if (dbError) {
-        if (dbError.code === '23505') {
-            _showError('A show already exists with this date and venue.');
-        } else {
-            _showError(`Save failed: ${dbError.message}`);
+        if (insertError) {
+            if (insertError.code === '23505') {
+                _showError('A show already exists with this date and venue.');
+            } else {
+                _showError(`Save failed: ${insertError.message}`);
+            }
+            return;
         }
-        return;
+
+        // Don't run setlist.fm lookup for band archive writes
+        if (!isBandWrite) {
+            // Show a subtle searching indicator on the save button
+            const saveBtn = document.querySelector('#editor-modal button[onclick="saveGig()"]');
+            const origLabel = saveBtn?.textContent;
+            if (saveBtn) saveBtn.textContent = 'Searching setlist.fm…';
+
+            try {
+                const mbid     = await lookupMbid(band);
+                const matches  = mbid ? await lookupSetlistsByDate(mbid, dateStr) : [];
+
+                if (saveBtn && origLabel) saveBtn.textContent = origLabel;
+
+                if (matches.length > 0) {
+                    // Let the user confirm which show is theirs
+                    const chosen = await showSetlistConfirmation(matches);
+
+                    if (chosen) {
+                        // ── Confirmed: enrich with full setlist.fm data ───────
+                        const grouped = groupByShow([chosen]);
+                        const perfRows  = [];
+                        const venueRows = [];
+
+                        for (const show of grouped.values()) {
+                            perfRows.push(...show.performances);
+                            venueRows.push(buildVenueRow(show.venueRaw));
+                        }
+
+                        await Promise.all([
+                            upsertVenues(venueRows),
+                            upsertPerformances(perfRows),
+                        ]);
+                    }
+                    // If chosen === null the user said "none of these" — fall
+                    // through to pending_venues below just like a no-match case.
+                    if (!chosen) {
+                        await _submitPendingVenue({ session, journalKey, band, dateStr, venue });
+                    }
+                } else {
+                    // ── No match on setlist.fm: queue venue for admin review ──
+                    await _submitPendingVenue({ session, journalKey, band, dateStr, venue });
+                }
+            } catch (lookupErr) {
+                // setlist.fm lookup is best-effort — don't block the save
+                console.warn('setlist.fm lookup failed:', lookupErr.message);
+                if (saveBtn && origLabel) saveBtn.textContent = origLabel;
+                await _submitPendingVenue({ session, journalKey, band, dateStr, venue });
+            }
+        }
     }
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -376,6 +550,28 @@ window.saveGig = async () => {
     // Refresh the UI so the new/edited gig appears immediately
     if (window.refreshUI) window.refreshUI();
 };
+
+// ─── PENDING VENUE SUBMIT ─────────────────────────────────────────────────────
+
+/**
+ * Inserts a row into pending_venues when a new show's venue couldn't be
+ * matched or confirmed via setlist.fm. Best-effort — never blocks the save.
+ */
+async function _submitPendingVenue({ session, journalKey, band, dateStr, venue }) {
+    try {
+        const { error } = await supabase.from('pending_venues').insert({
+            submitted_by: session.user.id,
+            journal_key:  journalKey,
+            venue_name:   venue,
+            band:         band,
+            date:         dateStr,
+            status:       'pending',
+        });
+        if (error) console.warn('pending_venues insert failed:', error.message);
+    } catch (e) {
+        console.warn('pending_venues insert error:', e.message);
+    }
+}
 
 // ─── CSV EXPORT ───────────────────────────────────────────────────────────────
 

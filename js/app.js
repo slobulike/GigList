@@ -1,8 +1,10 @@
 /**
  * GigList Core Engine
- * v3.5.1 — 2026-03-28
+ * v3.5.2 — 2026-03-28
  * -------------------------------------------------------------------
- * [FIX] Band archive now runs successfully (manual trigger pulls 60 entries, overnight cron job pulls everything)
+ ✅ Worker deployed as venue-geocoder
+ ✅ First venue geocoded successfully - setlist.fm data only includes lat / long details, we now fetch city and country data and enrich the venues table
+ ✅ Manually added shows now attempt to sync with setlist.fm
  */
 
 import * as Data from './modules/data.js';
@@ -64,7 +66,7 @@ let currentUser = null;
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "3.5.1";
+const APP_VERSION = "3.5.2";
 
 window.toggleListView = UI.toggleListView;
 window.activeView = window.activeView || 'list';

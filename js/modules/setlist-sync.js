@@ -21,6 +21,10 @@
  *       onComplete: ({ inserted, skipped, newVenues }) => { ... },
  *       onError:    (err) => { ... },
  *   });
+ *
+ * Named exports (also used by editor.js for single-show setlist.fm lookup):
+ *   toUKDate, parseSongs, groupByShow, buildJournalRow, buildVenueRow,
+ *   upsertVenues, upsertPerformances, upsertJournals
  */
 
 
@@ -63,7 +67,7 @@ async function fetchPage(username, page) {
 /**
  * setlist.fm date format: "DD-MM-YYYY" → GigList canonical: "DD/MM/YYYY"
  */
-function toUKDate(eventDate) {
+export function toUKDate(eventDate) {
     return eventDate.replace(/-/g, '/');
 }
 
@@ -72,7 +76,7 @@ function toUKDate(eventDate) {
  * Parse songs from the nested sets structure into a pipe-separated string.
  * Matches the format used in performances.csv and sync_shared_data.py.
  */
-function parseSongs(sets) {
+export function parseSongs(sets) {
     const songs = [];
     for (const set of sets?.set || []) {
         for (const song of set?.song || []) {
@@ -94,7 +98,7 @@ function isFestivalVenue(venueName) {
  * A single night at a multi-act show produces one journal row but
  * multiple performance rows — same logic as onboard_user.py.
  */
-function groupByShow(setlists) {
+export function groupByShow(setlists) {
     const grouped = new Map();
 
 
@@ -149,7 +153,7 @@ function groupByShow(setlists) {
  * Builds a journals row from a grouped show.
  * Mirrors the Band/Festival/Support logic in onboard_user.py.
  */
-function buildJournalRow(userId, show) {
+export function buildJournalRow(userId, show) {
     const { journalKey, dateUK, d, m, y, venueName, artists } = show;
     const isFest = isFestivalVenue(venueName);
 
@@ -204,7 +208,7 @@ function buildJournalRow(userId, show) {
  * Geocoding (city/country) is skipped here — a nightly Cloudflare cron
  * Worker will reverse-geocode rows that have lat/lng but no city/country.
  */
-function buildVenueRow(venueRaw) {
+export function buildVenueRow(venueRaw) {
     const city = venueRaw.city || {};
     const coords = city.coords || {};
 
@@ -230,7 +234,7 @@ function buildVenueRow(venueRaw) {
  * Upserts venues that don't already exist.
  * official_name is the unique key — we never overwrite existing enriched data.
  */
-async function upsertVenues(venueRows) {
+export async function upsertVenues(venueRows) {
     if (!venueRows.length) return;
 
 
@@ -261,7 +265,7 @@ async function upsertVenues(venueRows) {
  * Upserts performances. Uses upsert on (journal_key, artist) so that
  * re-running the sync enriches setlist data without duplicating rows.
  */
-async function upsertPerformances(perfRows) {
+export async function upsertPerformances(perfRows) {
     if (!perfRows.length) return;
 
 
@@ -281,7 +285,7 @@ async function upsertPerformances(perfRows) {
  * Skips rows that already exist (ignoreDuplicates: true) so re-syncing
  * never overwrites user edits like went_with, comments, or price.
  */
-async function upsertJournals(journalRows) {
+export async function upsertJournals(journalRows) {
     if (!journalRows.length) return { inserted: 0, skipped: 0 };
 
 
