@@ -1,10 +1,8 @@
 /**
  * GigList Core Engine
- * v3.5.2 — 2026-03-28
+ * v3.6.0 — 2026-03-29
  * -------------------------------------------------------------------
- ✅ Worker deployed as venue-geocoder
- ✅ First venue geocoded successfully - setlist.fm data only includes lat / long details, we now fetch city and country data and enrich the venues table
- ✅ Manually added shows now attempt to sync with setlist.fm
+ ✅ Improved new user onboarding journey - now finds show matches with existing users
  */
 
 import * as Data from './modules/data.js';
@@ -66,7 +64,7 @@ let currentUser = null;
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "3.5.2";
+const APP_VERSION = "3.6.0";
 
 window.toggleListView = UI.toggleListView;
 window.activeView = window.activeView || 'list';
@@ -292,10 +290,17 @@ export async function initApp() {
 
     initModeSwitcher(); // build the logo dropdown switcher (uses _following)
 
-    // New user onboarding — open settings modal pre-focused on setlist.fm sync
+    // New user onboarding — companion check first, then setlist sync
     const isNewUser = new URLSearchParams(window.location.search).get('new') === 'true';
     if (isNewUser && currentUser?.Type === 'Personal') {
-        setTimeout(() => {
+        setTimeout(async () => {
+            // Step 1: check if other users have tagged this username as a companion.
+            // If matches exist, show the "I Was There" panel and wait for the user
+            // to finish before opening the settings modal. If no matches, this
+            // resolves immediately and falls straight through to the sync step.
+            await checkCompanionMatches();
+
+            // Step 2: open the setlist.fm sync modal as normal.
             window.openSettings();
             const input = document.getElementById('setlistIdInput');
             const hint  = document.getElementById('sync-status');
@@ -305,6 +310,12 @@ export async function initApp() {
                 hint.className = 'text-[10px] mt-3 leading-relaxed text-indigo-500 font-black not-italic';
             }
         }, 600);
+    }
+
+    // Return visit: silently check for newly-tagged companion matches.
+    // No-ops if nothing new. Only runs for authenticated personal users.
+    if (!isNewUser && currentUser?.Type === 'Personal') {
+        setTimeout(() => checkReturnVisitCompanionMatches(), 2000);
     }
 }
 
@@ -636,6 +647,11 @@ window.syncSetlistFm = async function() {
 
             window.track('setlist_sync_complete', { journalInserted, journalSkipped, newVenues, pages });
 
+            // Show the low-result tip if fewer than 10 shows were imported.
+            if (journalInserted < 10) {
+                showLowSyncTip();
+            }
+
             if (journalInserted > 0) {
                 setTimeout(async () => {
                     const data = await Data.loadAppData(currentUser);
@@ -751,6 +767,332 @@ window.dismissConnectionsBanner = function() {
     sessionStorage.setItem('connections_dismissed', '1');
     window.track('connections_banner_dismissed');
 };
+
+// ─── ONBOARDING: LOW SYNC TIP ────────────────────────────────────────────────
+
+/**
+ * Shown inside the settings modal when a setlist.fm sync returns fewer than
+ * 10 shows. Injects an amber tip panel below the sync status line with an
+ * email search string the user can paste into Gmail to find old tickets.
+ */
+function showLowSyncTip() {
+    const EMAIL_SEARCH = `from:(seetickets OR ticketmaster OR dice OR gigsandtours OR "eventim" OR "wegottickets") "booking confirmation" OR "order confirmation" OR "reference" -("upcoming" OR "reminder" OR "your tickets are ready" OR "newsletter")`;
+
+    const statusEl = document.getElementById('sync-status');
+    if (!statusEl) return;
+    if (document.getElementById('low-sync-tip')) return; // guard against double-injection
+
+    const tip = document.createElement('div');
+    tip.id = 'low-sync-tip';
+    tip.className = 'mt-3 p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 leading-relaxed';
+    tip.innerHTML = `
+        <p class="font-black mb-1">💡 Not seeing all your shows?</p>
+        <p class="mb-2 text-amber-800">Paste this into Gmail (or any inbox) to find old ticket confirmation emails, then add those shows manually:</p>
+        <div class="bg-amber-100 border border-amber-200 rounded-lg p-2 font-mono text-[10px] text-amber-900 break-all mb-2">${EMAIL_SEARCH}</div>
+        <button id="low-sync-copy-btn"
+                class="inline-flex items-center gap-1.5 bg-amber-500 hover:bg-amber-600 active:scale-95 transition-all text-white text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-full">
+            <i data-lucide="clipboard-copy" class="w-3 h-3" aria-hidden="true"></i>
+            Copy to clipboard
+        </button>
+    `;
+
+    statusEl.insertAdjacentElement('afterend', tip);
+    if (window.lucide) lucide.createIcons();
+
+    document.getElementById('low-sync-copy-btn')?.addEventListener('click', async () => {
+        try {
+            await navigator.clipboard.writeText(EMAIL_SEARCH);
+        } catch {
+            // Fallback for browsers that block clipboard API
+            const ta = document.createElement('textarea');
+            ta.value = EMAIL_SEARCH;
+            ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+        }
+        const btn = document.getElementById('low-sync-copy-btn');
+        if (!btn) return;
+        btn.textContent = '✓ Copied!';
+        btn.classList.replace('bg-amber-500', 'bg-emerald-500');
+        btn.classList.replace('hover:bg-amber-600', 'hover:bg-emerald-600');
+        setTimeout(() => {
+            btn.innerHTML = '<i data-lucide="clipboard-copy" class="w-3 h-3" aria-hidden="true"></i> Copy to clipboard';
+            btn.classList.replace('bg-emerald-500', 'bg-amber-500');
+            btn.classList.replace('hover:bg-emerald-600', 'hover:bg-amber-600');
+            if (window.lucide) lucide.createIcons();
+        }, 2500);
+    });
+}
+
+// ─── ONBOARDING: "I WAS THERE" COMPANION MATCHING ────────────────────────────
+
+/**
+ * Queries the get_companion_matches RPC for shows where other users have
+ * tagged the current user's GigList username in their went_with field.
+ * Filters out shows the user already has. If matches exist, renders the
+ * "I Was There" overlay and returns a Promise that resolves once the user
+ * finishes. If no matches, resolves immediately.
+ *
+ * Called during ?new=true onboarding BEFORE the settings modal opens.
+ */
+async function checkCompanionMatches() {
+    if (!currentUser?.isAuthUser || currentUser?.Type !== 'Personal') return;
+
+    const username = currentUser.UserName || currentUser.username;
+    if (!username) return;
+
+    // SECURITY DEFINER RPC — bypasses RLS safely, only returns show facts.
+    const { data: matches, error } = await supabase
+        .rpc('get_companion_matches', { search_username: username });
+
+    if (error) { console.debug('companion_matches RPC:', error.message); return; }
+    if (!matches?.length) return;
+
+    // Filter out shows the user already has.
+    const { data: ownJournal } = await supabase
+        .from('journals')
+        .select('journal_key')
+        .eq('user_id', currentUser.id);
+
+    const ownKeys  = new Set((ownJournal || []).map(r => r.journal_key));
+    const newShows = matches.filter(m => !ownKeys.has(m.journal_key));
+
+    if (!newShows.length) return;
+
+    // Return a Promise so the caller can await the user finishing the panel.
+    return new Promise(resolve => renderIWasTherePanel(newShows, username, resolve));
+}
+
+/**
+ * Renders the full-screen "I Was There" overlay. Each matched show has a
+ * toggle button. On Continue, toggled shows are upserted into journals.
+ * Calls onDone() once dismissed (Continue or Skip).
+ */
+function renderIWasTherePanel(matches, username, onDone) {
+    // overlay
+    const overlay = document.createElement('div');
+    overlay.id = 'iwasthere-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.65);backdrop-filter:blur(4px);z-index:9500;display:flex;align-items:center;justify-content:center;padding:1rem;';
+
+    // card
+    const card = document.createElement('div');
+    card.style.cssText = 'background:#fff;border-radius:1.25rem;box-shadow:0 24px 64px rgba(0,0,0,0.3);width:100%;max-width:480px;max-height:88vh;display:flex;flex-direction:column;overflow:hidden;';
+
+    const count = matches.length;
+    card.innerHTML = `
+        <div class="p-5 pb-4 border-b border-slate-100">
+            <p class="text-2xl mb-1">🎤</p>
+            <h2 class="text-base font-black text-slate-900 mb-1">Your friends remember you being there</h2>
+            <p class="text-xs text-slate-500 leading-relaxed">
+                Other GigList members have tagged <strong>${iwtEscape(username)}</strong> as a companion
+                at ${count} show${count !== 1 ? 's' : ''}. Claim the ones you were at — they'll go straight into your vault.
+            </p>
+        </div>
+        <div id="iwt-list" class="flex-1 overflow-y-auto divide-y divide-slate-50"></div>
+        <div class="p-4 border-t border-slate-100 flex items-center justify-between gap-3">
+            <span id="iwt-count" class="text-[10px] text-slate-400 font-bold uppercase tracking-widest">0 selected</span>
+            <div class="flex gap-2">
+                <button id="iwt-skip"
+                        class="text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-600 transition-colors px-3 py-2 rounded-full">
+                    Skip for now
+                </button>
+                <button id="iwt-continue"
+                        class="bg-indigo-600 hover:bg-indigo-700 active:scale-95 transition-all text-white text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-full">
+                    Add selected &amp; continue
+                </button>
+            </div>
+        </div>
+    `;
+
+    const listEl   = card.querySelector('#iwt-list');
+    const countEl  = card.querySelector('#iwt-count');
+    const selected = new Set();
+
+    matches.forEach(show => {
+        const row = document.createElement('div');
+        row.className = 'flex items-center justify-between gap-3 px-5 py-3 hover:bg-slate-50 transition-colors';
+
+        const dateStr = show.date
+            ? (() => { try { return new Date(show.date).toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' }); } catch(e) { return show.date; } })()
+            : '';
+        const location = [show.city, show.country].filter(Boolean).join(', ');
+
+        row.innerHTML = `
+            <div class="min-w-0 flex-1">
+                <p class="text-sm font-black text-slate-900 truncate">${iwtEscape(show.artist)}</p>
+                <p class="text-[11px] text-slate-500 truncate">${iwtEscape(show.official_venue || '')}${show.official_venue && location ? ' · ' : ''}${iwtEscape(location)}</p>
+                <p class="text-[10px] text-slate-400">${dateStr}</p>
+            </div>
+            <button class="iwt-claim flex-shrink-0 border-2 border-slate-200 text-slate-500 hover:border-indigo-400 hover:text-indigo-600 transition-all text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-full active:scale-95"
+                    data-key="${iwtEscape(show.journal_key)}">
+                I was there
+            </button>
+        `;
+
+        const btn = row.querySelector('.iwt-claim');
+        btn.addEventListener('click', () => {
+            const key = show.journal_key;
+            if (selected.has(key)) {
+                selected.delete(key);
+                btn.textContent = 'I was there';
+                btn.classList.remove('bg-indigo-600', 'border-indigo-600', 'text-white');
+                btn.classList.add('border-slate-200', 'text-slate-500');
+            } else {
+                selected.add(key);
+                btn.textContent = '✓ I was there';
+                btn.classList.add('bg-indigo-600', 'border-indigo-600', 'text-white');
+                btn.classList.remove('border-slate-200', 'text-slate-500');
+            }
+            countEl.textContent = `${selected.size} selected`;
+        });
+
+        listEl.appendChild(row);
+    });
+
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+
+    card.querySelector('#iwt-skip').addEventListener('click', () => {
+        overlay.remove();
+        onDone();
+    });
+
+    card.querySelector('#iwt-continue').addEventListener('click', async () => {
+        if (selected.size > 0) {
+            await claimCompanionShows(matches.filter(m => selected.has(m.journal_key)));
+        }
+        overlay.remove();
+        onDone();
+    });
+}
+
+/**
+ * Upserts claimed shows into the user's journals table.
+ * The rich show data already exists in the shared performances/venues tables
+ * via journal_key — we only need the journals row to link the user to the show.
+ */
+async function claimCompanionShows(shows) {
+    if (!shows.length) return;
+
+    const rows = shows.map(show => ({
+        user_id:        currentUser.id,
+        journal_key:    show.journal_key,
+        date:           show.date           || null,
+        band:           show.artist         || null,
+        official_venue: show.official_venue || null,
+        venue:          show.official_venue || null,
+        comments:       'Added via companion match',
+    }));
+
+    const { error } = await supabase
+        .from('journals')
+        .upsert(rows, { onConflict: 'user_id,journal_key', ignoreDuplicates: true });
+
+    if (error) {
+        console.warn('claimCompanionShows:', error.message);
+        window.showToast("Some shows couldn't be added — try again", 'warning');
+        return;
+    }
+
+    shows.forEach(s => window.track('show_added', { journal_key: s.journal_key, source: 'companion_match' }));
+    window.showToast(`${shows.length} show${shows.length !== 1 ? 's' : ''} added to your vault!`, 'success');
+
+    // Reload data so newly claimed shows appear immediately.
+    const data = await Data.loadAppData(currentUser);
+    window.journalData     = data.journalData;
+    window.performanceData = data.performanceData;
+    window.filteredResults = [...data.journalData];
+    refreshUI();
+}
+
+/**
+ * For return visits: check if new companion-matched shows have appeared that
+ * the user hasn't claimed yet. Shows a slim dismissable banner. The dismissal
+ * key is fingerprinted to the exact set of offers, so the banner reappears
+ * if genuinely new shows are tagged later.
+ */
+async function checkReturnVisitCompanionMatches() {
+    if (!currentUser?.isAuthUser || currentUser?.Type !== 'Personal') return;
+
+    const username = currentUser.UserName || currentUser.username;
+    if (!username) return;
+
+    const { data: matches } = await supabase
+        .rpc('get_companion_matches', { search_username: username });
+
+    if (!matches?.length) return;
+
+    const { data: ownJournal } = await supabase
+        .from('journals')
+        .select('journal_key')
+        .eq('user_id', currentUser.id);
+
+    const ownKeys  = new Set((ownJournal || []).map(r => r.journal_key));
+    const newShows = matches.filter(m => !ownKeys.has(m.journal_key));
+
+    if (!newShows.length) return;
+
+    // Fingerprint so dismissal is per unique set of offers.
+    const fingerprint  = newShows.map(m => m.journal_key).sort().join('|');
+    const dismissedKey = 'iwt_dismissed_' + btoa(unescape(encodeURIComponent(fingerprint))).slice(0, 20);
+    if (localStorage.getItem(dismissedKey)) return;
+    if (document.getElementById('iwt-return-banner')) return;
+
+    const count = newShows.length;
+
+    const container = document.getElementById('view-home')
+                   || document.getElementById('view-data')
+                   || document.querySelector('.view-section:not(.hidden)')
+                   || document.body;
+
+    const banner = document.createElement('div');
+    banner.id = 'iwt-return-banner';
+    banner.className = 'flex items-center justify-between gap-3 mx-4 mb-3 px-4 py-3 bg-indigo-50 border border-indigo-200 rounded-2xl text-xs font-bold text-indigo-800';
+    banner.innerHTML = `
+        <span>
+            🎤 <strong>${count} show${count !== 1 ? 's' : ''}</strong> your friends say you attended —
+            <button id="iwt-banner-open"
+                    class="underline font-black text-indigo-600 hover:text-indigo-800 transition-colors">
+                claim them
+            </button>
+        </span>
+        <button id="iwt-banner-dismiss" aria-label="Dismiss"
+                class="text-indigo-300 hover:text-indigo-500 transition-colors font-black text-base leading-none">&times;</button>
+    `;
+
+    container.prepend(banner);
+
+    banner.querySelector('#iwt-banner-open').addEventListener('click', () => {
+        banner.remove();
+        new Promise(resolve => renderIWasTherePanel(newShows, username, resolve))
+            .then(async () => {
+                const data = await Data.loadAppData(currentUser);
+                window.journalData     = data.journalData;
+                window.performanceData = data.performanceData;
+                window.filteredResults = [...data.journalData];
+                refreshUI();
+            });
+    });
+
+    banner.querySelector('#iwt-banner-dismiss').addEventListener('click', () => {
+        localStorage.setItem(dismissedKey, '1');
+        banner.remove();
+    });
+}
+
+/** Minimal HTML escaper for user-controlled strings rendered into innerHTML. */
+function iwtEscape(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
 
 // ─── ANALYTICS ───────────────────────────────────────────────────────────────
 
