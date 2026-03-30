@@ -1,3 +1,16 @@
+    * GigList Core Engine
+
+     * GigList Core Engine
+     * v3.6.1 — 2026-03-30
+     * -------------------------------------------------------------------
+     ✅ Guide new users with low setlist matches to finding manual shows from email search
+     */
+
+    * v3.6.0 — 2026-03-29
+    * -------------------------------------------------------------------
+    ✅ Improved new user onboarding journey - now finds show matches with existing users
+    */
+
     * v3.5.2 — 2026-03-28
     * -------------------------------------------------------------------
     ✅ Worker deployed as venue-geocoder

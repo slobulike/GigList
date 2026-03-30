@@ -243,11 +243,11 @@ async function insertJournalsBatch(supabaseUrl, serviceKey, rows) {
 
 // ─── Per-band sync ────────────────────────────────────────────────────────────
 
-async function syncBand(band, env, log, maxPages = null) {
+async function syncBand(band, env, log, maxPages = null, startPage = 1) {
     const { name, mbid } = band;
-    log(`  → Starting ${name} (${mbid})`);
+    log(`  → Starting ${name} (${mbid}) from page ${startPage}${maxPages ? ` (max ${maxPages} pages)` : ''}`);
 
-    let page          = 1;
+    let page          = startPage;
     let totalJournals = 0;
     let totalPerfs    = 0;
     let totalVenues   = 0;
@@ -287,9 +287,17 @@ async function syncBand(band, env, log, maxPages = null) {
             totalVenues += newVenues.length;
         }
 
-        // Performances — upsert (enrich setlist data on re-run)
+        // Performances — deduplicate within the batch first.
+        // setlist.fm occasionally lists the same artist twice on one show
+        // (e.g. guest appearance + headline slot), which causes Postgres to
+        // reject the upsert with "ON CONFLICT DO UPDATE command cannot affect
+        // row a second time". Keep the last occurrence of each (journal_key, artist).
+        const perfsSeen = new Map();
+        for (const p of perfRows) perfsSeen.set(`${p.journal_key}||${p.artist}`, p);
+        const dedupedPerfs = [...perfsSeen.values()];
+
         await upsertBatch(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY,
-            'performances', perfRows, 'journal_key,artist');
+            'performances', dedupedPerfs, 'journal_key,artist');
         totalPerfs += perfRows.length;
 
         // Journals — fetch existing keys first, only insert genuinely new rows.
@@ -325,7 +333,7 @@ async function syncBand(band, env, log, maxPages = null) {
 
 // ─── Main run ─────────────────────────────────────────────────────────────────
 
-async function run(env, bandFilter = null, maxPages = null) {
+async function run(env, bandFilter = null, maxPages = null, startPage = 1) {
     const logs    = [];
     const log     = msg => { logs.push(msg); console.log(msg); };
     const results = [];
@@ -360,7 +368,7 @@ async function run(env, bandFilter = null, maxPages = null) {
             continue;
         }
         try {
-            const result = await syncBand(band, env, log, maxPages);
+            const result = await syncBand(band, env, log, maxPages, startPage);
             results.push(result);
         } catch (err) {
             log(`  ✗ ${band.name} failed: ${err.message}`);
@@ -398,13 +406,18 @@ export default {
         }
 
         const bandFilter = params.get('band') || null;
-        // Manual HTTP trigger is limited to 3 pages per band (~60 shows) to stay
-        // within Cloudflare's 50 subrequest limit per invocation.
-        // The nightly scheduled() handler runs without this constraint.
-        const maxPages = parseInt(params.get('maxPages') || '3', 10);
+        // maxPages: optional cap on pages per invocation (omit for unlimited).
+        // startPage: resume a sync from a given page (default 1).
+        // Example — sync Frank Turner pages 1-20:
+        //   ?secret=X&band=Frank+Turner&maxPages=20
+        // Example — resume from page 21:
+        //   ?secret=X&band=Frank+Turner&startPage=21&maxPages=20
+        const maxPagesParam = params.get('maxPages');
+        const maxPages  = maxPagesParam ? parseInt(maxPagesParam, 10) : null;
+        const startPage = parseInt(params.get('startPage') || '1', 10);
 
         try {
-            const { logs, results } = await run(env, bandFilter, maxPages);
+            const { logs, results } = await run(env, bandFilter, maxPages, startPage);
             return new Response(JSON.stringify({ ok: true, logs, results }, null, 2), {
                 headers: { 'Content-Type': 'application/json', ...corsHeaders },
             });

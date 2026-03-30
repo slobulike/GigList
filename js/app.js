@@ -1,8 +1,8 @@
 /**
  * GigList Core Engine
- * v3.6.0 — 2026-03-29
+ * v3.6.1 — 2026-03-30
  * -------------------------------------------------------------------
- ✅ Improved new user onboarding journey - now finds show matches with existing users
+ ✅ Guide users to finding manual shows from email search
  */
 
 import * as Data from './modules/data.js';
@@ -64,7 +64,7 @@ let currentUser = null;
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "3.6.0";
+const APP_VERSION = "3.6.1";
 
 window.toggleListView = UI.toggleListView;
 window.activeView = window.activeView || 'list';
@@ -825,6 +825,22 @@ function showLowSyncTip() {
         }, 2500);
     });
 }
+
+// Called from the vault.html "I don't have a setlist.fm account" button.
+// Shows the email search tip immediately without needing to run a sync first.
+window.showNoSetlistTip = function() {
+    // Clear the input and status text so the sync section doesn't look broken
+    const input    = document.getElementById('setlistIdInput');
+    const statusEl = document.getElementById('sync-status');
+    if (input)    input.value = '';
+    if (statusEl) {
+        statusEl.textContent = 'No setlist.fm account? No problem.';
+        statusEl.className   = 'text-[10px] mt-3 italic leading-relaxed text-indigo-500';
+    }
+    // Remove existing tip if already shown, so it re-renders fresh
+    document.getElementById('low-sync-tip')?.remove();
+    showLowSyncTip();
+};
 
 // ─── ONBOARDING: "I WAS THERE" COMPANION MATCHING ────────────────────────────
 
