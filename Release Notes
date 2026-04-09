@@ -1,6 +1,16 @@
-    * GigList Core Engine
 
-     * GigList Core Engine
+   * GigList Core Engine
+
+ * v3.6.2 — 2026-04-09
+ * -------------------------------------------------------------------
+ ✅ Bug fix to address issues with Follow feature:
+ Fix 1 — acceptFollowRequest updates the in-memory caches immediately. Removes the user from window._pendingRequests and adds them to _followers. So if the banner re-renders within the same session (tab switch etc.) they're no longer shown as a pending request.
+ Fix 2 — initSocial filters out dismissed followback prompts before building the allPrompts list, using a sessionStorage key so they don't reappear during the same visit.
+ Fix 3 — "Not Now" button calls window.dismissFollowBack(id) instead of the old inline this.closest('[data-dismiss]').remove() which only removed the DOM element without persisting anything.
+ Fix 4 — window.dismissFollowBack() saves the dismissed user ID to sessionStorage and hides the banner if nothing's left.
+ Fix 5 — data-followback attribute added to the followback row div so dismissFollowBack can find and remove the right element.
+ */
+
      * v3.6.1 — 2026-03-30
      * -------------------------------------------------------------------
      ✅ Guide new users with low setlist matches to finding manual shows from email search

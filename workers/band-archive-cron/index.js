@@ -248,13 +248,14 @@ async function syncBand(band, env, log, maxPages = null, startPage = 1) {
     log(`  → Starting ${name} (${mbid}) from page ${startPage}${maxPages ? ` (max ${maxPages} pages)` : ''}`);
 
     let page          = startPage;
+    let pagesElapsed  = 0;
     let totalJournals = 0;
     let totalPerfs    = 0;
     let totalVenues   = 0;
     let hasMore       = true;
 
     while (hasMore) {
-        if (maxPages && page > maxPages) {
+        if (maxPages && pagesElapsed >= maxPages) {
             log(`    reached page limit (${maxPages}) — stopping`);
             break;
         }
@@ -316,6 +317,7 @@ async function syncBand(band, env, log, maxPages = null, startPage = 1) {
         log(`    page ${page}: ${journalRows.length} shows, ${perfRows.length} perfs, ${newVenues.length} new venues`);
 
         page++;
+        pagesElapsed++;
         await sleep(DELAY_MS);
     }
 
