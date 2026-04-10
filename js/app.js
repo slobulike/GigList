@@ -1,13 +1,9 @@
 /**
  * GigList Core Engine
- * v3.6.2 — 2026-04-09
+ * v3.6.3 — 2026-04-10
  * -------------------------------------------------------------------
- ✅ Bug fix to address issues with Follow feature:
- Fix 1 — acceptFollowRequest updates the in-memory caches immediately. Removes the user from window._pendingRequests and adds them to _followers. So if the banner re-renders within the same session (tab switch etc.) they're no longer shown as a pending request.
- Fix 2 — initSocial filters out dismissed followback prompts before building the allPrompts list, using a sessionStorage key so they don't reappear during the same visit.
- Fix 3 — "Not Now" button calls window.dismissFollowBack(id) instead of the old inline this.closest('[data-dismiss]').remove() which only removed the DOM element without persisting anything.
- Fix 4 — window.dismissFollowBack() saves the dismissed user ID to sessionStorage and hides the banner if nothing's left.
- Fix 5 — data-followback attribute added to the followback row div so dismissFollowBack can find and remove the right element.
+ ✅ Improved error messaging in Follow feature
+ ✅ Fix adding extra artists to festival lineup in editor mode
  */
 
 import * as Data from './modules/data.js';
@@ -811,15 +807,18 @@ let _followers = []; // cache: [{id, username}] of users who follow me
 
 async function initSocial() {
     // Step 1: get raw follow IDs (accepted only for the journal-access list)
-    const [followingRes, followersRes, pendingRes] = await Promise.all([
+    const [followingRes, followersRes, pendingRes, pendingOutboundRes] = await Promise.all([
         supabase.from('follows').select('following_id').eq('follower_id', currentUser.id).eq('status', 'accepted'),
         supabase.from('follows').select('follower_id').eq('following_id', currentUser.id).eq('status', 'accepted'),
-        supabase.from('follows').select('follower_id').eq('following_id', currentUser.id).eq('status', 'pending')
+        supabase.from('follows').select('follower_id').eq('following_id', currentUser.id).eq('status', 'pending'),
+        supabase.from('follows').select('following_id').eq('follower_id', currentUser.id).eq('status', 'pending')
     ]);
 
     const followingIds = (followingRes.data || []).map(r => r.following_id).filter(Boolean);
     const followerIds  = (followersRes.data || []).map(r => r.follower_id).filter(Boolean);
-
+    const pendingOutboundIds = new Set(
+        (pendingOutboundRes.data || []).map(r => r.following_id).filter(Boolean)
+    );
     // Step 2: look up usernames from profiles (no join ambiguity)
     const [followingProfiles, followerProfiles] = await Promise.all([
         followingIds.length
@@ -847,7 +846,7 @@ async function initSocial() {
 
     // Show follow-back prompt for accepted followers I don't follow back
     const followingSet = new Set(_following.map(f => f.id));
-    const pendingFollowBack = _followers.filter(f => !followingSet.has(f.id));
+    const pendingFollowBack = _followers.filter(f => !followingSet.has(f.id) && !pendingOutboundIds.has(f.id));
 
     // Filter out any "Not Now" followback dismissals from this session
     const dismissedFollowBacks = new Set(
@@ -982,9 +981,18 @@ window.followUser = async (userId, username, btn) => {
         status:       followStatus
     });
     if (error) {
-        const msg = error.code === '23505'
-            ? `You're already following ${username}`
-            : `Couldn't follow ${username} — try again`;
+        let msg = `Couldn't follow ${username} — try again`;
+        if (error.code === '23505') {
+            const { data: existingFollow } = await supabase
+                .from('follows')
+                .select('status')
+                .eq('follower_id', currentUser.id)
+                .eq('following_id', userId)
+                .single();
+            msg = existingFollow?.status === 'pending'
+                ? `${username} needs to approve your follow request`
+                : `You're already following ${username}`;
+        }
         window.showToast(msg, 'warning');
         if (error.code === '23505') {
             // Only add to the local cache if the existing row is actually accepted.

@@ -443,12 +443,19 @@ window.saveGig = async () => {
 
     let dbError = null;
     if (editingKey) {
-        // ── Edit path: straight update, no setlist.fm lookup needed ──────────
-        const { error } = await supabase
-            .from('journals')
-            .update(supabaseRow)
-            .is('user_id', writeUserId)
-            .eq('journal_key', editingKey);
+        // ── Edit path ─────────────────────────────────────────────────────────
+        // .is() only works for NULL / boolean literals — use .eq() for real UUIDs
+        const { error } = writeUserId === null
+            ? await supabase
+                .from('journals')
+                .update(supabaseRow)
+                .is('user_id', null)
+                .eq('journal_key', editingKey)
+            : await supabase
+                .from('journals')
+                .update(supabaseRow)
+                .eq('user_id', writeUserId)
+                .eq('journal_key', editingKey);
         dbError = error;
 
         if (dbError) {
