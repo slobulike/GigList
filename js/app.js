@@ -1,6 +1,6 @@
 /**
  * GigList Core Engine
- * v3.6.3 — 2026-04-10
+ * v3.6.4 — 2026-04-11
  * -------------------------------------------------------------------
  ✅ Improved error messaging in Follow feature
  ✅ Fix adding extra artists to festival lineup in editor mode
@@ -19,6 +19,7 @@ import { GigPuzzle } from './modules/puzzle.js';
 import { initEditor, exportCSV } from './modules/editor.js';
 import { supabase } from './modules/supabase.js';
 import { runSetlistSync } from './modules/setlist-sync.js';
+import { runOnboarding, handleZeroSyncResult } from './modules/onboarding.js';
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
@@ -65,7 +66,7 @@ let currentUser = null;
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "3.6.2";
+const APP_VERSION = "3.6.4";
 
 window.toggleListView = UI.toggleListView;
 window.activeView = window.activeView || 'list';
@@ -292,19 +293,10 @@ export async function initApp() {
     initModeSwitcher(); // build the logo dropdown switcher (uses _following)
 
     // New user onboarding — open settings modal pre-focused on setlist.fm sync
-    const isNewUser = new URLSearchParams(window.location.search).get('new') === 'true';
-    if (isNewUser && currentUser?.Type === 'Personal') {
-        setTimeout(() => {
-            window.openSettings();
-            const input = document.getElementById('setlistIdInput');
-            const hint  = document.getElementById('sync-status');
-            if (input) input.focus();
-            if (hint) {
-                hint.textContent = 'Welcome! Enter your setlist.fm username to import your gig history.';
-                hint.className = 'text-[10px] mt-3 leading-relaxed text-indigo-500 font-black not-italic';
-            }
-        }, 600);
-    }
+        const isNewUser = new URLSearchParams(window.location.search).get('new') === 'true';
+        if (isNewUser && currentUser?.Type === 'Personal') {
+            runOnboarding(currentUser);
+        }
 }
 
 function refreshUI() {
@@ -634,6 +626,11 @@ window.syncSetlistFm = async function() {
             if (btn) { btn.disabled = false; btn.classList.remove('opacity-50', 'cursor-not-allowed'); }
 
             window.track('setlist_sync_complete', { journalInserted, journalSkipped, newVenues, pages });
+
+            // Show email search tip if sync found nothing
+            if (journalInserted === 0) {
+                handleZeroSyncResult();
+            }
 
             if (journalInserted > 0) {
                 setTimeout(async () => {
