@@ -466,6 +466,76 @@ window.saveGig = async () => {
             }
             return;
         }
+// ── Sync festival lineup changes into performances table ──────────────
+        if (isFest === 'Y') {
+            const newLineup = _get('editor-lineups').trim();
+            if (newLineup) {
+                const newActs = newLineup.split('/').map(s => s.trim()).filter(Boolean);
+
+                // Fetch existing performance rows for this journal_key
+                const { data: existingPerfs } = await supabase
+                    .from('performances')
+                    .select('artist')
+                    .eq('journal_key', editingKey);
+
+                const existingArtists = new Set(
+                    (existingPerfs || []).map(p => p.artist.toLowerCase())
+                );
+                const newActsLower = new Set(newActs.map(a => a.toLowerCase()));
+
+                // Acts to add — in new lineup but not in performances
+                const toInsert = newActs
+                    .filter(act => !existingArtists.has(act.toLowerCase()))
+                    .map((act, i) => ({
+                        journal_key:    editingKey,
+                        artist:         act,
+                        role:           i === 0 && existingArtists.size === 0 ? 'Headline' : 'Support',
+                        setlist:        null,
+                        tour:           null,
+                        setlist_url:    null,
+                        official_venue: venue,
+                        date:           dateStr,
+                        year:           y,
+                        month:          m,
+                        day:            d,
+                    }));
+
+                // Acts to remove — in performances but not in new lineup
+                const toRemove = (existingPerfs || [])
+                    .map(p => p.artist)
+                    .filter(artist => !newActsLower.has(artist.toLowerCase()));
+
+                // Insert new acts
+                if (toInsert.length > 0) {
+                    const { error: perfError } = await supabase
+                        .from('performances')
+                        .insert(toInsert);
+                    if (perfError) console.warn('performances insert failed:', perfError.message);
+                }
+
+                // Delete removed acts
+                if (toRemove.length > 0) {
+                    const { error: delError } = await supabase
+                        .from('performances')
+                        .delete()
+                        .eq('journal_key', editingKey)
+                        .in('artist', toRemove);
+                    if (delError) console.warn('performances delete failed:', delError.message);
+                }
+
+                // Propagate updated lineup string to all other users' journal
+                // rows for this show if anything changed
+                if (toInsert.length > 0 || toRemove.length > 0) {
+                    await supabase
+                        .from('journals')
+                        .update({ festival_lineups: newLineup })
+                        .eq('journal_key', editingKey)
+                        .neq('user_id', writeUserId === null
+                            ? '00000000-0000-0000-0000-000000000000'
+                            : writeUserId);
+                }
+            }
+        }
 
     } else {
         // ── New show path: write journal first, then try setlist.fm lookup ───

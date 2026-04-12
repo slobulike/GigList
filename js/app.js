@@ -1,9 +1,9 @@
 /**
  * GigList Core Engine
- * v3.6.4 — 2026-04-11
+ * v3.7.0 — 2026-04-12
  * -------------------------------------------------------------------
- ✅ Improved error messaging in Follow feature
- ✅ Fix adding extra artists to festival lineup in editor mode
+ ✅ Updated how to handle adding and removing festival acts in the editor
+ ✅ Added quick link to Slamdunk 2026 clashfinder
  */
 
 import * as Data from './modules/data.js';
@@ -66,7 +66,7 @@ let currentUser = null;
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "3.6.4";
+const APP_VERSION = "3.7.0";
 
 window.toggleListView = UI.toggleListView;
 window.activeView = window.activeView || 'list';
@@ -1474,6 +1474,19 @@ function buildSwitcherPanel() {
                 )).join('')}
                 ${bands.length === 0 ? '<p class="px-4 py-3 text-xs text-slate-400">No band archives yet.</p>' : ''}
             </div>
+        </div>
+
+        <div class="border-t border-slate-100">
+            <button onclick="window.location.href='clashfinder.html'" role="menuitem"
+                    class="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-colors">
+                <span class="w-5 flex-shrink-0 flex items-center justify-center">
+                    <i data-lucide="calendar-clock" class="w-4 h-4 text-indigo-400"></i>
+                </span>
+                <span class="flex-1 min-w-0">
+                    <span class="block text-sm font-black text-slate-900">Clashfinder</span>
+                    <span class="block text-[10px] text-slate-400 font-bold uppercase tracking-widest">Slam Dunk 2026</span>
+                </span>
+            </button>
         </div>
 
         <div class="border-t border-slate-100">
