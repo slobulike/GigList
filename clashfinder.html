@@ -13,13 +13,6 @@
         html, body { height: 100%; overflow: hidden; }
         body { font-family: 'Plus Jakarta Sans', sans-serif; background: #0a0a0f; color: #f0f0f5; display:flex; flex-direction:column; }
 
-        /* ── Colours (swapped: must=green, like=red) ── */
-        /*
-            must   = green  #22c55e
-            should = amber  #ffbb30
-            like   = red    #ff5050
-        */
-
         /* ── Scrollable timeline container ── */
         .tl-scroll-el {
             overflow: auto;
@@ -44,11 +37,9 @@
         }
         .tl-row { display: flex; border-bottom: 1px solid #181828; }
 
-        /* ── Grid lines ── */
         .tl-vline      { position:absolute; top:0; bottom:0; width:1px; background:#1e1e2e; pointer-events:none; }
         .tl-vline-half { position:absolute; top:0; bottom:0; width:1px; background:#1a1a26; pointer-events:none; opacity:0.6; }
 
-        /* ── Time header ── */
         .tl-header-el {
             display: flex; position: sticky; top: 0; z-index: 30;
             background: #0d0d18; border-bottom: 1px solid #2a2a3e; flex-shrink: 0;
@@ -90,7 +81,12 @@
         .slot-like .slot-name { color:#ff5050; }
         .slot-like .slot-time { color:#bb3030; }
 
-        /* ── Clash border overrides (applied via JS inline style on the border) ── */
+        /* did_see = INDIGO/PURPLE — "I was there" */
+        .slot-did_see { background:#0e0826; border:1px solid #3730a3; }
+        .slot-did_see .slot-name { color:#a78bfa; }
+        .slot-did_see .slot-time { color:#6d28d9; }
+
+        /* ── Clash border overrides ── */
         .clash-red    { box-shadow: inset 0 0 0 2px #ef4444; }
         .clash-amber  { box-shadow: inset 0 0 0 2px #f59e0b; }
         .clash-green  { box-shadow: inset 0 0 0 2px #22c55e; }
@@ -133,16 +129,18 @@
             transition:transform 0.1s;
         }
         .pbtn:active { transform:scale(0.98); }
-        .pbtn-must   { background:#082008; border-color:#1a4a1a; color:#22c55e; }
-        .pbtn-should { background:#201400; border-color:#3e2c00; color:#ffbb30; }
-        .pbtn-like   { background:#200808; border-color:#4a1010; color:#ff5050; }
-        .pbtn-none   { background:#14142a; border-color:#2a2a44; color:#606080; }
+        .pbtn-must    { background:#082008; border-color:#1a4a1a; color:#22c55e; }
+        .pbtn-should  { background:#201400; border-color:#3e2c00; color:#ffbb30; }
+        .pbtn-like    { background:#200808; border-color:#4a1010; color:#ff5050; }
+        .pbtn-did_see { background:#0e0826; border-color:#3730a3; color:#a78bfa; }
+        .pbtn-none    { background:#14142a; border-color:#2a2a44; color:#606080; }
 
         /* ── Dots ── */
         .pdot { display:inline-block; width:6px; height:6px; border-radius:50%; flex-shrink:0; }
-        .pdot-must   { background:#22c55e; }
-        .pdot-should { background:#ffbb30; }
-        .pdot-like   { background:#ff5050; }
+        .pdot-must    { background:#22c55e; }
+        .pdot-should  { background:#ffbb30; }
+        .pdot-like    { background:#ff5050; }
+        .pdot-did_see { background:#a78bfa; }
 
         /* ── View buttons ── */
         .vbtn {
@@ -161,10 +159,11 @@
             border-radius:999px; cursor:pointer; border:1px solid transparent;
             transition:all 0.15s; user-select:none;
         }
-        .key-btn.active-must   { background:#082008; border-color:#22c55e; color:#22c55e; }
-        .key-btn.active-should { background:#1c1200; border-color:#ffbb30; color:#ffbb30; }
-        .key-btn.active-like   { background:#1c0808; border-color:#ff5050; color:#ff5050; }
-        .key-btn:not(.active-must):not(.active-should):not(.active-like) { color:#3a3a5a; border-color:#2a2a40; }
+        .key-btn.active-must    { background:#082008; border-color:#22c55e; color:#22c55e; }
+        .key-btn.active-should  { background:#1c1200; border-color:#ffbb30; color:#ffbb30; }
+        .key-btn.active-like    { background:#1c0808; border-color:#ff5050; color:#ff5050; }
+        .key-btn.active-did_see { background:#0e0826; border-color:#a78bfa; color:#a78bfa; }
+        .key-btn:not(.active-must):not(.active-should):not(.active-like):not(.active-did_see) { color:#3a3a5a; border-color:#2a2a40; }
 
         /* ── Expand mode ── */
         body.expanded #hdr        { display:none !important; }
@@ -180,11 +179,33 @@
         #expand-btn:active { background:#2a2a4a; }
         #expand-btn svg { width:14px; height:14px; stroke:#8888aa; stroke-width:2; fill:none; }
 
-        /* overflow for lineup view */
         #view-lineup-inner { overflow-y:auto; padding:12px; flex:1; min-height:0; }
+
+        /* ── Archive sheet ── */
+        .archive-sheet {
+            position:fixed; bottom:0; left:0; right:0;
+            background:#13131f; border-top:1px solid #2a2a40;
+            border-radius:20px 20px 0 0; padding:20px; z-index:200;
+            transform:translateY(100%); transition:transform 0.3s cubic-bezier(0.4,0,0.2,1);
+            max-height:85vh; overflow-y:auto;
+        }
+        .archive-sheet.open { transform:translateY(0); }
+
+        /* ── Auth nudge banner ── */
+        #auth-nudge {
+            display:none; background:#1a1030; border:1px solid #3730a3;
+            border-radius:12px; padding:10px 14px; margin:6px 10px 0;
+            font-size:11px; font-weight:700; color:#8b7cf6; flex-shrink:0;
+        }
     </style>
 </head>
 <body>
+
+<!-- ── Auth nudge (shown to unauthenticated users) ── -->
+<div id="auth-nudge">
+    🔒 Sign in to save your picks across devices and archive the shows you saw.
+    <a href="index.html" style="color:#a78bfa; font-weight:800; margin-left:6px;">Sign in →</a>
+</div>
 
 <!-- ── Header ── -->
 <div id="hdr" style="background:#0a0a0f; border-bottom:1px solid #1e1e2e; padding:10px 14px 8px; flex-shrink:0;">
@@ -195,9 +216,18 @@
                 Clashfinder <span style="color:#4a4a6a;font-style:normal;">2026</span>
             </h1>
         </div>
-        <div style="text-align:right;">
-            <p style="font-size:7px;font-weight:800;color:#4a4a6a;text-transform:uppercase;margin:0;">Sat 23 May</p>
-            <p id="hdr-time" style="font-size:13px;font-weight:800;color:#f0f0f5;margin:0;font-variant-numeric:tabular-nums;"></p>
+        <div style="display:flex;align-items:center;gap:8px;">
+            <!-- Post-event archive button — only visible when user has did_see picks -->
+            <button id="btn-archive" onclick="openArchiveSheet()"
+                    style="display:none; background:#1a0e40; border:1px solid #4f46e5; color:#a78bfa;
+                           font-size:9px; font-weight:800; text-transform:uppercase; letter-spacing:0.08em;
+                           padding:5px 10px; border-radius:8px; cursor:pointer; font-family:inherit;">
+                + Archive
+            </button>
+            <div style="text-align:right;">
+                <p style="font-size:7px;font-weight:800;color:#4a4a6a;text-transform:uppercase;margin:0;">Sat 23 May</p>
+                <p id="hdr-time" style="font-size:13px;font-weight:800;color:#f0f0f5;margin:0;font-variant-numeric:tabular-nums;"></p>
+            </div>
         </div>
     </div>
     <!-- 3-tab view toggle -->
@@ -212,9 +242,10 @@
 <div id="view-tl" style="display:flex; flex-direction:column; flex:1; min-height:0; overflow:hidden;">
     <div class="key-strip" style="display:flex;align-items:center;gap:6px;padding:5px 10px;background:#0a0a0f;border-bottom:1px solid #181828;flex-shrink:0;flex-wrap:wrap;">
         <span style="font-size:8px;font-weight:800;color:#3a3a5a;text-transform:uppercase;letter-spacing:0.07em;margin-right:2px;">Show:</span>
-        <div class="key-btn kb-must active-must"     onclick="toggleFilter('must')">  <span class="pdot pdot-must"></span>   Must</div>
-        <div class="key-btn kb-should active-should" onclick="toggleFilter('should')"><span class="pdot pdot-should"></span> Should</div>
-        <div class="key-btn kb-like active-like"     onclick="toggleFilter('like')">  <span class="pdot pdot-like"></span>   Like</div>
+        <div class="key-btn kb-must active-must"       onclick="toggleFilter('must')">  <span class="pdot pdot-must"></span>    Must</div>
+        <div class="key-btn kb-should active-should"   onclick="toggleFilter('should')"><span class="pdot pdot-should"></span>  Should</div>
+        <div class="key-btn kb-like active-like"       onclick="toggleFilter('like')">  <span class="pdot pdot-like"></span>    Like</div>
+        <div class="key-btn kb-did_see active-did_see" onclick="toggleFilter('did_see')"><span class="pdot pdot-did_see"></span> Saw</div>
         <div class="key-btn kb-all" onclick="toggleFilter('all')" style="margin-left:4px;color:#5a5a7a;border-color:#2a2a40;">All acts</div>
     </div>
     <div class="tl-scroll-el" id="tl-scroll">
@@ -230,9 +261,10 @@
 <div id="view-mytl" style="display:none; flex-direction:column; flex:1; min-height:0; overflow:hidden;">
     <div class="key-strip" style="display:flex;align-items:center;gap:6px;padding:5px 10px;background:#0a0a0f;border-bottom:1px solid #181828;flex-shrink:0;flex-wrap:wrap;">
         <span style="font-size:8px;font-weight:800;color:#3a3a5a;text-transform:uppercase;letter-spacing:0.07em;margin-right:2px;">Show:</span>
-        <div class="key-btn kb-must active-must"     onclick="toggleFilter('must')">  <span class="pdot pdot-must"></span>   Must</div>
-        <div class="key-btn kb-should active-should" onclick="toggleFilter('should')"><span class="pdot pdot-should"></span> Should</div>
-        <div class="key-btn kb-like active-like"     onclick="toggleFilter('like')">  <span class="pdot pdot-like"></span>   Like</div>
+        <div class="key-btn kb-must active-must"       onclick="toggleFilter('must')">  <span class="pdot pdot-must"></span>    Must</div>
+        <div class="key-btn kb-should active-should"   onclick="toggleFilter('should')"><span class="pdot pdot-should"></span>  Should</div>
+        <div class="key-btn kb-like active-like"       onclick="toggleFilter('like')">  <span class="pdot pdot-like"></span>    Like</div>
+        <div class="key-btn kb-did_see active-did_see" onclick="toggleFilter('did_see')"><span class="pdot pdot-did_see"></span> Saw</div>
         <div class="key-btn kb-all" onclick="toggleFilter('all')" style="margin-left:4px;color:#5a5a7a;border-color:#2a2a40;">All acts</div>
     </div>
     <div id="mytl-empty" style="display:none; text-align:center; padding:60px 20px; flex-shrink:0;">
@@ -253,9 +285,10 @@
 <div id="view-lineup" style="display:none; flex-direction:column; flex:1; min-height:0;">
     <div class="key-strip" style="display:flex;align-items:center;gap:6px;padding:5px 10px;background:#0a0a0f;border-bottom:1px solid #181828;flex-shrink:0;flex-wrap:wrap;">
         <span style="font-size:8px;font-weight:800;color:#3a3a5a;text-transform:uppercase;letter-spacing:0.07em;margin-right:2px;">Show:</span>
-        <div class="key-btn kb-must active-must"     onclick="toggleFilter('must')">  <span class="pdot pdot-must"></span>   Must</div>
-        <div class="key-btn kb-should active-should" onclick="toggleFilter('should')"><span class="pdot pdot-should"></span> Should</div>
-        <div class="key-btn kb-like active-like"     onclick="toggleFilter('like')">  <span class="pdot pdot-like"></span>   Like</div>
+        <div class="key-btn kb-must active-must"       onclick="toggleFilter('must')">  <span class="pdot pdot-must"></span>    Must</div>
+        <div class="key-btn kb-should active-should"   onclick="toggleFilter('should')"><span class="pdot pdot-should"></span>  Should</div>
+        <div class="key-btn kb-like active-like"       onclick="toggleFilter('like')">  <span class="pdot pdot-like"></span>    Like</div>
+        <div class="key-btn kb-did_see active-did_see" onclick="toggleFilter('did_see')"><span class="pdot pdot-did_see"></span> Saw</div>
         <div class="key-btn kb-all" onclick="toggleFilter('all')" style="margin-left:4px;color:#5a5a7a;border-color:#2a2a40;">All acts</div>
     </div>
     <div id="view-lineup-inner">
@@ -263,6 +296,7 @@
             <span style="font-size:10px;font-weight:800;color:#22c55e;display:flex;align-items:center;gap:4px;"><span class="pdot pdot-must"></span>Must see</span>
             <span style="font-size:10px;font-weight:800;color:#ffbb30;display:flex;align-items:center;gap:4px;"><span class="pdot pdot-should"></span>Should see</span>
             <span style="font-size:10px;font-weight:800;color:#ff5050;display:flex;align-items:center;gap:4px;"><span class="pdot pdot-like"></span>Like to see</span>
+            <span style="font-size:10px;font-weight:800;color:#a78bfa;display:flex;align-items:center;gap:4px;"><span class="pdot pdot-did_see"></span>Did see</span>
         </div>
         <div id="lineup-empty" style="text-align:center; padding:50px 20px;">
             <p style="font-size:28px;margin:0 0 10px;">🎸</p>
@@ -275,15 +309,16 @@
 
 <!-- ── Bottom bar ── -->
 <div id="btm" style="background:#0a0a0f; border-top:1px solid #1e1e2e; padding:7px 16px; display:flex; align-items:center; justify-content:space-between; flex-shrink:0;">
-    <div style="display:flex; gap:10px; align-items:center;">
+    <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
         <span style="font-size:9px;font-weight:800;color:#22c55e;display:flex;align-items:center;gap:3px;"><span class="pdot pdot-must"></span>MUST</span>
         <span style="font-size:9px;font-weight:800;color:#ffbb30;display:flex;align-items:center;gap:3px;"><span class="pdot pdot-should"></span>SHOULD</span>
         <span style="font-size:9px;font-weight:800;color:#ff5050;display:flex;align-items:center;gap:3px;"><span class="pdot pdot-like"></span>LIKE</span>
+        <span style="font-size:9px;font-weight:800;color:#a78bfa;display:flex;align-items:center;gap:3px;"><span class="pdot pdot-did_see"></span>SAW</span>
     </div>
     <div id="sel-count" style="font-size:9px;font-weight:800;color:#4a4a6a;letter-spacing:0.08em;text-transform:uppercase;">0 selected</div>
 </div>
 
-<!-- ── Expand button (always visible) ── -->
+<!-- ── Expand button ── -->
 <div id="expand-btn" onclick="toggleExpand()" title="Expand / collapse">
     <svg id="expand-icon" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
 </div>
@@ -294,13 +329,50 @@
     <div style="width:36px;height:4px;background:#2a2a40;border-radius:2px;margin:0 auto 14px;"></div>
     <p id="p-name" style="font-size:16px;font-weight:800;font-style:italic;color:#f0f0f5;margin:0 0 3px;"></p>
     <p id="p-meta" style="font-size:10px;font-weight:700;color:#4a4a6a;margin:0 0 14px;letter-spacing:0.05em;text-transform:uppercase;"></p>
-    <button class="pbtn pbtn-must"   onclick="setPriority('must')">  <span class="pdot pdot-must"></span>   Must see — top of my list</button>
-    <button class="pbtn pbtn-should" onclick="setPriority('should')"><span class="pdot pdot-should"></span> Should see — if nothing clashes</button>
-    <button class="pbtn pbtn-like"   onclick="setPriority('like')">  <span class="pdot pdot-like"></span>   Like to see — if I'm nearby</button>
-    <button class="pbtn pbtn-none"   onclick="setPriority('none')">  <span style="width:6px;height:6px;display:inline-block;border-radius:50%;background:#383858;"></span>&nbsp; Remove / not interested</button>
+    <button class="pbtn pbtn-must"    onclick="setPriority('must')">   <span class="pdot pdot-must"></span>    Must see — top of my list</button>
+    <button class="pbtn pbtn-should"  onclick="setPriority('should')"> <span class="pdot pdot-should"></span>  Should see — if nothing clashes</button>
+    <button class="pbtn pbtn-like"    onclick="setPriority('like')">   <span class="pdot pdot-like"></span>    Like to see — if I'm nearby</button>
+    <button class="pbtn pbtn-did_see" onclick="setPriority('did_see')"><span class="pdot pdot-did_see"></span> Did see ✓ — I was there</button>
+    <button class="pbtn pbtn-none"    onclick="setPriority('none')">   <span style="width:6px;height:6px;display:inline-block;border-radius:50%;background:#383858;"></span>&nbsp; Remove / not interested</button>
 </div>
 
-<script>
+<!-- ── Archive sheet ── -->
+<div class="picker-overlay" id="archive-overlay" onclick="closeArchiveSheet()"></div>
+<div class="archive-sheet"  id="archive-sheet">
+    <div style="width:36px;height:4px;background:#2a2a40;border-radius:2px;margin:0 auto 14px;"></div>
+    <p style="font-size:16px;font-weight:800;font-style:italic;color:#f0f0f5;margin:0 0 4px;">Add to GigList</p>
+    <p style="font-size:10px;font-weight:700;color:#4a4a6a;margin:0 0 16px;letter-spacing:0.05em;text-transform:uppercase;">Archive the shows you saw</p>
+
+    <div id="archive-bands-list" style="margin-bottom:16px;"></div>
+
+    <p style="font-size:10px;color:#4a4a6a;font-weight:700;margin:0 0 12px;line-height:1.5;">
+        Each act you marked "Did See" will be added to your personal GigList archive as a festival show at
+        <span id="archive-venue-label" style="color:#a78bfa;font-weight:800;"></span>.
+        You can add comments and companions after saving.
+    </p>
+
+    <div style="display:flex;gap:10px;">
+        <button onclick="closeArchiveSheet()"
+                style="flex:1; padding:13px; border-radius:12px; border:1px solid #2a2a40;
+                       background:#14142a; color:#5a5a7a; font-size:12px; font-weight:800;
+                       font-family:inherit; cursor:pointer; text-transform:uppercase; letter-spacing:0.06em;">
+            Cancel
+        </button>
+        <button onclick="commitArchive()"
+                style="flex:2; padding:13px; border-radius:12px; border:none;
+                       background:#4f46e5; color:#fff; font-size:12px; font-weight:800;
+                       font-family:inherit; cursor:pointer; text-transform:uppercase; letter-spacing:0.06em;">
+            Add to My GigList →
+        </button>
+    </div>
+</div>
+
+<script type="module">
+    import { initClashfinderSync } from './js/modules/clashfinder-sync.js';
+
+    // ── Festival metadata (override per-event here) ────────────────────────────
+    const EVENT_SLUG = 'slam-dunk-2026';
+
     const STAGES = [
         {id:'msw',    name:'Main Stage West',       short:'Main West'  },
         {id:'msel',   name:'Main Stage East Left',  short:'East Left'  },
@@ -366,23 +438,39 @@
     const START_MIN = 11*60+30, END_MIN = 23*60, TOTAL_MIN = END_MIN - START_MIN;
     const LABEL_W = 62, ROW_H = 46, HDR_H = 22;
 
-    const priorities  = JSON.parse(localStorage.getItem('sd26_prio')    || '{}');
-    const filterState = JSON.parse(localStorage.getItem('sd26_filters') || '{"must":true,"should":true,"like":true}');
+    // ── Init sync module ───────────────────────────────────────────────────────
+    let sync = null;
+    let priorities = {}; // reference kept in sync for live mutation
 
-    let activeView = 'tl', pickerActId = null, ppm = 3, isExpanded = false;
+    (async () => {
+        sync = await initClashfinderSync(EVENT_SLUG);
+        priorities = sync.priorities; // live reference
+
+        if (!sync.isAuthed) {
+            document.getElementById('auth-nudge').style.display = 'block';
+        }
+
+        updateArchiveButton();
+        buildTimeline();
+        updateCount();
+        updateKeyButtons();
+    })();
+
+    const filterState = JSON.parse(localStorage.getItem('sd26_filters') || '{"must":true,"should":true,"like":true,"did_see":true}');
+    const saveF = () => localStorage.setItem('sd26_filters', JSON.stringify(filterState));
+
+    let activeView = 'tl', pickerActId = null, isExpanded = false;
 
     const toMin = t => { const [h,m]=t.split(':').map(Number); return h*60+m; };
     const fmt   = t => { const [h,m]=t.split(':').map(Number); return (h>12?h-12:h)+':'+(m<10?'0'+m:m)+(h>=12?'pm':'am'); };
-    const save  = () => localStorage.setItem('sd26_prio', JSON.stringify(priorities));
-    const saveF = () => localStorage.setItem('sd26_filters', JSON.stringify(filterState));
 
-    function calcPPM(scrollId) {
-        const landscape = window.innerWidth > window.innerHeight;
-        return landscape ? Math.max(2.0, (window.innerWidth - LABEL_W - 6) / TOTAL_MIN) : 2.8;
+    function calcPPM() {
+        return window.innerWidth > window.innerHeight
+            ? Math.max(2.0, (window.innerWidth - LABEL_W - 6) / TOTAL_MIN)
+            : 2.8;
     }
 
-    // ── Clash detection ─────────────────────────────────────────────────────────
-    // Returns a Map: actId → clash class ('clash-red'|'clash-amber'|'clash-green'|'')
+    // ── Clash detection (did_see counts as selected for clash purposes) ─────────
     function calcClashes(actList) {
         const result = new Map();
         for (const act of actList) result.set(act.id, 'clash-green');
@@ -402,16 +490,13 @@
 
                 if (overlap > 10) {
                     if (pa==='must' && pb==='must') {
-                        // must vs must, >10 min — red
                         clashClass = 'clash-red';
                     } else if ((pa==='must'||pb==='must') && overlap > 10) {
-                        // must vs any other want, >10 min — amber
                         clashClass = 'clash-amber';
                     }
                 }
 
                 if (clashClass) {
-                    // Only upgrade (red > amber > green)
                     const upgrade = (cur, next) => {
                         const rank = {'clash-red':2,'clash-amber':1,'clash-green':0};
                         return rank[next]>rank[cur] ? next : cur;
@@ -424,18 +509,16 @@
         return result;
     }
 
-    // ── Build a timeline into given DOM element IDs ──────────────────────────────
     function buildTL(scrollId, headerId, bodyId, nowId, actsToShow) {
-        const localPPM = calcPPM(scrollId);
+        const localPPM = calcPPM();
         const totalW   = Math.ceil(TOTAL_MIN * localPPM);
         const clashes  = calcClashes(actsToShow);
 
-        // wrap
-        const wrap = document.getElementById(scrollId).querySelector('[id$="-wrap"]') ||
-                     document.getElementById(scrollId).parentElement.querySelector('[id$="-wrap"]');
+        const scrollEl = document.getElementById(scrollId);
+        const wrap = scrollEl?.querySelector('[id$="-wrap"]') ||
+                     scrollEl?.parentElement?.querySelector('[id$="-wrap"]');
         if (wrap) wrap.style.width = (LABEL_W + totalW) + 'px';
 
-        // header
         const hdr = document.getElementById(headerId);
         hdr.style.cssText = `display:flex; height:${HDR_H}px; width:${LABEL_W+totalW}px; position:sticky; top:0; z-index:30; background:#0d0d18; border-bottom:1px solid #2a2a3e; flex-shrink:0;`;
         let hHtml = `<div style="width:${LABEL_W}px;flex-shrink:0;position:sticky;left:0;background:#0d0d18;z-index:31;border-right:1px solid #2a2a3e;"></div>`;
@@ -448,7 +531,6 @@
         hHtml += '</div>';
         hdr.innerHTML = hHtml;
 
-        // body — group acts by stage, only show stages that have visible acts
         const body = document.getElementById(bodyId);
         body.style.cssText = `width:${LABEL_W+totalW}px; position:relative;`;
         let bHtml = '';
@@ -483,7 +565,6 @@
         });
         body.innerHTML = bHtml;
 
-        // now line
         const nowMin = new Date().getHours()*60 + new Date().getMinutes();
         const nowEl  = document.getElementById(nowId);
         const rowCount = STAGES.filter(s => actsToShow.some(a=>a.stage===s.id)).length;
@@ -494,19 +575,16 @@
             nowEl.style.display='none';
         }
 
-        // scroll to now on first build
-        const scrollEl = document.getElementById(scrollId);
         if (nowMin>=START_MIN && nowMin<=END_MIN && scrollEl.scrollLeft===0) {
             const target = Math.max(0, LABEL_W+(nowMin-START_MIN)*localPPM - window.innerWidth*0.4);
             setTimeout(()=>{ scrollEl.scrollLeft=target; },50);
         }
     }
 
-    // ── Filtered act list for main timeline ──────────────────────────────────────
     function filteredActs() {
         return ACTS.filter(a => {
             const p = priorities[a.id];
-            if (!p || p==='none') return true; // unselected always shown dimmed
+            if (!p || p==='none') return true;
             return filterState[p] !== false;
         });
     }
@@ -516,7 +594,6 @@
     }
 
     function buildMyTimeline() {
-        // All selected acts (needed for clash calc) but only show filtered ones
         const allSel = ACTS.filter(a => priorities[a.id] && priorities[a.id]!=='none');
         const visible = allSel.filter(a => filterState[priorities[a.id]] !== false);
         const empty  = document.getElementById('mytl-empty');
@@ -528,13 +605,13 @@
         buildTL('mytl-scroll','mytl-header','mytl-body','my-tl-now', visible);
     }
 
-    // ── Filter key toggle ─────────────────────────────────────────────────────────
     function toggleFilter(which) {
         if (which==='all') {
-            filterState.must=true; filterState.should=true; filterState.like=true;
+            filterState.must=true; filterState.should=true;
+            filterState.like=true; filterState.did_see=true;
         } else {
             filterState[which] = !filterState[which];
-            if (!filterState.must && !filterState.should && !filterState.like) {
+            if (!filterState.must && !filterState.should && !filterState.like && !filterState.did_see) {
                 filterState[which]=true;
             }
         }
@@ -545,23 +622,24 @@
         if (activeView==='lineup') buildLineup();
     }
 
+    window.toggleFilter = toggleFilter;
+
     function updateKeyButtons() {
-        const activeClass = {must:'active-must', should:'active-should', like:'active-like'};
-        // Update every key strip — there are three (one per view)
-        ['must','should','like'].forEach(k => {
+        const activeClass = {must:'active-must', should:'active-should', like:'active-like', did_see:'active-did_see'};
+        ['must','should','like','did_see'].forEach(k => {
             document.querySelectorAll('.kb-'+k).forEach(el => {
                 el.className = 'key-btn kb-'+k + (filterState[k] ? ' '+activeClass[k] : '');
             });
         });
-        const allActive = filterState.must && filterState.should && filterState.like;
+        const allActive = filterState.must && filterState.should && filterState.like && filterState.did_see;
         document.querySelectorAll('.kb-all').forEach(el => {
             el.style.color       = allActive ? '#8888aa' : '#5a5a7a';
             el.style.borderColor = allActive ? '#3a3a58' : '#2a2a40';
         });
     }
 
-    // ── Priority picker ───────────────────────────────────────────────────────────
-    function openPicker(id) {
+    // ── Priority picker ──────────────────────────────────────────────────────────
+    window.openPicker = function(id) {
         pickerActId = id;
         const act = ACTS.find(a=>a.id===id);
         const stg = STAGES.find(s=>s.id===act.stage);
@@ -569,21 +647,90 @@
         document.getElementById('p-meta').textContent = `${fmt(act.start)} – ${fmt(act.end)} · ${stg.name}`;
         document.getElementById('p-sheet').classList.add('open');
         document.getElementById('p-overlay').classList.add('open');
-    }
-    function closePicker() {
+    };
+
+    window.closePicker = function() {
         document.getElementById('p-sheet').classList.remove('open');
         document.getElementById('p-overlay').classList.remove('open');
         pickerActId=null;
-    }
-    function setPriority(level) {
+    };
+
+    window.setPriority = async function(level) {
         if (!pickerActId) return;
-        if (level==='none') delete priorities[pickerActId]; else priorities[pickerActId]=level;
-        save(); closePicker();
+        await sync?.setPriority(pickerActId, level) ?? (() => {
+            // fallback if sync not ready yet
+            if (level==='none') delete priorities[pickerActId];
+            else priorities[pickerActId] = level;
+        })();
+        closePicker();
         buildTimeline();
-        if (activeView==='mytl')    buildMyTimeline();
-        if (activeView==='lineup')  buildLineup();
+        if (activeView==='mytl')   buildMyTimeline();
+        if (activeView==='lineup') buildLineup();
         updateCount();
+        updateArchiveButton();
+    };
+
+    // ── Did See count & archive button ──────────────────────────────────────────
+    function updateArchiveButton() {
+        const sawCount = Object.values(priorities).filter(p=>p==='did_see').length;
+        const btn = document.getElementById('btn-archive');
+        if (!btn) return;
+        if (sawCount > 0 && sync?.isAuthed) {
+            btn.style.display = 'block';
+            btn.textContent   = `+ Archive (${sawCount})`;
+        } else {
+            btn.style.display = 'none';
+        }
     }
+
+    // ── Archive sheet ────────────────────────────────────────────────────────────
+    window.openArchiveSheet = function() {
+        if (!sync) return;
+        const payload = sync.getArchivePayload(ACTS);
+
+        document.getElementById('archive-venue-label').textContent = payload.venue || payload.festival;
+
+        const list = document.getElementById('archive-bands-list');
+        if (payload.bands.length === 0) {
+            list.innerHTML = '<p style="color:#4a4a6a;font-size:12px;">No acts marked as "Did See" yet.</p>';
+        } else {
+            list.innerHTML = payload.bands.map(b =>
+                `<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #1e1e2e;">
+                    <span class="pdot pdot-did_see"></span>
+                    <span style="font-size:13px;font-weight:800;color:#a78bfa;">${b}</span>
+                </div>`
+            ).join('');
+        }
+
+        document.getElementById('archive-sheet').classList.add('open');
+        document.getElementById('archive-overlay').classList.add('open');
+    };
+
+    window.closeArchiveSheet = function() {
+        document.getElementById('archive-sheet').classList.remove('open');
+        document.getElementById('archive-overlay').classList.remove('open');
+    };
+
+    /**
+     * Redirect to vault.html with archive pre-population params.
+     * vault.html picks these up on load and opens the editor modal.
+     */
+    window.commitArchive = function() {
+        if (!sync) return;
+        const payload = sync.getArchivePayload(ACTS);
+        if (!payload.bands.length) return;
+
+        const params = new URLSearchParams({
+            prefill:   'festival',
+            date:      payload.date,
+            venue:     payload.venue,
+            festival:  payload.festival,
+            bands:     payload.bands.join('|'),
+        });
+
+        closeArchiveSheet();
+        window.location.href = `vault.html?${params.toString()}`;
+    };
 
     // ── My Lineup list ────────────────────────────────────────────────────────────
     function buildLineup() {
@@ -596,9 +743,9 @@
         empty.style.display='none'; leg.style.display='flex';
 
         const clashMap = calcClashes(ACTS);
-        const C={must:'#22c55e',should:'#ffbb30',like:'#ff5050'};
-        const D={must:'pdot-must',should:'pdot-should',like:'pdot-like'};
-        const CLASH_C={'clash-red':'#ef4444','clash-amber':'#f59e0b','clash-green':'#22c55e','':`#3a3a5a`};
+        const C   = {must:'#22c55e',should:'#ffbb30',like:'#ff5050',did_see:'#a78bfa'};
+        const DOT = {must:'pdot-must',should:'pdot-should',like:'pdot-like',did_see:'pdot-did_see'};
+        const CLASH_C = {'clash-red':'#ef4444','clash-amber':'#f59e0b','clash-green':'#22c55e','':'#3a3a5a'};
 
         list.innerHTML = sel.map(act=>{
             const p=priorities[act.id], stg=STAGES.find(s=>s.id===act.stage);
@@ -609,7 +756,7 @@
                 <div style="font-size:9px;font-weight:800;color:#4a4a6a;min-width:38px;text-align:center;line-height:1.5;">${fmt(act.start)}<br>${fmt(act.end)}</div>
                 <div style="flex:1;min-width:0;">
                     <div style="display:flex;align-items:center;gap:5px;margin-bottom:2px;">
-                        <span class="pdot ${D[p]}"></span>
+                        <span class="pdot ${DOT[p]}"></span>
                         <span style="font-size:13px;font-weight:800;color:${C[p]};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${act.name}</span>
                     </div>
                     <div style="font-size:9px;font-weight:700;color:#4a4a6a;text-transform:uppercase;letter-spacing:0.06em;">${stg.short}</div>
@@ -619,13 +766,15 @@
         }).join('');
     }
 
+    window.buildLineup = buildLineup;
+
     function updateCount() {
         const n=Object.values(priorities).filter(p=>p!=='none').length;
         document.getElementById('sel-count').textContent = n?`${n} selected`:'0 selected';
     }
 
-    // ── View switching ────────────────────────────────────────────────────────────
-    function setView(v) {
+    // ── View switching ─────────────────────────────────────────────────────────
+    window.setView = function(v) {
         activeView=v;
         document.getElementById('view-tl').style.display    = v==='tl'    ?'flex':'none';
         document.getElementById('view-mytl').style.display  = v==='mytl'  ?'flex':'none';
@@ -635,10 +784,10 @@
         });
         if (v==='mytl')   buildMyTimeline();
         if (v==='lineup') buildLineup();
-    }
+    };
 
-    // ── Expand / collapse ─────────────────────────────────────────────────────────
-    function toggleExpand() {
+    // ── Expand / collapse ──────────────────────────────────────────────────────
+    window.toggleExpand = function() {
         isExpanded = !isExpanded;
         document.body.classList.toggle('expanded', isExpanded);
         document.getElementById('expand-icon').innerHTML = isExpanded
@@ -649,24 +798,21 @@
             if (activeView==='tl')   buildTimeline();
             if (activeView==='mytl') buildMyTimeline();
         },50);
-    }
+    };
 
-    // ── Clock ─────────────────────────────────────────────────────────────────────
+    // ── Clock ──────────────────────────────────────────────────────────────────
     function updateClock() {
         const now=new Date(),h=now.getHours(),m=now.getMinutes().toString().padStart(2,'0');
         document.getElementById('hdr-time').textContent=(h>12?h-12:h||12)+':'+m+(h>=12?'pm':'am');
     }
 
-    // ── Resize / orientation ──────────────────────────────────────────────────────
+    // ── Resize ─────────────────────────────────────────────────────────────────
     let rzTimer;
     window.addEventListener('resize',()=>{ clearTimeout(rzTimer); rzTimer=setTimeout(()=>{ if(activeView==='tl') buildTimeline(); else if(activeView==='mytl') buildMyTimeline(); },120); });
     window.addEventListener('orientationchange',()=>{ setTimeout(()=>{ if(activeView==='tl') buildTimeline(); else if(activeView==='mytl') buildMyTimeline(); },200); });
 
-    // ── Init ──────────────────────────────────────────────────────────────────────
+    // ── Init ───────────────────────────────────────────────────────────────────
     updateClock();
-    updateKeyButtons();
-    buildTimeline();
-    updateCount();
     setInterval(updateClock, 15000);
     setInterval(()=>{
         if (activeView==='tl')   buildTimeline();

@@ -797,3 +797,36 @@ export const initEditor = () => {
     wireCombobox('editor-venue',   'editor-venue-list',   getVenueOptions);
     wireCombobox('editor-support', 'editor-support-list', getSupportOptions);
 };
+
+// ─── FESTIVAL PREFILL MODAL ───────────────────────────────────────────────────
+
+/**
+ * Opens the editor modal for each "did see" band in sequence.
+ * After saving (or skipping), advances to the next band automatically.
+ *
+ * @param {{ date: string, venue: string, festival: string, bands: string[] }} prefill
+ */
+export const openFestivalPrefillModal = ({ date, venue, festival, bands }) => {
+    if (!bands || bands.length === 0) return;
+
+    editingKey = null;
+    renderEditorModal({
+        Date:               date,
+        Band:               festival,
+        OfficialVenue:      venue,
+        'Festival?':        'Y',
+        'Festival Lineups': bands.join(' / '),
+        'Notable Support':  '',
+        'Went With':        '',
+        Comments:           '',
+        Price:              '',
+        Photos:             '',
+        'Review URL':       '',
+    });
+
+    const title = document.getElementById('editor-modal-title');
+    if (title) title.textContent = `Add Show · ${festival} (${bands.length} acts)`;
+};
+
+// Expose on window so app.js can call it
+window.openFestivalPrefillModal = openFestivalPrefillModal;

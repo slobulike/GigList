@@ -1,9 +1,9 @@
 /**
  * GigList Core Engine
- * v3.7.0 — 2026-04-12
+ * v3.7.1 — 2026-04-12
  * -------------------------------------------------------------------
- ✅ Updated how to handle adding and removing festival acts in the editor
- ✅ Added quick link to Slamdunk 2026 clashfinder
+ ✅ Added festival clashfinder to supabase
+ ✅ Users can now select artists they saw straight from the clashfinder and add a new journal entry prefilled with all of the festival and artist info
  */
 
 import * as Data from './modules/data.js';
@@ -66,7 +66,7 @@ let currentUser = null;
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "3.7.0";
+const APP_VERSION = "3.7.1";
 
 window.toggleListView = UI.toggleListView;
 window.activeView = window.activeView || 'list';
@@ -292,11 +292,49 @@ export async function initApp() {
 
     initModeSwitcher(); // build the logo dropdown switcher (uses _following)
 
-    // New user onboarding — open settings modal pre-focused on setlist.fm sync
-        const isNewUser = new URLSearchParams(window.location.search).get('new') === 'true';
-        if (isNewUser && currentUser?.Type === 'Personal') {
-            runOnboarding(currentUser);
+// New user onboarding — open settings modal pre-focused on setlist.fm sync
+    const isNewUser = new URLSearchParams(window.location.search).get('new') === 'true';
+    if (isNewUser && currentUser?.Type === 'Personal') {
+        setTimeout(() => {
+            window.openSettings();
+            const input = document.getElementById('setlistIdInput');
+            const hint  = document.getElementById('sync-status');
+            if (input) input.focus();
+            if (hint) {
+                hint.textContent = 'Welcome! Enter your setlist.fm username to import your gig history.';
+                hint.className = 'text-[10px] mt-3 leading-relaxed text-indigo-500 font-black not-italic';
+            }
+        }, 600);
+    }
+
+    // ─── CLASHFINDER PREFILL ──────────────────────────────────────────────────
+    // params is already defined at the top of initApp() — reuse it here
+    const prefillType = params.get('prefill');
+    if (prefillType === 'festival' && currentUser?.Type === 'Personal') {
+        const prefillDate     = params.get('date')     || '';
+        const prefillVenue    = params.get('venue')    || '';
+        const prefillFestival = params.get('festival') || '';
+        const prefillBands    = (params.get('bands') || '').split('|').map(b => b.trim()).filter(Boolean);
+
+        if (prefillBands.length > 0) {
+            const cleanUrl = new URL(window.location.href);
+            ['prefill','date','venue','festival','bands'].forEach(k => cleanUrl.searchParams.delete(k));
+            window.history.replaceState({}, '', cleanUrl);
+
+            window.switchView('data');
+
+            setTimeout(() => {
+                if (window.openFestivalPrefillModal) {
+                    window.openFestivalPrefillModal({
+                        date:     prefillDate,
+                        venue:    prefillVenue,
+                        festival: prefillFestival,
+                        bands:    prefillBands,
+                    });
+                }
+            }, 800);
         }
+    }
 }
 
 function refreshUI() {
