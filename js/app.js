@@ -1,9 +1,9 @@
 /**
  * GigList Core Engine
- * v3.7.1 — 2026-04-12
+ * v3.7.3 — 2026-04-14
  * -------------------------------------------------------------------
- ✅ Added festival clashfinder to supabase
- ✅ Users can now select artists they saw straight from the clashfinder and add a new journal entry prefilled with all of the festival and artist info
+ * ✅ Moved clashfinder setlist data to the DB
+ * ✅ Attempted bug fixes for newly tagged shows
  */
 
 import * as Data from './modules/data.js';
@@ -19,7 +19,7 @@ import { GigPuzzle } from './modules/puzzle.js';
 import { initEditor, exportCSV } from './modules/editor.js';
 import { supabase } from './modules/supabase.js';
 import { runSetlistSync } from './modules/setlist-sync.js';
-import { runOnboarding, handleZeroSyncResult } from './modules/onboarding.js';
+import { runOnboarding, checkCompanionTags, handleZeroSyncResult } from './modules/onboarding.js';
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
@@ -47,14 +47,12 @@ window.showToast = (message, type = 'info', duration = 3500) => {
     container.appendChild(toast);
     if (window.lucide) lucide.createIcons();
 
-    // Animate in
     requestAnimationFrame(() => {
         requestAnimationFrame(() => {
             toast.classList.remove('translate-y-2', 'opacity-0');
         });
     });
 
-    // Auto-dismiss
     setTimeout(() => {
         toast.classList.add('translate-y-2', 'opacity-0');
         setTimeout(() => toast.remove(), 300);
@@ -66,7 +64,7 @@ let currentUser = null;
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "3.7.1";
+const APP_VERSION = "3.7.3";
 
 window.toggleListView = UI.toggleListView;
 window.activeView = window.activeView || 'list';
@@ -82,12 +80,12 @@ export async function initApp() {
     const bandParam   = params.get('band');
     const friendParam = params.get('friend');
     const friendName  = params.get('friendName') || 'Friend';
+    const isNewUser   = params.get('new') === 'true';
 
     // 1. Check Supabase auth session
     const { data: { session } } = await supabase.auth.getSession();
 
     if (friendParam && session) {
-        // Viewing a friend's journal — must be authenticated
         currentUser = {
             ...( (await supabase.from('profiles').select('*').eq('id', session.user.id).single()).data || {} ),
             UserName:    decodeURIComponent(friendName),
@@ -97,7 +95,6 @@ export async function initApp() {
             isAuthUser:  true
         };
     } else if (bandParam) {
-        // Band archive — accessible with or without auth
         const { data: bandRow } = await supabase
             .from('bands')
             .select('*')
@@ -113,13 +110,12 @@ export async function initApp() {
             Type:        'Band',
             Subject:     bandRow.subject || bandRow.name,
             id:          session?.user?.id || null,
-            isAuthUser:  !!session   // track whether viewer is logged in for switcher
+            isAuthUser:  !!session
         };
     } else if (!session) {
         window.location.href = 'index.html';
         return;
     } else {
-        // Authenticated personal user
         const { data: profile } = await supabase
             .from('profiles')
             .select('*')
@@ -141,7 +137,7 @@ export async function initApp() {
 
     // 1. Load Data
     const data = await Data.loadAppData(currentUser);
-    window.currentUser = currentUser; // expose for modules that need user context
+    window.currentUser = currentUser;
     window.journalData = data.journalData;
     window.performanceData = data.performanceData;
     window.filteredResults = [...data.journalData];
@@ -153,7 +149,7 @@ export async function initApp() {
 
     // 2. Apply Band Mode / Friend Mode Branding
     if (window.isFriendMode) {
-        document.body.classList.add('band-mode'); // reuse band-mode styles
+        document.body.classList.add('band-mode');
         const topHeader = document.querySelector('header');
         if (topHeader) {
             topHeader.classList.add('bg-indigo-600', 'border-b-2', 'border-black/10');
@@ -174,35 +170,29 @@ export async function initApp() {
 
         const topHeader = document.querySelector('header');
         if (topHeader) {
-            // Do NOT override position — header must stay fixed in both modes
             topHeader.classList.add('bg-[#189BCC]', 'border-b-2', 'border-black/10');
-            // Remove the white/blur default so the band colour shows through cleanly
             topHeader.classList.remove('bg-white/80', 'backdrop-blur-xl');
 
-            // Tint the logo icon to match
             const logoIcon = document.getElementById('header-logo-icon');
             if (logoIcon) {
                 logoIcon.style.backgroundColor = 'rgba(255,255,255,0.2)';
                 logoIcon.style.boxShadow = 'none';
             }
 
-            // Update the merged title to show the band name
             const titleEl = document.getElementById('header-page-title');
             if (titleEl) {
                 titleEl.textContent = window.currentArtist || 'Artist Archive';
                 titleEl.style.color = 'white';
             }
 
-            // Date line in white too
             const dateEl = document.getElementById('header-date-display');
             if (dateEl) dateEl.style.color = 'rgba(255,255,255,0.7)';
 
-            // Style the user badge for the band colour header
             const badge = document.getElementById('userIdentity');
             if (badge) {
                 badge.style.color = 'white';
                 badge.style.backgroundColor = 'rgba(255,255,255,0.2)';
-                badge.innerText = '...'; // placeholder until profile fetch resolves
+                badge.innerText = '...';
             }
         }
     }
@@ -211,19 +201,15 @@ export async function initApp() {
     const versionEl = document.getElementById('app-version-display');
     if (versionEl) versionEl.innerText = APP_VERSION;
 
-    // Resolve the authenticated user's real display name.
-    // In band mode currentUser is the band, so fetch the real profile separately.
     let authDisplayName = 'User';
     if (currentUser.isAuthUser) {
         if (currentUser.Type === 'Band') {
-            // Select only username first — is_admin column may not exist yet
             const { data: authProfile, error: profileErr } = await supabase
                 .from('profiles')
                 .select('username, is_admin')
                 .eq('id', currentUser.id)
                 .single();
             if (profileErr) {
-                // Fallback: try without is_admin in case column not yet added
                 const { data: basicProfile } = await supabase
                     .from('profiles')
                     .select('username')
@@ -241,7 +227,6 @@ export async function initApp() {
             authDisplayName = currentUser.UserName || currentUser.username || 'User';
         }
     }
-    // Expose for switcher and other modules
     window.authDisplayName = authDisplayName;
 
     const identityEl = document.getElementById('userIdentity');
@@ -260,22 +245,15 @@ export async function initApp() {
         }
     }
 
-    // loadVenues is called inside loadAppData and its result stored as window.allVenues.
-    // Alias it here under the name the rest of the app expects.
     window.venueLookup = window.allVenues;
     window.track('app_load', {
         mode:     currentUser.Type,
         is_admin: currentUser.is_admin || false
     });
 
-    // Enforce read-only for non-admin band mode visitors
-    // Admin check relies on is_admin from profiles table — run SQL:
-    //   alter table profiles add column is_admin boolean default false;
-    //   update profiles set is_admin = true where username = 'Rich';
     const isReadOnly = (window.isBandMode && !currentUser?.is_admin) || window.isFriendMode;
     window.isReadOnly = isReadOnly;
     if (isReadOnly) {
-        // Hide edit controls — they'll also be hidden in the gig modal via window.isReadOnly
         document.getElementById('btn-add-show')?.classList.add('hidden');
         document.getElementById('unsaved-banner')?.classList.add('hidden');
     }
@@ -287,28 +265,27 @@ export async function initApp() {
 
     // Load social data FIRST so _following is ready when the switcher panel builds
     if (currentUser?.isAuthUser && (currentUser?.Type === 'Personal' || currentUser?.Type === 'Friend')) {
-        await initSocial(); // populates _following before switcher is built
+        await initSocial();
     }
 
-    initModeSwitcher(); // build the logo dropdown switcher (uses _following)
+    initModeSwitcher();
 
-// New user onboarding — open settings modal pre-focused on setlist.fm sync
-    const isNewUser = new URLSearchParams(window.location.search).get('new') === 'true';
-    if (isNewUser && currentUser?.Type === 'Personal') {
-        setTimeout(() => {
-            window.openSettings();
-            const input = document.getElementById('setlistIdInput');
-            const hint  = document.getElementById('sync-status');
-            if (input) input.focus();
-            if (hint) {
-                hint.textContent = 'Welcome! Enter your setlist.fm username to import your gig history.';
-                hint.className = 'text-[10px] mt-3 leading-relaxed text-indigo-500 font-black not-italic';
-            }
-        }, 600);
+    // ── Onboarding & companion notifications ─────────────────────────────────
+    if (currentUser?.Type === 'Personal') {
+        if (isNewUser) {
+            // New user: run the full onboarding flow (companion claim panel + settings modal).
+            // checkCompanionTags is intentionally skipped here — runOnboarding handles
+            // companion matching for new users via the claim panel, and we don't want
+            // the returning-user banner racing with the claim modal.
+            setTimeout(() => runOnboarding(currentUser), 400);
+        } else {
+            // Returning user: check whether anyone has tagged them in a show since
+            // they last dismissed the notification. Delayed so the page settles first.
+            setTimeout(() => checkCompanionTags(currentUser), 2000);
+        }
     }
 
     // ─── CLASHFINDER PREFILL ──────────────────────────────────────────────────
-    // params is already defined at the top of initApp() — reuse it here
     const prefillType = params.get('prefill');
     if (prefillType === 'festival' && currentUser?.Type === 'Personal') {
         const prefillDate     = params.get('date')     || '';
@@ -349,13 +326,12 @@ function refreshUI() {
     UI.updateCurrentDate();
     UI.updateStats(results);
     UI.updateRank(results);
-    UI.updateFavouriteButton(); // async — fetches fan count and favourite state
+    UI.updateFavouriteButton();
     UI.updateTicker(results);
     UI.renderOTDBanner(results);
     UI.renderCarousel(results);
     UI.renderTable(sortedResults);
 
-    // Chart visibility by mode
     const companionContainer = document.getElementById('companionChartContainer');
     const songContainer = document.getElementById('songChartContainer');
     const topBandsContainer = document.getElementById('topBandsChartContainer');
@@ -383,7 +359,6 @@ function refreshUI() {
 
     Charts.renderYearChart(results, 'dashboardYearChart');
 
-    // Map (only re-render if currently visible)
     const mapContainer = document.getElementById('mapContainer');
     if (mapContainer && !mapContainer.classList.contains('hidden')) {
         UI.renderMap(sortedResults);
@@ -510,7 +485,6 @@ window.switchView = (viewId) => {
 
 // ─── CHART FILTER BRIDGE ──────────────────────────────────────────────────────
 
-// Called by charts.js when a bar is clicked — maps chart clicks to search filters
 window.applyChartFilter = (type, value) => {
     const searchInput = document.getElementById('searchInput');
 
@@ -539,7 +513,6 @@ window.viewGigDetails = (key) => {
     UI.openGigModal(key, window.journalData, window.performanceData);
     if (currentUser?.isAuthUser && !window.isBandMode) {
         setTimeout(() => window.loadGigAttendees(key), 100);
-        // Async — renders archive status button into placeholder span
         const entry = (window.journalData || []).find(g => g['Journal Key'] === key);
         if (entry) setTimeout(() => initArchiveButton(entry), 150);
     }
@@ -568,8 +541,6 @@ window.openSettings = function() {
     modal.classList.remove('hidden');
     modal.setAttribute('aria-hidden', 'false');
 
-    // Settings always relates to the authenticated user, not the archive being viewed.
-    // Only hide personal sections for unauthenticated band archive visitors.
     const isUnauthenticated = !window.currentUser?.isAuthUser;
     const exportSection  = document.getElementById('settings-export-section');
     const setlistSection = document.getElementById('setlistIdInput')?.closest('.bg-slate-50');
@@ -581,7 +552,6 @@ window.openSettings = function() {
     if (friendsSection) friendsSection.classList.toggle('hidden', isUnauthenticated);
     if (privacySection) privacySection.classList.toggle('hidden', isUnauthenticated);
 
-    // Refresh the following list and privacy toggle whenever settings opens
     if (!isUnauthenticated) {
         renderFollowingList?.();
         loadPrivacySetting?.();
@@ -589,7 +559,6 @@ window.openSettings = function() {
 
     document.getElementById('setlistIdInput')?.focus();
 
-    // Wire Enter key on friend search (safe to add multiple times — same handler)
     const friendInput = document.getElementById('friend-search-input');
     if (friendInput && !friendInput._enterWired) {
         friendInput._enterWired = true;
@@ -617,7 +586,6 @@ window.syncSetlistFm = async function() {
         return;
     }
 
-    // UI elements in the settings modal
     const btn        = document.querySelector('[onclick="window.syncSetlistFm()"]');
     const statusEl   = document.getElementById('sync-status');
     const progressEl = document.getElementById('sync-progress');
@@ -640,7 +608,6 @@ window.syncSetlistFm = async function() {
         }
     };
 
-    // Disable button while running
     if (btn) { btn.disabled = true; btn.classList.add('opacity-50', 'cursor-not-allowed'); }
     setProgress(5);
     setStatus('Connecting to setlist.fm\u2026');
@@ -665,11 +632,6 @@ window.syncSetlistFm = async function() {
 
             window.track('setlist_sync_complete', { journalInserted, journalSkipped, newVenues, pages });
 
-            // Show email search tip if sync found nothing
-            if (journalInserted === 0) {
-                handleZeroSyncResult();
-            }
-
             if (journalInserted > 0) {
                 setTimeout(async () => {
                     const data = await Data.loadAppData(currentUser);
@@ -681,9 +643,12 @@ window.syncSetlistFm = async function() {
                 }, 800);
             }
 
-            // If this is a new user (?new=true), trigger the connections banner
-            const isNewUser = new URLSearchParams(window.location.search).get('new') === 'true';
-            if (isNewUser && journalInserted > 0) {
+            if (journalInserted === 0) {
+                handleZeroSyncResult();
+            }
+
+            // Always check for gig overlap after a sync (surface other GigList users at same shows)
+            if (journalInserted > 0) {
                 setTimeout(() => checkGigOverlap(), 1500);
             }
         },
@@ -708,7 +673,6 @@ async function checkGigOverlap() {
     const banner = document.getElementById('connections-banner');
     if (!banner) return;
 
-    // Don't re-show if dismissed this session
     if (sessionStorage.getItem('connections_dismissed')) return;
 
     const { data: myJournals, error: myErr } = await supabase
@@ -729,7 +693,6 @@ async function checkGigOverlap() {
 
     if (matchErr || !matches?.length) return;
 
-    // Group by user_id and count shared shows
     const byUser = new Map();
     for (const row of matches) {
         if (!byUser.has(row.user_id)) byUser.set(row.user_id, { userId: row.user_id, shows: [] });
@@ -791,7 +754,6 @@ window.dismissConnectionsBanner = function() {
 window.track = (event, properties = {}) => {
     const userId = window.currentUser?.id;
     if (!userId) return;
-    // Fire and forget — never blocks UI
     supabase.from('events').insert({ user_id: userId, event, properties })
         .then(({ error }) => { if (error) console.debug('track:', error.message); });
 };
@@ -837,11 +799,10 @@ async function loadPrivacySetting() {
     if (knob) knob.style.transform = isPublic ? 'translateX(1.5rem)' : 'translateX(0)';
 }
 
-let _following = []; // cache: [{id, username}] of users I follow
-let _followers = []; // cache: [{id, username}] of users who follow me
+let _following = [];
+let _followers = [];
 
 async function initSocial() {
-    // Step 1: get raw follow IDs (accepted only for the journal-access list)
     const [followingRes, followersRes, pendingRes, pendingOutboundRes] = await Promise.all([
         supabase.from('follows').select('following_id').eq('follower_id', currentUser.id).eq('status', 'accepted'),
         supabase.from('follows').select('follower_id').eq('following_id', currentUser.id).eq('status', 'accepted'),
@@ -854,7 +815,7 @@ async function initSocial() {
     const pendingOutboundIds = new Set(
         (pendingOutboundRes.data || []).map(r => r.following_id).filter(Boolean)
     );
-    // Step 2: look up usernames from profiles (no join ambiguity)
+
     const [followingProfiles, followerProfiles] = await Promise.all([
         followingIds.length
             ? supabase.from('profiles').select('id, username').in('id', followingIds)
@@ -870,7 +831,6 @@ async function initSocial() {
     window._following = _following;
     window._followers = _followers;
 
-    // Pending requests — people who want to follow me but I haven't accepted yet
     const pendingRequestIds = (pendingRes.data || []).map(r => r.follower_id).filter(Boolean);
     let pendingRequestProfiles = [];
     if (pendingRequestIds.length) {
@@ -879,11 +839,9 @@ async function initSocial() {
     }
     window._pendingRequests = pendingRequestProfiles;
 
-    // Show follow-back prompt for accepted followers I don't follow back
     const followingSet = new Set(_following.map(f => f.id));
     const pendingFollowBack = _followers.filter(f => !followingSet.has(f.id) && !pendingOutboundIds.has(f.id));
 
-    // Filter out any "Not Now" followback dismissals from this session
     const dismissedFollowBacks = new Set(
         JSON.parse(sessionStorage.getItem('followback_dismissed') || '[]')
     );
@@ -932,7 +890,6 @@ async function initSocial() {
         }
     }
 
-    // Populate following list in settings
     renderFollowingList();
     loadPrivacySetting();
 }
@@ -960,7 +917,6 @@ function renderFollowingList() {
     `).join('');
 }
 
-// Search for users by username
 window.searchFriends = async () => {
     const input   = document.getElementById('friend-search-input');
     const results = document.getElementById('friend-search-results');
@@ -1001,7 +957,6 @@ window.searchFriends = async () => {
 };
 
 window.followUser = async (userId, username, btn) => {
-    // Check if target user has a public profile (auto-accept) or private (pending)
     const { data: targetProfile } = await supabase
         .from('profiles')
         .select('is_public')
@@ -1030,9 +985,6 @@ window.followUser = async (userId, username, btn) => {
         }
         window.showToast(msg, 'warning');
         if (error.code === '23505') {
-            // Only add to the local cache if the existing row is actually accepted.
-            // If it's pending (e.g. follow-back on a private profile), don't surface
-            // them in the switcher yet — they'll appear after they accept.
             if (!_following.find(f => f.id === userId)) {
                 const { data: existingFollow } = await supabase
                     .from('follows')
@@ -1047,7 +999,6 @@ window.followUser = async (userId, username, btn) => {
                     renderFollowingList();
                     rebuildSwitcherPanel();
                 }
-                // If pending, the toast already fired above — nothing more to do
             }
         }
         return;
@@ -1056,19 +1007,16 @@ window.followUser = async (userId, username, btn) => {
     window.track('follow_user', { target: username, status: followStatus });
     if (followStatus === 'pending') {
         window.showToast(`Follow request sent to ${username}`, 'info');
-        // Update button to show pending state
         if (btn) {
             const el = btn.tagName === 'BUTTON' ? btn : btn.querySelector('button');
             if (el) el.outerHTML = `<span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Requested</span>`;
         }
-        return; // Don't add to _following yet — not accepted
+        return;
     }
 
-    // Update cache
     _following.push({ id: userId, username });
     window._following = _following;
 
-    // Update button to "Following"
     if (btn) {
         const el = btn.tagName === 'BUTTON' ? btn : btn.querySelector('button');
         if (el) {
@@ -1079,19 +1027,16 @@ window.followUser = async (userId, username, btn) => {
     renderFollowingList();
     rebuildSwitcherPanel();
 
-    // Remove from follow-back banner if present
     const bannerRow = document.querySelector(`[data-user="${userId}"]`);
     bannerRow?.closest('[data-dismiss]')?.remove() ||
     bannerRow?.closest('.flex')?.remove();
 
-    // Update any +follow buttons in the currently open gig modal
     document.querySelectorAll(`button[onclick*="followUser('${userId}"]`).forEach(b => {
         b.outerHTML = `<span class="text-indigo-300 text-[9px] font-black">✓</span>`;
     });
 };
 
 window.unfollowUser = async (userId, username) => {
-    // Show inline confirmation toast instead of blocking confirm()
     const confirmed = await new Promise(resolve => {
         const container = document.getElementById('toast-container');
         if (!container) { resolve(window.confirm('Unfollow ' + username + '?')); return; }
@@ -1127,20 +1072,15 @@ window.acceptFollowRequest = async (userId, username, rowEl) => {
         .eq('following_id', currentUser.id);
     if (error) { window.showToast('Could not accept request', 'error'); return; }
 
-    // Update in-memory caches so the banner doesn't reappear on tab switch.
-    // Move the user from _pendingRequests into _followers.
     window._pendingRequests = (window._pendingRequests || []).filter(f => f.id !== userId);
     if (!_followers.find(f => f.id === userId)) {
         _followers.push({ id: userId, username });
         window._followers = _followers;
     }
-    // Also add to _following if they follow back — they're now a mutual connection
-    // (don't add here — user hasn't chosen to follow back yet)
 
     rowEl?.remove();
     window.showToast(`You're now connected with ${username}`, 'success');
 
-    // Hide banner if no more prompts remain
     const list = document.getElementById('follow-back-list');
     if (list && !list.children.length) {
         document.getElementById('follow-back-banner')?.classList.add('hidden');
@@ -1160,36 +1100,29 @@ window.declineFollowRequest = async (userId, rowEl) => {
     }
 };
 
-// Dismiss a "follow back" prompt for this session without declining the follow.
-// Uses sessionStorage so the prompt returns on next visit.
 window.dismissFollowBack = (userId) => {
     const dismissed = new Set(JSON.parse(sessionStorage.getItem('followback_dismissed') || '[]'));
     dismissed.add(userId);
     sessionStorage.setItem('followback_dismissed', JSON.stringify([...dismissed]));
-    // Remove the row from the DOM
     const row = document.querySelector(`[data-followback="${userId}"]`);
     row?.remove();
-    // Hide banner if nothing left
     const list = document.getElementById('follow-back-list');
     if (list && !list.children.length) {
         document.getElementById('follow-back-banner')?.classList.add('hidden');
     }
 };
 
-// Rebuild the switcher panel after follow state changes
 function rebuildSwitcherPanel() {
     const existing = document.getElementById('mode-switcher-panel');
     if (existing) existing.remove();
     window._switcherPanelBuilt = false;
 }
 
-// Switch to a friend's journal
 window._switchToFriend = (userId, username) => {
     closeSwitcher();
     window.location.href = `vault.html?friend=${userId}&friendName=${encodeURIComponent(username)}`;
 };
 
-// Load GigList attendees for a show — called from openGigModal
 window.loadGigAttendees = async (journalKey) => {
     if (!currentUser?.isAuthUser) return;
 
@@ -1198,7 +1131,6 @@ window.loadGigAttendees = async (journalKey) => {
     const list      = document.getElementById(`modal-giglist-attendees-list-${safeKey}`);
     if (!container || !list) return;
 
-    // Query the show_attendance view (exposes only user_id + journal_key, no private data)
     const { data: attendees, error } = await supabase
         .from('show_attendance')
         .select('user_id')
@@ -1210,7 +1142,6 @@ window.loadGigAttendees = async (journalKey) => {
 
     const otherIds = attendees.map(r => r.user_id);
 
-    // Look up usernames from profiles
     const { data: profiles } = await supabase
         .from('profiles')
         .select('id, username')
@@ -1253,7 +1184,6 @@ window.toggleFavourite = async () => {
     const countEl  = document.getElementById('btn-favourite-count');
     const rankEl   = document.getElementById('stat-rank');
 
-    // Optimistic UI — update immediately, sync with server after
     const wasFavourite = window._isFavourite;
     window._isFavourite = !wasFavourite;
 
@@ -1274,7 +1204,6 @@ window.toggleFavourite = async () => {
         if (icon) icon.style.fill = 'none';
     }
 
-    // Sync with server
     if (wasFavourite) {
         await supabase.from('band_fans').delete()
             .eq('band_name', bandName).eq('user_id', userId);
@@ -1299,25 +1228,22 @@ window.uploadScrapbookPhoto = async (input, journalKey, formattedDate, cleanVenu
         ? `${(window.currentArtist || 'band').toLowerCase().replace(/[^a-z0-9]/g, '-')}/${formattedDate}-${cleanVenue}.jpg`
         : `${userId}/${formattedDate}-${cleanVenue}.jpg`;
 
-    // Show uploading state on the camera button
     const btn = document.getElementById('h-camera-btn');
     const originalHTML = btn?.innerHTML;
     if (btn) btn.innerHTML = `<svg class="w-5 h-5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>`;
 
     try {
-        // Convert to JPEG at reasonable quality to keep file sizes sensible
         const compressed = await compressImage(file, 1920, 0.85);
 
         const { error } = await supabase.storage
             .from(bucket)
             .upload(storagePath, compressed, {
                 contentType: 'image/jpeg',
-                upsert: true   // replace if photo already exists for this show
+                upsert: true
             });
 
         if (error) throw error;
 
-        // Get a signed URL and update the modal image immediately
         const { data: signedData, error: signedError } = isBandMode
             ? await supabase.storage.from('band-photos').getPublicUrl(storagePath)
             : await supabase.storage.from('gig-photos').createSignedUrl(storagePath, 3600);
@@ -1336,7 +1262,6 @@ window.uploadScrapbookPhoto = async (input, journalKey, formattedDate, cleanVenu
             }
         }
 
-        // Restore camera button with a success tick briefly
         if (btn) {
             btn.innerHTML = `<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>`;
             setTimeout(() => { if (btn) btn.innerHTML = originalHTML; if (window.lucide) lucide.createIcons(); }, 2000);
@@ -1349,14 +1274,9 @@ window.uploadScrapbookPhoto = async (input, journalKey, formattedDate, cleanVenu
         window.showToast('Photo upload failed — try again', 'error');
     }
 
-    // Reset the file input so the same file can be re-selected if needed
     input.value = '';
 };
 
-/**
- * Compresses an image file to a JPEG at the given max dimension and quality.
- * Keeps aspect ratio. Returns a Blob.
- */
 async function compressImage(file, maxDimension, quality) {
     return new Promise((resolve) => {
         const img = new Image();
@@ -1399,7 +1319,6 @@ async function initModeSwitcher() {
     logoLink.setAttribute('aria-expanded', 'false');
     logoLink.setAttribute('aria-controls', 'mode-switcher-panel');
 
-    // Make all child elements pass clicks through to the <a>
     logoLink.querySelectorAll('*').forEach(el => el.style.pointerEvents = 'none');
 
     logoLink.addEventListener('click', (e) => {
@@ -1407,7 +1326,6 @@ async function initModeSwitcher() {
         toggleSwitcher();
     });
 
-    // Close on outside click
     document.addEventListener('click', (e) => {
         const panel = document.getElementById('mode-switcher-panel');
         if (panel && !panel.classList.contains('hidden') &&
@@ -1468,7 +1386,6 @@ function buildSwitcherPanel() {
     const isFriend      = currentUser.Type === 'Friend';
     const currentFriend = isFriend ? currentUser.friendId : null;
     const following     = window._following || [];
-    // Section toggle states — start expanded if currently in that mode
     const bandsExpanded     = isBand;
     const followingExpanded = isFriend || (following.length > 0 && !isBand);
 
@@ -1491,7 +1408,7 @@ function buildSwitcherPanel() {
                 ${following.map(f => row(
                     f.username, 'Personal Archive',
                     f.id === currentFriend,
-                    f.id === currentFriend ? '' : `window._switchToFriend('${f.id}', '${f.username.replace(/'/g, "\'")}')`
+                    f.id === currentFriend ? '' : `window._switchToFriend('${f.id}', '${f.username.replace(/'/g, "\\'")}')`
                 )).join('')}
             </div>
         </div>` : ''}
@@ -1538,9 +1455,8 @@ function buildSwitcherPanel() {
         </div>
     `;
 
-    // Insert panel into body as fixed-position element anchored below the logo
     panel.style.position = 'fixed';
-    panel.style.top = '64px'; // height of header — adjust if header height changes
+    panel.style.top = '64px';
     panel.style.left = '12px';
     panel.classList.remove('absolute', 'top-full');
     document.body.appendChild(panel);
@@ -1561,7 +1477,7 @@ window._toggleBandSection = (btn) => {
             chevron.setAttribute('data-lucide', expanding ? 'chevron-up' : 'chevron-down');
             if (window.lucide) lucide.createIcons();
         }
-}
+    }
 };
 
 window._toggleFollowingSection = (btn) => {
@@ -1595,7 +1511,6 @@ window.signOut = async function() {
     window.location.href = 'index.html';
 };
 
-// Keep for backward compatibility — settings modal sign out
 window.browseBandMode = function() {
     window.closeSettings();
     window.location.href = 'index.html?mode=Band';

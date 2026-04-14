@@ -1,60 +1,83 @@
 /**
  * clashfinder-sync.js
- * Handles Supabase persistence for clashfinder picks.
+ * Handles Supabase persistence for clashfinder picks, and loads
+ * event/stage/act data dynamically from the database.
  *
- * Replaces localStorage for priority storage when the user is authenticated.
- * Falls back gracefully to localStorage for unauthenticated visitors so the
- * clashfinder still works without an account.
+ * Falls back gracefully to localStorage for unauthenticated visitors.
  *
- * Usage (from clashfinder.html <script> block):
- *
+ * Usage:
  *   import { initClashfinderSync } from './js/modules/clashfinder-sync.js';
- *
  *   const sync = await initClashfinderSync('slam-dunk-2026');
- *   // sync.priorities  — the live priorities object (same shape as before)
- *   // sync.setPriority(actId, level) — persist a single pick
- *   // sync.loadAll()   — reload all picks from DB
- *   // sync.isAuthed    — boolean
- *   // sync.userId      — uuid | null
- *   // sync.event       — the clashfinder_events row
+ *
+ *   sync.event      — clashfinder_events row
+ *   sync.stages     — clashfinder_stages rows (sorted by sort_order)
+ *   sync.acts       — clashfinder_acts rows (sorted by start_time)
+ *   sync.priorities — live { [act_uuid]: priority } object
+ *   sync.isAuthed   — boolean
+ *   sync.setPriority(actId, level) — persist a single pick
+ *   sync.getArchivePayload() — returns { festival, venue, date, bands[] }
  */
 
 import { supabase } from './supabase.js';
 
-const LS_KEY_PREFIX = 'cf_prio_'; // localStorage fallback key per event
+const LS_KEY_PREFIX = 'cf_prio_';
 
 export async function initClashfinderSync(eventSlug) {
-    // ── Fetch event metadata ──────────────────────────────────────────────────
-    const { data: event, error: evErr } = await supabase
-        .from('clashfinder_events')
-        .select('*')
-        .eq('slug', eventSlug)
-        .single();
 
-    if (evErr || !event) {
-        console.warn('clashfinder-sync: event not found for slug', eventSlug);
-    }
+    // ── 1. Load event + lineup from Supabase ─────────────────────────────────
+    const [eventRes, stagesRes, actsRes] = await Promise.all([
+        supabase
+            .from('clashfinder_events')
+            .select('*')
+            .eq('slug', eventSlug)
+            .single(),
+        supabase
+            .from('clashfinder_stages')
+            .select('*')
+            .eq('event_slug', eventSlug)
+            .order('sort_order'),
+        supabase
+            .from('clashfinder_acts')
+            .select('*')
+            .eq('event_slug', eventSlug)
+            .order('start_time'),
+    ]);
 
-    // ── Auth check ────────────────────────────────────────────────────────────
+    if (eventRes.error)  console.warn('clashfinder-sync: event load failed',  eventRes.error);
+    if (stagesRes.error) console.warn('clashfinder-sync: stages load failed', stagesRes.error);
+    if (actsRes.error)   console.warn('clashfinder-sync: acts load failed',   actsRes.error);
+
+    const event  = eventRes.data  || null;
+    const stages = stagesRes.data || [];
+
+    // Normalise acts: map DB columns → shape the renderer expects
+    const acts = (actsRes.data || []).map(a => ({
+        id:    a.id,                      // UUID — the stable pick key
+        stage: a.stage_id,
+        name:  a.name,
+        start: a.start_time.slice(0, 5),  // 'HH:MM:SS' → 'HH:MM'
+        end:   a.end_time.slice(0, 5),
+    }));
+
+    // ── 2. Auth check ─────────────────────────────────────────────────────────
     const { data: { session } } = await supabase.auth.getSession();
     const isAuthed = !!session;
     const userId   = session?.user?.id || null;
 
-    // ── Load existing picks ───────────────────────────────────────────────────
+    // ── 3. Load existing picks ────────────────────────────────────────────────
     let priorities = {};
 
     if (isAuthed) {
-        const { data: rows, error: loadErr } = await supabase
+        const { data: rows, error } = await supabase
             .from('clashfinder_picks')
             .select('act_id, priority')
             .eq('user_id', userId)
             .eq('event_slug', eventSlug);
 
-        if (!loadErr && rows) {
+        if (!error && rows) {
             rows.forEach(r => { priorities[r.act_id] = r.priority; });
         }
     } else {
-        // Unauthenticated: use localStorage
         try {
             priorities = JSON.parse(localStorage.getItem(LS_KEY_PREFIX + eventSlug) || '{}');
         } catch (_) {
@@ -62,7 +85,7 @@ export async function initClashfinderSync(eventSlug) {
         }
     }
 
-    // ── Persist a single pick ─────────────────────────────────────────────────
+    // ── 4. Persist a single pick ──────────────────────────────────────────────
     async function setPriority(actId, level) {
         if (level === 'none') {
             delete priorities[actId];
@@ -93,63 +116,28 @@ export async function initClashfinderSync(eventSlug) {
         }
     }
 
-    // ── Reload all picks from DB ──────────────────────────────────────────────
-    async function loadAll() {
-        if (!isAuthed) return;
-        const { data: rows } = await supabase
-            .from('clashfinder_picks')
-            .select('act_id, priority')
-            .eq('user_id', userId)
-            .eq('event_slug', eventSlug);
-
-        // Replace in-place so the caller's reference stays valid
-        Object.keys(priorities).forEach(k => delete priorities[k]);
-        (rows || []).forEach(r => { priorities[r.act_id] = r.priority; });
-    }
-
-    // ── Build "add to archive" pre-population data ────────────────────────────
-    /**
-     * Returns the data needed to pre-populate the add-gig modal for post-event
-     * archiving. Caller (clashfinder.html) passes in the full ACTS array so
-     * this module doesn't need to know the lineup.
-     *
-     * @param {Array} allActs - The ACTS array from the clashfinder
-     * @returns {{ festival: string, venue: string, date: string, bands: string[] }}
-     */
-    function getArchivePayload(allActs) {
-        const seenActIds = Object.entries(priorities)
+    // ── 5. Archive payload ────────────────────────────────────────────────────
+    function getArchivePayload() {
+        const seenIds = Object.entries(priorities)
             .filter(([, p]) => p === 'did_see')
             .map(([id]) => id);
 
-        const bands = seenActIds
-            .map(id => allActs.find(a => a.id === id)?.name)
+        const bands = seenIds
+            .map(id => acts.find(a => a.id === id)?.name)
             .filter(Boolean)
             .sort();
 
         return {
-            festival:  event?.name    || eventSlug,
-            venue:     event?.venue   || '',
-            date:      event?.festival_date
-                           ? formatDateForApp(event.festival_date)
-                           : '',
+            festival: event?.name          || eventSlug,
+            venue:    event?.venue         || '',
+            date:     event?.festival_date ? formatDateForApp(event.festival_date) : '',
             bands,
         };
     }
 
-    return {
-        priorities,
-        setPriority,
-        loadAll,
-        getArchivePayload,
-        isAuthed,
-        userId,
-        event,
-    };
+    return { priorities, setPriority, getArchivePayload, isAuthed, userId, event, stages, acts };
 }
 
-/**
- * Convert ISO date (YYYY-MM-DD) to app format (DD/MM/YYYY)
- */
 function formatDateForApp(iso) {
     const [y, m, d] = iso.split('-');
     return `${d}/${m}/${y}`;
