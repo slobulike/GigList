@@ -924,6 +924,8 @@ export const openGigModal = (key, journalData, performanceData) => {
         console.error("No entry found for key:", key);
         return;
     }
+    // --- added as per gemini ---
+    window.currentEditingGig = entry;
 
     const modal = document.getElementById('modal');
     const modalContent = document.getElementById('modal-content');
@@ -938,7 +940,6 @@ export const openGigModal = (key, journalData, performanceData) => {
 
     // Generate the slug
     const scrapbookPath = `assets/scrapbook/${formattedDate}-${cleanVenue}.jpg`;
-
     const artistPath = `assets/artists/${entry.Band.toLowerCase().replace(/ /g, '_')}_stock_photo.jpg`;
     const youtubeLink = `https://www.youtube.com/results?search_query=${encodeURIComponent(`${entry.Band} live ${entry.OfficialVenue} ${entry.Date}`)}`;
 
@@ -1064,6 +1065,11 @@ export const openGigModal = (key, journalData, performanceData) => {
                                 class="bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 text-slate-500 text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
                             <i data-lucide="pencil" class="w-3.5 h-3.5" aria-hidden="true"></i> EDIT
                         </button>
+                                        <button onclick="window.shareGig(window.currentEditingGig)"
+                                                class="flex-1 py-3.5 text-[11px] font-black text-indigo-600 bg-indigo-50 border border-indigo-100 rounded-2xl transition-all active:scale-95 flex items-center justify-center gap-2 uppercase tracking-widest">
+                                            <i data-lucide="share-2" class="w-.5 h-3.5"></i>
+                                            Share
+                                        </button>
                         ${isFestival ? '<span class="bg-amber-400 text-black text-[8px] font-black px-2 py-1 rounded uppercase">Festival</span>' : ''}
                         <span id="modal-archive-btn-wrap-${entry['Journal Key']?.replace(/[^a-z0-9]/gi,'_')}"></span>
                     </div>

@@ -302,26 +302,30 @@ export async function checkCompanionTags(currentUser) {
         .rpc('get_companion_matches', { p_username: username });
 
     if (error) { console.warn('checkCompanionTags:', error.message); return; }
-    if (!matches?.length) return;
 
-    // Only surface matches that:
-    //   (a) the user doesn't already have in their own journal
-    //   (b) haven't been explicitly acknowledged/dismissed before
-    const newMatches = matches.filter(m =>
-        !myKeys.has(m.journal_key) && !acknowledged.has(m.journal_key)
-    );
-
-    if (!newMatches.length) return;
-
-    console.log('companion check', {
+    // Log BEFORE any filtering so we see the raw state
+    console.log('companion check — raw', {
         username,
         matchCount: matches?.length,
         myKeyCount: myKeys.size,
         acknowledgedCount: acknowledged.size,
-        newMatchCount: newMatches?.length,
+        acknowledged: [...acknowledged],
+        myKeys: [...myKeys],
         matches,
-        newMatches
     });
+
+    if (!matches?.length) return;
+
+    const newMatches = matches.filter(m =>
+        !myKeys.has(m.journal_key) && !acknowledged.has(m.journal_key)
+    );
+
+    console.log('companion check — filtered', {
+        newMatchCount: newMatches.length,
+        newMatches,
+    });
+
+    if (!newMatches.length) return;
 
     _renderCompanionTagsBanner(newMatches, currentUser);
     window.track?.('companion_tags_shown', { count: newMatches.length });

@@ -1,9 +1,8 @@
 /**
  * GigList Core Engine
- * v3.7.3 — 2026-04-14
+ * v3.8.0 — 2026-04-14
  * -------------------------------------------------------------------
- * ✅ Moved clashfinder setlist data to the DB
- * ✅ Attempted bug fixes for newly tagged shows
+ * ✅ Added public "show.html" used in the new share feature
  */
 
 import * as Data from './modules/data.js';
@@ -1514,6 +1513,42 @@ window.signOut = async function() {
 window.browseBandMode = function() {
     window.closeSettings();
     window.location.href = 'index.html?mode=Band';
+};
+
+/**
+ * Triggers the native share sheet or copies link to clipboard
+ * @param {Object} gig - The gig object from journalData
+ */
+window.shareGig = async (gig) => {
+    if (!gig) return;
+
+    // Matches your local data key
+    const rawKey = gig['Journal Key'] || gig.JournalKey;
+    const safeKey = btoa(rawKey);
+
+    // Clean slugs for aesthetics
+    const bandName = gig.Band || "Gig";
+    const venueName = gig.OfficialVenue || gig.Venue || "Venue";
+    const prettySlug = `${bandName}-${venueName}`.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-');
+
+    const shareUrl = `${window.location.origin}${window.location.pathname.replace('vault.html', 'show.html')}?k=${safeKey}&s=${prettySlug}`;
+
+    const shareData = {
+        title: `${bandName} at ${venueName}`,
+        text: `Check out this show on GigList!`,
+        url: shareUrl
+    };
+
+    try {
+        if (navigator.share) {
+            await navigator.share(shareData);
+        } else {
+            await navigator.clipboard.writeText(shareUrl);
+            window.showToast("Link copied to clipboard!", "success");
+        }
+    } catch (err) {
+        if (err.name !== 'AbortError') console.error("Share failed:", err);
+    }
 };
 
 // ─── DATA CONTROLS ────────────────────────────────────────────────────────────
