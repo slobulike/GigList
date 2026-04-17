@@ -1,10 +1,8 @@
 /**
  * GigList Core Engine
- * v3.8.1 — 2026-04-15
+ * v3.8.2 — 2026-04-17
  * -------------------------------------------------------------------
- * ✅ Tightened RLS for anon profile (used in share function)
- * ✅ Added spotify link to gig modal
- * ✅ Made "On this day" banner clickable to load gig
+ * ✅ Bug fixes to  setlist retrieval and saving in gig modal
  */
 
 import * as Data from './modules/data.js';
@@ -65,7 +63,7 @@ let currentUser = null;
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "3.8.1";
+const APP_VERSION = "3.8.2";
 
 window.toggleListView = UI.toggleListView;
 window.activeView = window.activeView || 'list';

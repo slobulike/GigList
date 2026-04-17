@@ -112,6 +112,18 @@ function buildSetlistFmUrl(params) {
         return { url: `${SETLISTFM_BASE}/search/artists?artistName=${encodeURIComponent(name)}&sort=relevance&p=${page}` };
     }
 
+    if (endpoint === "find-show") {
+      const mbid = params.get("mbid");
+      const eventDate = params.get("eventDate"); // Use the official API name here
+      const page = params.get("p") || "1";
+
+      if (!mbid || !eventDate) return { error: "Missing mbid or eventDate" };
+
+      const targetUrl = `${SETLISTFM_BASE}/search/setlists?artistMbid=${encodeURIComponent(mbid)}&date=${eventDate}&p=${page}`;
+
+      return { url: targetUrl };
+    }
+
     return { error: `Unknown endpoint: "${endpoint}". Valid values: user-setlists, artist-setlists, artist-search, venue` };
 }
 

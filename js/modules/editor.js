@@ -259,34 +259,93 @@ async function lookupMbid(artistName) {
 }
 
 /**
- * Fetch setlists for an MBID and return those matching the given UK date (DD/MM/YYYY).
- * Checks up to 3 pages (newest-first feed) with an early-exit once we pass the date.
+ * Fetch the setlist for a specific MBID + date using the find-show endpoint,
+ * which passes `date=DD-MM-YYYY` to setlist.fm's search/setlists API.
+ * Returns the first matching setlist object, or null if not found.
+ *
+ * dateUK is DD/MM/YYYY (GigList format) — converted to DD-MM-YYYY for the API.
  */
 async function lookupSetlistsByDate(mbid, dateUK) {
-    const [d, m, y] = dateUK.split('/');
-    const targetFm  = `${d}-${m}-${y}`; // setlist.fm format: DD-MM-YYYY
+    const fmDate = dateUK.replace(/\//g, '-'); // DD/MM/YYYY → DD-MM-YYYY
 
-    const matches = [];
-    for (let page = 1; page <= 3; page++) {
-        const url = `${WORKER_URL}/?endpoint=artist-setlists&mbid=${encodeURIComponent(mbid)}&page=${page}`;
-        const res = await fetch(url);
-        if (!res.ok || res.status === 404) break;
-        const data = await res.json();
-        const setlists = data?.setlist || [];
-        if (!setlists.length) break;
+    const url = `${WORKER_URL}/?endpoint=find-show&mbid=${encodeURIComponent(mbid)}&eventDate=${fmDate}`;
+    const res = await fetch(url);
 
-        for (const sl of setlists) {
-            if (sl.eventDate === targetFm) matches.push(sl);
-        }
+    if (res.status === 404) return null; // no show found for this date — expected
+    if (res.status === 429) throw new Error('rate_limited');
+    if (!res.ok) return null;
 
-        // Feed is newest-first; once the last item on this page predates the
-        // target we won't find anything further in.
-        const lastDate = setlists[setlists.length - 1]?.eventDate;
-        if (lastDate && lastDate < targetFm) break;
+    const data = await res.json();
+    return (data.setlist || [])[0] || null;
+}
 
-        await new Promise(r => setTimeout(r, 400));
+/**
+ * Returns an array of Date objects for the start date plus the next
+ * (windowDays - 1) days, to cover multi-day festivals where the journal
+ * entry only records the first day.
+ */
+function festivalDateWindow(dateStr, windowDays = 3) {
+    const [d, m, y] = dateStr.split('/').map(Number);
+    const base = new Date(y, m - 1, d);
+    const dates = [];
+    for (let i = 0; i < windowDays; i++) {
+        const dt = new Date(base);
+        dt.setDate(base.getDate() + i);
+        const dd = String(dt.getDate()).padStart(2, '0');
+        const mm = String(dt.getMonth() + 1).padStart(2, '0');
+        const yyyy = dt.getFullYear();
+        dates.push(`${dd}/${mm}/${yyyy}`);
     }
-    return matches;
+    return dates;
+}
+
+/**
+ * For a festival show: parse the lineup string, look up each band on
+ * setlist.fm using the date-filtered find-show endpoint, and return all
+ * setlist objects found.
+ *
+ * Because the journal entry only records the festival start date, we check
+ * a 3-day window for each band (start date + 2 following days) and take the
+ * first match. This handles multi-day festivals where different acts play on
+ * different days.
+ *
+ * Returns an array of raw setlist objects, one per band that was found.
+ */
+async function lookupFestivalSetlists(lineupStr, dateStr) {
+    const bands = lineupStr
+        .split('/')
+        .map(b => b.trim())
+        .filter(Boolean);
+
+    const dateWindow = festivalDateWindow(dateStr, 3);
+    const allMatches = [];
+
+    for (const bandName of bands) {
+        try {
+            const mbid = await lookupMbid(bandName);
+            if (!mbid) continue;
+
+            // Polite delay between MBID lookup and first setlist fetch
+            await new Promise(r => setTimeout(r, 1100));
+
+            // Try each date in the window until we find a match
+            let match = null;
+            for (const tryDate of dateWindow) {
+                match = await lookupSetlistsByDate(mbid, tryDate);
+                if (match) break;
+                // Polite delay between date attempts
+                await new Promise(r => setTimeout(r, 1100));
+            }
+
+            if (match) allMatches.push(match);
+        } catch (e) {
+            console.warn(`Festival setlist lookup failed for ${bandName}:`, e.message);
+        }
+        // Polite delay between bands
+        await new Promise(r => setTimeout(r, 1100));
+    }
+
+    return allMatches;
 }
 
 /**
@@ -355,277 +414,181 @@ function showSetlistConfirmation(setlists) {
 // ─── SAVE ─────────────────────────────────────────────────────────────────────
 
 window.saveGig = async () => {
-    const dateStr    = fromInputDate(_get('editor-date').trim());
-    const band       = _get('editor-band').trim();
-    const venue      = _get('editor-venue').trim();
+    // Helper to get values
+    const _get = (id) => document.getElementById(id)?.value || '';
 
-    // Basic validation
+    const dateStr = fromInputDate(_get('editor-date').trim());
+    const band = _get('editor-band').trim();
+    const venue = _get('editor-venue').trim();
+
+    // 1. Validation
     if (!dateStr || !band || !venue) {
         _showError('Date, Artist and Venue are required.');
         return;
     }
 
-    // Validate date format DD/MM/YYYY
-    const dateParts = dateStr.split('/');
-    if (dateParts.length !== 3 || dateParts[2].length !== 4) {
-        _showError('Date must be in DD/MM/YYYY format.');
-        return;
-    }
-
     const journalKey = buildJournalKey(dateStr, venue);
-    const isFest     = document.getElementById('editor-festival')?.checked ? 'Y' : 'N';
-    const [d, m, y]  = dateParts;
+    const isFest = document.getElementById('editor-festival')?.checked ? 'Y' : 'N';
+    const [d, m, y] = dateStr.split('/');
 
-    const gigRow = {
-        'Date':              dateStr,
-        'Band':              band,
-        'OfficialVenue':     venue,
-        'Venue':             venue,
-        'Journal Key':       journalKey,
-        'Festival?':         isFest,
-        'Festival Lineups':  _get('editor-lineups').trim(),
-        'Notable Support':   _get('editor-support').trim(),
-        'Went With':         _get('editor-went-with').trim(),
-        'Comments':          _get('editor-comments').trim(),
-        'Price':             _get('editor-price').trim(),
-        'Photos':            _get('editor-photos').trim(),
-        'Review URL':        _get('editor-review').trim(),
-        'Year':              y,
-        'Month':             m,
-        'Day':               d,
-        // safeKey is used in table onClick attributes — pre-escape apostrophes
-        'safeKey':           journalKey.replace(/'/g, "\\'").replace(/"/g, '&quot;'),
-    };
-
-    const journal = window.journalData || [];
-
-    if (editingKey) {
-        const idx = journal.findIndex(
-            g => (g['Journal Key'] || '').toString().trim() === editingKey.toString().trim()
-        );
-        if (idx !== -1) {
-            journal[idx] = { ...journal[idx], ...gigRow };
-        } else {
-            journal.push(gigRow);
-        }
-    } else {
-        journal.push(gigRow); // duplicate check happens via Supabase insert below
-    }
-
-    // ── Write to Supabase (primary store) ────────────────────────────────────
+    // 2. Auth Check
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
-        _showError('You must be signed in to save a show.');
+        _showError('You must be signed in to save.');
         return;
     }
 
-    // In band mode, admin writes to band journal (user_id = null)
-    // In personal mode, writes to user's own journal
     const isBandWrite = window.isBandMode && window.currentUser?.is_admin;
     const writeUserId = isBandWrite ? null : session.user.id;
 
     const supabaseRow = {
-        user_id:           writeUserId,
-        journal_key:       journalKey,
-        date:              dateStr,
-        band:              isBandWrite ? (window.currentArtist || band) : band,
-        official_venue:    venue,
-        venue:             venue,
-        festival:          isFest === 'Y',
-        festival_lineups:  _get('editor-lineups').trim(),
-        notable_support:   _get('editor-support').trim(),
-        went_with:         _get('editor-went-with').trim(),
-        comments:          isBandWrite ? 'Historical Artist Entry' : _get('editor-comments').trim(),
-        price:             _get('editor-price').trim(),
-        photos:            _get('editor-photos').trim(),
-        review_url:        _get('editor-review').trim(),
+        user_id: writeUserId,
+        journal_key: journalKey,
+        date: dateStr,
+        band: isBandWrite ? (window.currentArtist || band) : band,
+        official_venue: venue,
+        venue: venue,
+        festival: isFest === 'Y',
+        festival_lineups: _get('editor-lineups').trim(),
+        notable_support: _get('editor-support').trim(),
+        went_with: _get('editor-went-with').trim(),
+        comments: isBandWrite ? 'Historical Artist Entry' : _get('editor-comments').trim(),
+        price: _get('editor-price').trim(),
+        photos: _get('editor-photos').trim(),
+        review_url: _get('editor-review').trim(),
     };
 
-    let dbError = null;
-    if (editingKey) {
-        // ── Edit path ─────────────────────────────────────────────────────────
-        // .is() only works for NULL / boolean literals — use .eq() for real UUIDs
-        const { error } = writeUserId === null
-            ? await supabase
-                .from('journals')
-                .update(supabaseRow)
-                .is('user_id', null)
-                .eq('journal_key', editingKey)
-            : await supabase
-                .from('journals')
-                .update(supabaseRow)
-                .eq('user_id', writeUserId)
-                .eq('journal_key', editingKey);
-        dbError = error;
+    try {
+        console.log("Saving to Supabase...");
 
-        if (dbError) {
-            if (dbError.code === '23505') {
-                _showError('A show already exists with this date and venue.');
-            } else {
-                _showError(`Save failed: ${dbError.message}`);
-            }
-            return;
-        }
-// ── Sync festival lineup changes into performances table ──────────────
-        if (isFest === 'Y') {
-            const newLineup = _get('editor-lineups').trim();
-            if (newLineup) {
-                const newActs = newLineup.split('/').map(s => s.trim()).filter(Boolean);
-
-                // Fetch existing performance rows for this journal_key
-                const { data: existingPerfs } = await supabase
-                    .from('performances')
-                    .select('artist')
-                    .eq('journal_key', editingKey);
-
-                const existingArtists = new Set(
-                    (existingPerfs || []).map(p => p.artist.toLowerCase())
-                );
-                const newActsLower = new Set(newActs.map(a => a.toLowerCase()));
-
-                // Acts to add — in new lineup but not in performances
-                const toInsert = newActs
-                    .filter(act => !existingArtists.has(act.toLowerCase()))
-                    .map((act, i) => ({
-                        journal_key:    editingKey,
-                        artist:         act,
-                        role:           i === 0 && existingArtists.size === 0 ? 'Headline' : 'Support',
-                        setlist:        null,
-                        tour:           null,
-                        setlist_url:    null,
-                        official_venue: venue,
-                        date:           dateStr,
-                        year:           y,
-                        month:          m,
-                        day:            d,
-                    }));
-
-                // Acts to remove — in performances but not in new lineup
-                const toRemove = (existingPerfs || [])
-                    .map(p => p.artist)
-                    .filter(artist => !newActsLower.has(artist.toLowerCase()));
-
-                // Insert new acts
-                if (toInsert.length > 0) {
-                    const { error: perfError } = await supabase
-                        .from('performances')
-                        .insert(toInsert);
-                    if (perfError) console.warn('performances insert failed:', perfError.message);
-                }
-
-                // Delete removed acts
-                if (toRemove.length > 0) {
-                    const { error: delError } = await supabase
-                        .from('performances')
-                        .delete()
-                        .eq('journal_key', editingKey)
-                        .in('artist', toRemove);
-                    if (delError) console.warn('performances delete failed:', delError.message);
-                }
-
-                // Propagate updated lineup string to all other users' journal
-                // rows for this show if anything changed
-                if (toInsert.length > 0 || toRemove.length > 0) {
-                    await supabase
-                        .from('journals')
-                        .update({ festival_lineups: newLineup })
-                        .eq('journal_key', editingKey)
-                        .neq('user_id', writeUserId === null
-                            ? '00000000-0000-0000-0000-000000000000'
-                            : writeUserId);
-                }
-            }
-        }
-
-    } else {
-        // ── New show path: write journal first, then try setlist.fm lookup ───
-
-        const { error: insertError } = await supabase
+        // 3. Save Journal Entry (Upsert handles both New and Edit)
+        const { error: dbError } = await supabase
             .from('journals')
-            .insert(supabaseRow);
+            .upsert(supabaseRow, { onConflict: 'journal_key, user_id' });
 
-        if (insertError) {
-            if (insertError.code === '23505') {
-                _showError('A show already exists with this date and venue.');
-            } else {
-                _showError(`Save failed: ${insertError.message}`);
-            }
-            return;
-        }
+        if (dbError) throw dbError;
 
-        // Don't run setlist.fm lookup for band archive writes
+        // 4. Trigger Setlist Lookup (personal users only, not band archive writes)
         if (!isBandWrite) {
-            // Show a subtle searching indicator on the save button
             const saveBtn = document.querySelector('#editor-modal button[onclick="saveGig()"]');
             const origLabel = saveBtn?.textContent;
-            if (saveBtn) saveBtn.textContent = 'Searching setlist.fm…';
 
             try {
-                const mbid     = await lookupMbid(band);
-                const matches  = mbid ? await lookupSetlistsByDate(mbid, dateStr) : [];
-
-                if (saveBtn && origLabel) saveBtn.textContent = origLabel;
-
-                if (matches.length > 0) {
-                    // Let the user confirm which show is theirs
-                    const chosen = await showSetlistConfirmation(matches);
-
-                    if (chosen) {
-                        // ── Confirmed: enrich with full setlist.fm data ───────
-                        const grouped = groupByShow([chosen]);
-                        const perfRows  = [];
-                        const venueRows = [];
-
-                        for (const show of grouped.values()) {
-                            perfRows.push(...show.performances);
-                            venueRows.push(buildVenueRow(show.venueRaw));
+                if (isFest === 'Y') {
+                    // ── Festival path ──────────────────────────────────────────
+                    const lineups = _get('editor-lineups').trim();
+                    if (lineups) {
+                        if (saveBtn) saveBtn.textContent = 'Searching Lineup...';
+                        const matches = await lookupFestivalSetlists(lineups, dateStr);
+                        if (matches.length > 0) {
+                            const grouped = groupByShow(matches);
+                            const perfRows = [];
+                            const venueRows = [];
+                            for (const show of grouped.values()) {
+                                // Each band's setlist may have its own eventDate (different
+                                // day of a multi-day festival). Rewrite the journal_key on
+                                // every performance row to match the festival journal entry,
+                                // which is keyed to the start date + venue the user entered.
+                                // Without this, performances are orphaned under band-specific
+                                // keys that no journal row points to.
+                                const fixedPerfs = show.performances.map(p => ({
+                                    ...p,
+                                    journal_key:    journalKey,
+                                    official_venue: venue,
+                                }));
+                                perfRows.push(...fixedPerfs);
+                                venueRows.push(buildVenueRow(show.venueRaw));
+                            }
+                            await Promise.all([upsertVenues(venueRows), upsertPerformances(perfRows)]);
                         }
-
-                        await Promise.all([
-                            upsertVenues(venueRows),
-                            upsertPerformances(perfRows),
-                        ]);
-                    }
-                    // If chosen === null the user said "none of these" — fall
-                    // through to pending_venues below just like a no-match case.
-                    if (!chosen) {
-                        await _submitPendingVenue({ session, journalKey, band, dateStr, venue });
                     }
                 } else {
-                    // ── No match on setlist.fm: queue venue for admin review ──
-                    await _submitPendingVenue({ session, journalKey, band, dateStr, venue });
+                    // ── Single artist path ─────────────────────────────────────
+                    if (saveBtn) saveBtn.textContent = 'Searching setlist.fm...';
+
+                    try {
+                        // Step 1: Get MBID
+                        const searchUrl = `${WORKER_URL}/?endpoint=artist-search&name=${encodeURIComponent(band)}`;
+                        const artistRes = await fetch(searchUrl);
+                        const artistData = await artistRes.json();
+                        const mbid = artistData.artist?.[0]?.mbid;
+
+                        if (!mbid) {
+                            // No MBID found — queue for admin review, but don't
+                            // return early; fall through to UI update below.
+                            await _submitPendingVenue({ session, journalKey, band, dateStr, venue });
+                        } else {
+                            // Step 2: Polite delay before second API call
+                            console.log("MBID found. Waiting for API cooldown...");
+                            await new Promise(resolve => setTimeout(resolve, 1100));
+
+                            // Step 3: Date-filtered setlist lookup via find-show
+                            // workerDate is DD-MM-YYYY — the format find-show passes
+                            // to setlist.fm's `date` parameter.
+                            const workerDate = dateStr.replace(/\//g, '-');
+                            const setlistUrl = `${WORKER_URL}/?endpoint=find-show&mbid=${mbid}&eventDate=${workerDate}`;
+                            const setlistRes = await fetch(setlistUrl);
+
+                            if (setlistRes.status === 429) {
+                                throw new Error("Setlist.fm rate limit reached. Please wait a moment and try again.");
+                            }
+
+                            if (setlistRes.status === 404) {
+                                // setlist.fm has no record of this show — queue for review
+                                await _submitPendingVenue({ session, journalKey, band, dateStr, venue });
+                            } else if (setlistRes.ok) {
+                                const data = await setlistRes.json();
+                                // find-show returns results filtered by date so just take [0]
+                                const matchingSetlist = (data.setlist || [])[0];
+
+                                if (matchingSetlist) {
+                                    const grouped = groupByShow([matchingSetlist]);
+                                    const perfRows = [];
+                                    const venueRows = [];
+                                    for (const show of grouped.values()) {
+                                        perfRows.push(...show.performances);
+                                        venueRows.push(buildVenueRow(show.venueRaw));
+                                    }
+                                    await Promise.all([upsertVenues(venueRows), upsertPerformances(perfRows)]);
+                                } else {
+                                    await _submitPendingVenue({ session, journalKey, band, dateStr, venue });
+                                }
+                            }
+                        }
+                    } catch (err) {
+                        console.error("Setlist lookup failed:", err);
+                        window.showToast?.(err.message, 'error');
+                    }
                 }
             } catch (lookupErr) {
-                // setlist.fm lookup is best-effort — don't block the save
-                console.warn('setlist.fm lookup failed:', lookupErr.message);
-                if (saveBtn && origLabel) saveBtn.textContent = origLabel;
-                await _submitPendingVenue({ session, journalKey, band, dateStr, venue });
+                console.warn('Setlist lookup background process failed:', lookupErr);
+            } finally {
+                if (saveBtn) saveBtn.textContent = origLabel;
             }
         }
+
+        // 5. Update Local State and UI
+        if (window.refreshData) {
+            await window.refreshData();
+        } else {
+            // Manual local update if refreshData isn't available
+            const gigRow = { ...supabaseRow, 'Journal Key': journalKey, 'Band': band, 'Date': dateStr };
+            if (editingKey) {
+                const idx = window.journalData.findIndex(g => g['Journal Key'] === editingKey);
+                if (idx !== -1) window.journalData[idx] = gigRow;
+            } else {
+                window.journalData.push(gigRow);
+            }
+        }
+
+        closeEditorModal();
+        if (window.showToast) window.showToast('Show Saved ✓', 'success');
+        if (window.refreshUI) window.refreshUI();
+
+    } catch (err) {
+        console.error('Final Save Error:', err);
+        _showError(err.message || 'Could not save show.');
     }
-    // ─────────────────────────────────────────────────────────────────────────
-
-    // Update in-memory data so UI reflects change without a full reload
-    window.journalData = journal;
-    closeEditorModal();
-    const action = editingKey ? 'show_updated' : 'show_added';
-    window.track?.(action, { band, venue, is_band_mode: !!window.isBandMode });
-    if (window.showToast) window.showToast(
-        editingKey ? 'Show updated ✓' : 'Show added ✓',
-        'success'
-    );
-
-    // If the saved show is in the future, make sure the upcoming toggle is on
-    // so the user can immediately see the show they just added
-    const savedDate = parseDate(dateStr);
-    const now = new Date(); now.setHours(0, 0, 0, 0);
-    if (savedDate && savedDate >= now) {
-        const toggle = document.getElementById('upcoming-toggle');
-        if (toggle && !toggle.checked) toggle.checked = true;
-    }
-
-    // Refresh the UI so the new/edited gig appears immediately
-    if (window.refreshUI) window.refreshUI();
 };
 
 // ─── PENDING VENUE SUBMIT ─────────────────────────────────────────────────────
