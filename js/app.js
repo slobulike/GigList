@@ -1,8 +1,10 @@
 /**
  * GigList Core Engine
- * v3.8.2 — 2026-04-17
+ * v3.9.0 — 2026-04-19
  * -------------------------------------------------------------------
- * ✅ Bug fixes to  setlist retrieval and saving in gig modal
+ * ✅ Extracted social logic into js/modules/social.js
+ * ✅ Extracted switcher logic into js/modules/switcher.js
+ * ✅ Migrated from follows to buddies table
  */
 
 import * as Data from './modules/data.js';
@@ -19,6 +21,8 @@ import { initEditor, exportCSV } from './modules/editor.js';
 import { supabase } from './modules/supabase.js';
 import { runSetlistSync } from './modules/setlist-sync.js';
 import { runOnboarding, checkCompanionTags, handleZeroSyncResult } from './modules/onboarding.js';
+import { initSocial, checkGigOverlap, rebuildSwitcherPanel } from './modules/social.js';
+import { initModeSwitcher } from './modules/switcher.js';
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
@@ -63,7 +67,7 @@ let currentUser = null;
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "3.8.2";
+const APP_VERSION = "3.9.0";
 
 window.toggleListView = UI.toggleListView;
 window.activeView = window.activeView || 'list';
@@ -264,10 +268,10 @@ export async function initApp() {
 
     // Load social data FIRST so _following is ready when the switcher panel builds
     if (currentUser?.isAuthUser && (currentUser?.Type === 'Personal' || currentUser?.Type === 'Friend')) {
-        await initSocial();
+        await initSocial(currentUser);
     }
 
-    initModeSwitcher();
+    initModeSwitcher(currentUser);
 
     // ── Onboarding & companion notifications ─────────────────────────────────
     if (currentUser?.Type === 'Personal') {
@@ -552,8 +556,7 @@ window.openSettings = function() {
     if (privacySection) privacySection.classList.toggle('hidden', isUnauthenticated);
 
     if (!isUnauthenticated) {
-        renderFollowingList?.();
-        loadPrivacySetting?.();
+        // Social state (buddy list, privacy) is initialised by initSocial() on load
     }
 
     document.getElementById('setlistIdInput')?.focus();
@@ -648,7 +651,7 @@ window.syncSetlistFm = async function() {
 
             // Always check for gig overlap after a sync (surface other GigList users at same shows)
             if (journalInserted > 0) {
-                setTimeout(() => checkGigOverlap(), 1500);
+                setTimeout(() => checkGigOverlap(currentUser), 1500);
             }
         },
 
@@ -662,91 +665,8 @@ window.syncSetlistFm = async function() {
     });
 };
 
-// ─── SOCIAL / FRIENDS ────────────────────────────────────────────────────────
-
-// ─── GIG OVERLAP / CONNECTIONS BANNER ────────────────────────────────────────
-
-async function checkGigOverlap() {
-    if (!currentUser?.isAuthUser || currentUser?.Type !== 'Personal') return;
-
-    const banner = document.getElementById('connections-banner');
-    if (!banner) return;
-
-    if (sessionStorage.getItem('connections_dismissed')) return;
-
-    const { data: myJournals, error: myErr } = await supabase
-        .from('journals')
-        .select('journal_key')
-        .eq('user_id', currentUser.id);
-
-    if (myErr || !myJournals?.length) return;
-
-    const myKeys = myJournals.map(j => j.journal_key);
-
-    const { data: matches, error: matchErr } = await supabase
-        .from('journals')
-        .select('user_id, journal_key, band, official_venue, date')
-        .in('journal_key', myKeys)
-        .neq('user_id', currentUser.id)
-        .not('user_id', 'is', null);
-
-    if (matchErr || !matches?.length) return;
-
-    const byUser = new Map();
-    for (const row of matches) {
-        if (!byUser.has(row.user_id)) byUser.set(row.user_id, { userId: row.user_id, shows: [] });
-        byUser.get(row.user_id).shows.push(row);
-    }
-    if (!byUser.size) return;
-
-    const { data: profiles } = await supabase
-        .from('profiles')
-        .select('id, username')
-        .in('id', [...byUser.keys()]);
-
-    if (!profiles?.length) return;
-
-    const connections = profiles.map(p => ({
-        ...p,
-        shows: byUser.get(p.id)?.shows || [],
-        count: byUser.get(p.id)?.shows.length || 0,
-    })).sort((a, b) => b.count - a.count);
-
-    const followingSet = new Set((window._following || []).map(f => f.id));
-    const list = document.getElementById('connections-list');
-    if (!list) return;
-
-    list.innerHTML = connections.map(c => {
-        const alreadyFollowing = followingSet.has(c.id);
-        const ex = c.shows[0];
-        const example = ex ? ex.band + ' at ' + ex.official_venue : '';
-        return `
-        <div class="flex items-start justify-between gap-3" data-user-id="${c.id}">
-            <div class="flex-1 min-w-0">
-                <p class="text-sm font-black text-indigo-900">${c.username}</p>
-                <p class="text-[10px] text-indigo-500 mt-0.5">
-                    ${c.count} show${c.count !== 1 ? 's' : ''} in common${example ? ' &mdash; incl. ' + example : ''}
-                </p>
-            </div>
-            ${alreadyFollowing
-                ? '<span class="text-[10px] font-black text-emerald-600 uppercase tracking-widest flex-shrink-0 pt-0.5">Following</span>'
-                : `<button onclick="window.followUser('${c.id}', '${c.username}', this.closest('[data-user-id]'))"
-                          class="flex-shrink-0 bg-indigo-600 text-white text-[10px] font-black px-3 py-1.5 rounded-full hover:bg-indigo-700 transition-all active:scale-95 uppercase tracking-widest">
-                       Follow
-                   </button>`
-            }
-        </div>`;
-    }).join('');
-
-    banner.classList.remove('hidden');
-    window.track('connections_banner_shown', { count: connections.length });
-}
-
-window.dismissConnectionsBanner = function() {
-    document.getElementById('connections-banner')?.classList.add('hidden');
-    sessionStorage.setItem('connections_dismissed', '1');
-    window.track('connections_banner_dismissed');
-};
+// ─── GIG OVERLAP ─────────────────────────────────────────────────────────────
+// Moved to js/modules/social.js
 
 // ─── ANALYTICS ───────────────────────────────────────────────────────────────
 
@@ -757,414 +677,11 @@ window.track = (event, properties = {}) => {
         .then(({ error }) => { if (error) console.debug('track:', error.message); });
 };
 
-// ─── PRIVACY TOGGLE ──────────────────────────────────────────────────────────
+// ─── SOCIAL / SWITCHER ───────────────────────────────────────────────────────
+// Moved to js/modules/social.js and js/modules/switcher.js
 
-window.togglePrivacy = async () => {
-    const btn   = document.getElementById('privacy-toggle');
-    const knob  = document.getElementById('privacy-knob');
-    const isNowPublic = btn?.getAttribute('aria-checked') !== 'true';
 
-    const { error } = await supabase
-        .from('profiles')
-        .update({ is_public: isNowPublic })
-        .eq('id', currentUser.id);
 
-    if (error) { window.showToast('Could not update privacy setting', 'error'); return; }
-
-    btn?.setAttribute('aria-checked', String(isNowPublic));
-    if (btn)  btn.classList.toggle('bg-indigo-600', isNowPublic);
-    if (btn)  btn.classList.toggle('bg-slate-200',  !isNowPublic);
-    if (knob) knob.style.transform = isNowPublic ? 'translateX(1.5rem)' : 'translateX(0)';
-
-    window.showToast(
-        isNowPublic ? 'Profile set to public — anyone can follow you' : 'Profile set to private — follows need your approval',
-        'info', 4000
-    );
-};
-
-async function loadPrivacySetting() {
-    const { data } = await supabase
-        .from('profiles')
-        .select('is_public')
-        .eq('id', currentUser.id)
-        .single();
-
-    const isPublic = data?.is_public || false;
-    const btn  = document.getElementById('privacy-toggle');
-    const knob = document.getElementById('privacy-knob');
-    if (btn)  btn.setAttribute('aria-checked', String(isPublic));
-    if (btn)  btn.classList.toggle('bg-indigo-600', isPublic);
-    if (btn)  btn.classList.toggle('bg-slate-200',  !isPublic);
-    if (knob) knob.style.transform = isPublic ? 'translateX(1.5rem)' : 'translateX(0)';
-}
-
-let _following = [];
-let _followers = [];
-
-async function initSocial() {
-    const [followingRes, followersRes, pendingRes, pendingOutboundRes] = await Promise.all([
-        supabase.from('follows').select('following_id').eq('follower_id', currentUser.id).eq('status', 'accepted'),
-        supabase.from('follows').select('follower_id').eq('following_id', currentUser.id).eq('status', 'accepted'),
-        supabase.from('follows').select('follower_id').eq('following_id', currentUser.id).eq('status', 'pending'),
-        supabase.from('follows').select('following_id').eq('follower_id', currentUser.id).eq('status', 'pending')
-    ]);
-
-    const followingIds = (followingRes.data || []).map(r => r.following_id).filter(Boolean);
-    const followerIds  = (followersRes.data || []).map(r => r.follower_id).filter(Boolean);
-    const pendingOutboundIds = new Set(
-        (pendingOutboundRes.data || []).map(r => r.following_id).filter(Boolean)
-    );
-
-    const [followingProfiles, followerProfiles] = await Promise.all([
-        followingIds.length
-            ? supabase.from('profiles').select('id, username').in('id', followingIds)
-            : Promise.resolve({ data: [] }),
-        followerIds.length
-            ? supabase.from('profiles').select('id, username').in('id', followerIds)
-            : Promise.resolve({ data: [] })
-    ]);
-
-    _following = (followingProfiles.data || []).map(r => ({ id: r.id, username: r.username }));
-    _followers = (followerProfiles.data  || []).map(r => ({ id: r.id, username: r.username }));
-
-    window._following = _following;
-    window._followers = _followers;
-
-    const pendingRequestIds = (pendingRes.data || []).map(r => r.follower_id).filter(Boolean);
-    let pendingRequestProfiles = [];
-    if (pendingRequestIds.length) {
-        const { data: pp } = await supabase.from('profiles').select('id, username').in('id', pendingRequestIds);
-        pendingRequestProfiles = pp || [];
-    }
-    window._pendingRequests = pendingRequestProfiles;
-
-    const followingSet = new Set(_following.map(f => f.id));
-    const pendingFollowBack = _followers.filter(f => !followingSet.has(f.id) && !pendingOutboundIds.has(f.id));
-
-    const dismissedFollowBacks = new Set(
-        JSON.parse(sessionStorage.getItem('followback_dismissed') || '[]')
-    );
-
-    const allPrompts = [
-        ...pendingRequestProfiles.map(f => ({ ...f, type: 'request' })),
-        ...pendingFollowBack
-            .filter(f => !dismissedFollowBacks.has(f.id))
-            .map(f => ({ ...f, type: 'followback' }))
-    ];
-
-    if (allPrompts.length > 0) {
-        const banner = document.getElementById('follow-back-banner');
-        const list   = document.getElementById('follow-back-list');
-        if (banner && list) {
-            list.innerHTML = allPrompts.map(f => f.type === 'request' ? `
-                <div class="flex items-center justify-between gap-3">
-                    <span class="text-sm font-black text-indigo-900">${f.username} wants to follow you</span>
-                    <div class="flex gap-2 flex-shrink-0">
-                        <button onclick="window.acceptFollowRequest('${f.id}', '${f.username}', this.closest('.flex'))"
-                                class="bg-indigo-600 text-white text-[10px] font-black px-3 py-1.5 rounded-full hover:bg-indigo-700 transition-all active:scale-95 uppercase tracking-widest">
-                            Accept
-                        </button>
-                        <button onclick="window.declineFollowRequest('${f.id}', this.closest('.flex'))"
-                                class="text-slate-400 text-[10px] font-black px-3 py-1.5 rounded-full hover:text-slate-600 transition-colors uppercase tracking-widest">
-                            Decline
-                        </button>
-                    </div>
-                </div>` : `
-                <div class="flex items-center justify-between gap-3" data-followback="${f.id}">
-                    <span class="text-sm font-black text-indigo-900">${f.username} is following you</span>
-                    <div class="flex gap-2 flex-shrink-0">
-                        <button onclick="window.followUser('${f.id}', '${f.username}', this.closest('div[data-user]'))"
-                                data-user="${f.id}"
-                                class="bg-indigo-600 text-white text-[10px] font-black px-3 py-1.5 rounded-full hover:bg-indigo-700 transition-all active:scale-95 uppercase tracking-widest">
-                            Follow Back
-                        </button>
-                        <button onclick="window.dismissFollowBack('${f.id}')"
-                                class="text-slate-400 text-[10px] font-black px-3 py-1.5 rounded-full hover:text-slate-600 transition-colors uppercase tracking-widest">
-                            Not Now
-                        </button>
-                    </div>
-                </div>
-            `).join('');
-            banner.classList.remove('hidden');
-        }
-    }
-
-    renderFollowingList();
-    loadPrivacySetting();
-}
-
-function renderFollowingList() {
-    const container = document.getElementById('following-users');
-    if (!container) return;
-
-    if (_following.length === 0) {
-        container.innerHTML = '<p class="text-xs text-slate-400 italic">Not following anyone yet — search above to find friends.</p>';
-        return;
-    }
-
-    container.innerHTML = _following.map(f => `
-        <div class="flex items-center justify-between gap-2">
-            <button onclick="window._switchToFriend('${f.id}', '${f.username}')"
-                    class="text-sm font-black text-slate-700 hover:text-indigo-600 transition-colors text-left">
-                ${f.username}
-            </button>
-            <button onclick="window.unfollowUser('${f.id}', '${f.username}')"
-                    class="text-[10px] font-bold text-slate-400 hover:text-red-500 transition-colors uppercase tracking-widest">
-                Unfollow
-            </button>
-        </div>
-    `).join('');
-}
-
-window.searchFriends = async () => {
-    const input   = document.getElementById('friend-search-input');
-    const results = document.getElementById('friend-search-results');
-    const q       = input?.value.trim();
-    if (!q || !results) return;
-
-    results.innerHTML = '<p class="text-xs text-slate-400 italic">Searching…</p>';
-    results.classList.remove('hidden');
-
-    const { data, error } = await supabase
-        .from('profiles')
-        .select('id, username')
-        .ilike('username', `%${q}%`)
-        .neq('id', currentUser.id)
-        .limit(8);
-
-    if (error || !data?.length) {
-        results.innerHTML = '<p class="text-xs text-slate-400 italic">No users found.</p>';
-        return;
-    }
-
-    const followingIds = new Set(_following.map(f => f.id));
-
-    results.innerHTML = data.map(u => {
-        const isFollowing = followingIds.has(u.id);
-        return `
-        <div class="flex items-center justify-between gap-2 py-1">
-            <span class="text-sm font-black text-slate-700">${u.username}</span>
-            ${isFollowing
-                ? `<span class="text-[10px] font-bold text-indigo-400 uppercase tracking-widest">Following</span>`
-                : `<button onclick="window.followUser('${u.id}', '${u.username}', this)"
-                          class="bg-indigo-600 text-white text-[10px] font-black px-3 py-1.5 rounded-full hover:bg-indigo-700 transition-all active:scale-95 uppercase tracking-widest">
-                       Follow
-                   </button>`
-            }
-        </div>`;
-    }).join('');
-};
-
-window.followUser = async (userId, username, btn) => {
-    const { data: targetProfile } = await supabase
-        .from('profiles')
-        .select('is_public')
-        .eq('id', userId)
-        .single();
-
-    const followStatus = targetProfile?.is_public ? 'accepted' : 'pending';
-
-    const { error } = await supabase.from('follows').insert({
-        follower_id:  currentUser.id,
-        following_id: userId,
-        status:       followStatus
-    });
-    if (error) {
-        let msg = `Couldn't follow ${username} — try again`;
-        if (error.code === '23505') {
-            const { data: existingFollow } = await supabase
-                .from('follows')
-                .select('status')
-                .eq('follower_id', currentUser.id)
-                .eq('following_id', userId)
-                .single();
-            msg = existingFollow?.status === 'pending'
-                ? `${username} needs to approve your follow request`
-                : `You're already following ${username}`;
-        }
-        window.showToast(msg, 'warning');
-        if (error.code === '23505') {
-            if (!_following.find(f => f.id === userId)) {
-                const { data: existingFollow } = await supabase
-                    .from('follows')
-                    .select('status')
-                    .eq('follower_id', currentUser.id)
-                    .eq('following_id', userId)
-                    .single();
-
-                if (existingFollow?.status === 'accepted') {
-                    _following.push({ id: userId, username });
-                    window._following = _following;
-                    renderFollowingList();
-                    rebuildSwitcherPanel();
-                }
-            }
-        }
-        return;
-    }
-
-    window.track('follow_user', { target: username, status: followStatus });
-    if (followStatus === 'pending') {
-        window.showToast(`Follow request sent to ${username}`, 'info');
-        if (btn) {
-            const el = btn.tagName === 'BUTTON' ? btn : btn.querySelector('button');
-            if (el) el.outerHTML = `<span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Requested</span>`;
-        }
-        return;
-    }
-
-    _following.push({ id: userId, username });
-    window._following = _following;
-
-    if (btn) {
-        const el = btn.tagName === 'BUTTON' ? btn : btn.querySelector('button');
-        if (el) {
-            el.outerHTML = `<span class="text-[10px] font-bold text-indigo-400 uppercase tracking-widest">Following</span>`;
-        }
-    }
-
-    renderFollowingList();
-    rebuildSwitcherPanel();
-
-    const bannerRow = document.querySelector(`[data-user="${userId}"]`);
-    bannerRow?.closest('[data-dismiss]')?.remove() ||
-    bannerRow?.closest('.flex')?.remove();
-
-    document.querySelectorAll(`button[onclick*="followUser('${userId}"]`).forEach(b => {
-        b.outerHTML = `<span class="text-indigo-300 text-[9px] font-black">✓</span>`;
-    });
-};
-
-window.unfollowUser = async (userId, username) => {
-    const confirmed = await new Promise(resolve => {
-        const container = document.getElementById('toast-container');
-        if (!container) { resolve(window.confirm('Unfollow ' + username + '?')); return; }
-        const toast = document.createElement('div');
-        toast.className = 'pointer-events-auto flex items-center gap-3 bg-white border border-slate-200 shadow-xl px-5 py-3 rounded-2xl text-sm font-bold text-slate-700 max-w-xs';
-        const yesId = 'toast-yes-' + Date.now();
-        const noId  = 'toast-no-'  + Date.now();
-        toast.innerHTML =
-            '<span class="flex-1">Unfollow <strong>' + username + '</strong>?</span>' +
-            '<button id="' + yesId + '" class="bg-red-500 text-white px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-red-600 transition-colors">Yes</button>' +
-            '<button id="' + noId  + '" class="bg-slate-100 text-slate-600 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-colors">No</button>';
-        container.appendChild(toast);
-        document.getElementById(yesId).onclick = () => { toast.remove(); resolve(true); };
-        document.getElementById(noId).onclick  = () => { toast.remove(); resolve(false); };
-    });
-    if (!confirmed) return;
-    const { error } = await supabase.from('follows')
-        .delete()
-        .eq('follower_id', currentUser.id)
-        .eq('following_id', userId);
-    if (error) { window.showToast(`Couldn't unfollow ${username} — try again`, 'error'); return; }
-
-    _following = _following.filter(f => f.id !== userId);
-    window._following = _following;
-    renderFollowingList();
-    rebuildSwitcherPanel();
-};
-
-window.acceptFollowRequest = async (userId, username, rowEl) => {
-    const { error } = await supabase.from('follows')
-        .update({ status: 'accepted' })
-        .eq('follower_id', userId)
-        .eq('following_id', currentUser.id);
-    if (error) { window.showToast('Could not accept request', 'error'); return; }
-
-    window._pendingRequests = (window._pendingRequests || []).filter(f => f.id !== userId);
-    if (!_followers.find(f => f.id === userId)) {
-        _followers.push({ id: userId, username });
-        window._followers = _followers;
-    }
-
-    rowEl?.remove();
-    window.showToast(`You're now connected with ${username}`, 'success');
-
-    const list = document.getElementById('follow-back-list');
-    if (list && !list.children.length) {
-        document.getElementById('follow-back-banner')?.classList.add('hidden');
-    }
-};
-
-window.declineFollowRequest = async (userId, rowEl) => {
-    const { error } = await supabase.from('follows')
-        .delete()
-        .eq('follower_id', userId)
-        .eq('following_id', currentUser.id);
-    if (error) { window.showToast('Could not decline request', 'error'); return; }
-    rowEl?.remove();
-    const list = document.getElementById('follow-back-list');
-    if (list && !list.children.length) {
-        document.getElementById('follow-back-banner')?.classList.add('hidden');
-    }
-};
-
-window.dismissFollowBack = (userId) => {
-    const dismissed = new Set(JSON.parse(sessionStorage.getItem('followback_dismissed') || '[]'));
-    dismissed.add(userId);
-    sessionStorage.setItem('followback_dismissed', JSON.stringify([...dismissed]));
-    const row = document.querySelector(`[data-followback="${userId}"]`);
-    row?.remove();
-    const list = document.getElementById('follow-back-list');
-    if (list && !list.children.length) {
-        document.getElementById('follow-back-banner')?.classList.add('hidden');
-    }
-};
-
-function rebuildSwitcherPanel() {
-    const existing = document.getElementById('mode-switcher-panel');
-    if (existing) existing.remove();
-    window._switcherPanelBuilt = false;
-}
-
-window._switchToFriend = (userId, username) => {
-    closeSwitcher();
-    window.location.href = `vault.html?friend=${userId}&friendName=${encodeURIComponent(username)}`;
-};
-
-window.loadGigAttendees = async (journalKey) => {
-    if (!currentUser?.isAuthUser) return;
-
-    const safeKey   = journalKey.replace(/[^a-z0-9]/gi, '_');
-    const container = document.getElementById(`modal-giglist-attendees-${safeKey}`);
-    const list      = document.getElementById(`modal-giglist-attendees-list-${safeKey}`);
-    if (!container || !list) return;
-
-    const { data: attendees, error } = await supabase
-        .from('show_attendance')
-        .select('user_id')
-        .eq('journal_key', journalKey)
-        .neq('user_id', currentUser.id);
-
-    if (error) { console.warn('loadGigAttendees:', error.message); return; }
-    if (!attendees?.length) return;
-
-    const otherIds = attendees.map(r => r.user_id);
-
-    const { data: profiles } = await supabase
-        .from('profiles')
-        .select('id, username')
-        .in('id', otherIds);
-
-    if (!profiles?.length) return;
-
-    const followingIds = new Set((_following || []).map(f => f.id));
-
-    list.innerHTML = profiles.map(p => {
-        const isFollowing = followingIds.has(p.id);
-        return `
-            <span class="inline-flex items-center gap-1.5 bg-indigo-50 border border-indigo-200 text-indigo-700 text-[9px] px-2 py-1 rounded-md font-black uppercase tracking-wider">
-                <i data-lucide="music" class="w-2.5 h-2.5" aria-hidden="true"></i>
-                ${p.username}
-                ${!isFollowing
-                    ? `<button onclick="window.followUser('${p.id}', '${p.username}', this)" class="ml-0.5 text-indigo-400 hover:text-indigo-700 font-black transition-colors">+follow</button>`
-                    : ''}
-            </span>`;
-    }).join('');
-
-    container.classList.remove('hidden');
-    if (window.lucide) lucide.createIcons();
-};
 
 // ─── BAND FAVOURITE TOGGLE ────────────────────────────────────────────────────
 
@@ -1302,207 +819,8 @@ async function compressImage(file, maxDimension, quality) {
     });
 }
 
-async function initModeSwitcher() {
-    if (!currentUser?.isAuthUser) return;
-
-    const { data: bands } = await supabase.from('bands').select('name, rank').order('rank');
-    window._switcherBands = bands || [];
-
-    const logoLink = document.getElementById('header-logo-link');
-    if (!logoLink) return;
-
-    logoLink.removeAttribute('href');
-    logoLink.style.cursor = 'pointer';
-    logoLink.setAttribute('role', 'button');
-    logoLink.setAttribute('aria-label', 'Switch mode');
-    logoLink.setAttribute('aria-expanded', 'false');
-    logoLink.setAttribute('aria-controls', 'mode-switcher-panel');
-
-    logoLink.querySelectorAll('*').forEach(el => el.style.pointerEvents = 'none');
-
-    logoLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        toggleSwitcher();
-    });
-
-    document.addEventListener('click', (e) => {
-        const panel = document.getElementById('mode-switcher-panel');
-        if (panel && !panel.classList.contains('hidden') &&
-            !panel.contains(e.target) && !logoLink.contains(e.target)) {
-            closeSwitcher();
-        }
-    });
-}
-
-function toggleSwitcher() {
-    const panel = document.getElementById('mode-switcher-panel');
-    if (!panel) { buildSwitcherPanel(); return; }
-    if (panel.classList.contains('hidden')) {
-        openSwitcher();
-    } else {
-        closeSwitcher();
-    }
-}
-
-function openSwitcher() {
-    let panel = document.getElementById('mode-switcher-panel');
-    if (!panel) panel = buildSwitcherPanel();
-    panel.classList.remove('hidden');
-    document.getElementById('header-logo-link')?.setAttribute('aria-expanded', 'true');
-    if (window.lucide) lucide.createIcons();
-}
-
-function closeSwitcher() {
-    const panel = document.getElementById('mode-switcher-panel');
-    if (panel) panel.classList.add('hidden');
-    document.getElementById('header-logo-link')?.setAttribute('aria-expanded', 'false');
-}
-
-function buildSwitcherPanel() {
-    const isPersonal  = currentUser.Type === 'Personal';
-    const isBand      = currentUser.Type === 'Band';
-    const bands       = window._switcherBands || [];
-    const currentBand = isBand ? currentUser.UserName : null;
-
-    const panel = document.createElement('div');
-    panel.id        = 'mode-switcher-panel';
-    panel.className = 'absolute top-full left-0 mt-2 w-64 bg-white rounded-[1.5rem] shadow-2xl border border-slate-100 overflow-hidden z-[200]';
-    panel.setAttribute('role', 'menu');
-    panel.setAttribute('aria-label', 'Switch mode');
-
-    const row = (label, sublabel, active, onclick, icon = 'check') => `
-        <button onclick="${onclick}" role="menuitem"
-                class="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-colors ${active ? 'opacity-50 cursor-default pointer-events-none' : ''}">
-            <span class="w-5 flex-shrink-0 flex items-center justify-center">
-                ${active ? `<i data-lucide="${icon}" class="w-4 h-4 text-indigo-600"></i>` : ''}
-            </span>
-            <span class="flex-1 min-w-0">
-                <span class="block text-sm font-black text-slate-900 truncate">${label}</span>
-                ${sublabel ? `<span class="block text-[10px] text-slate-400 font-bold uppercase tracking-widest">${sublabel}</span>` : ''}
-            </span>
-        </button>`;
-
-    const isFriend      = currentUser.Type === 'Friend';
-    const currentFriend = isFriend ? currentUser.friendId : null;
-    const following     = window._following || [];
-    const bandsExpanded     = isBand;
-    const followingExpanded = isFriend || (following.length > 0 && !isBand);
-
-    panel.innerHTML = `
-        ${row(isFriend ? 'My Gig List' : (window.authDisplayName || 'My Gig List'),
-              'Personal Archive',
-              isPersonal,
-              isPersonal ? '' : "window._switchToPersonal()")}
-
-        ${following.length > 0 ? `
-        <div class="border-t border-slate-100">
-            <button onclick="window._toggleFollowingSection(this)" role="menuitem"
-                    class="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-colors"
-                    aria-expanded="${followingExpanded}" aria-controls="switcher-following-list">
-                <span class="w-5 flex-shrink-0"></span>
-                <span class="flex-1 text-sm font-black text-slate-900">Following</span>
-                <i data-lucide="chevron-${followingExpanded ? 'up' : 'down'}" class="w-4 h-4 text-slate-400 pointer-events-none" aria-hidden="true"></i>
-            </button>
-            <div id="switcher-following-list" class="${followingExpanded ? '' : 'hidden'} bg-slate-50/50">
-                ${following.map(f => row(
-                    f.username, 'Personal Archive',
-                    f.id === currentFriend,
-                    f.id === currentFriend ? '' : `window._switchToFriend('${f.id}', '${f.username.replace(/'/g, "\\'")}')`
-                )).join('')}
-            </div>
-        </div>` : ''}
-
-        <div class="border-t border-slate-100">
-            <button onclick="window._toggleBandSection(this)" role="menuitem"
-                    class="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-colors"
-                    aria-expanded="${bandsExpanded}" aria-controls="switcher-band-list">
-                <span class="w-5 flex-shrink-0"></span>
-                <span class="flex-1 text-sm font-black text-slate-900">Band Archives</span>
-                <i data-lucide="chevron-${bandsExpanded ? 'up' : 'down'}" class="w-4 h-4 text-slate-400 pointer-events-none" aria-hidden="true"></i>
-            </button>
-            <div id="switcher-band-list" class="${bandsExpanded ? '' : 'hidden'} bg-slate-50/50">
-                ${bands.map(b => row(
-                    b.name, 'Band Archive',
-                    currentBand === b.name,
-                    `window._switchToBand('${b.name.replace(/'/g, "\\'")}')`
-                )).join('')}
-                ${bands.length === 0 ? '<p class="px-4 py-3 text-xs text-slate-400">No band archives yet.</p>' : ''}
-            </div>
-        </div>
-
-        <div class="border-t border-slate-100">
-            <button onclick="window.location.href='clashfinder.html'" role="menuitem"
-                    class="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-colors">
-                <span class="w-5 flex-shrink-0 flex items-center justify-center">
-                    <i data-lucide="calendar-clock" class="w-4 h-4 text-indigo-400"></i>
-                </span>
-                <span class="flex-1 min-w-0">
-                    <span class="block text-sm font-black text-slate-900">Clashfinder</span>
-                    <span class="block text-[10px] text-slate-400 font-bold uppercase tracking-widest">Slam Dunk 2026</span>
-                </span>
-            </button>
-        </div>
-
-        <div class="border-t border-slate-100">
-            <button onclick="window.signOut()" role="menuitem"
-                    class="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-red-50 transition-colors group">
-                <span class="w-5 flex-shrink-0 flex items-center justify-center">
-                    <i data-lucide="log-out" class="w-4 h-4 text-slate-400 group-hover:text-red-500"></i>
-                </span>
-                <span class="text-sm font-black text-slate-500 group-hover:text-red-600">Sign Out</span>
-            </button>
-        </div>
-    `;
-
-    panel.style.position = 'fixed';
-    panel.style.top = '64px';
-    panel.style.left = '12px';
-    panel.classList.remove('absolute', 'top-full');
-    document.body.appendChild(panel);
-
-    if (window.lucide) lucide.createIcons();
-    return panel;
-}
-
-window._toggleBandSection = (btn) => {
-    const list = document.getElementById('switcher-band-list');
-    if (!list) return;
-    const expanding = list.classList.contains('hidden');
-    list.classList.toggle('hidden');
-    if (btn) {
-        btn.setAttribute('aria-expanded', expanding ? 'true' : 'false');
-        const chevron = btn.querySelector('[data-lucide^="chevron"]');
-        if (chevron) {
-            chevron.setAttribute('data-lucide', expanding ? 'chevron-up' : 'chevron-down');
-            if (window.lucide) lucide.createIcons();
-        }
-    }
-};
-
-window._toggleFollowingSection = (btn) => {
-    const list = document.getElementById('switcher-following-list');
-    if (!list) return;
-    const expanding = list.classList.contains('hidden');
-    list.classList.toggle('hidden');
-    if (btn) {
-        btn.setAttribute('aria-expanded', expanding ? 'true' : 'false');
-        const chevron = btn.querySelector('[data-lucide^="chevron"]');
-        if (chevron) {
-            chevron.setAttribute('data-lucide', expanding ? 'chevron-up' : 'chevron-down');
-            if (window.lucide) lucide.createIcons();
-        }
-    }
-};
-
-window._switchToPersonal = () => {
-    closeSwitcher();
-    window.location.href = 'vault.html';
-};
-
-window._switchToBand = (bandName) => {
-    closeSwitcher();
-    window.location.href = `vault.html?band=${encodeURIComponent(bandName)}`;
-};
+// ─── MODE SWITCHER ───────────────────────────────────────────────────────────
+// Moved to js/modules/switcher.js
 
 window.signOut = async function() {
     window.track('sign_out');
