@@ -510,3 +510,42 @@ window.loadGigAttendees = async (journalKey) => {
     container.classList.remove('hidden');
     if (window.lucide) lucide.createIcons();
 };
+
+// ─── LEGACY COMPANION RESOLUTION ─────────────────────────────────────────────
+
+/**
+ * On sign-in, promote any gig_companions rows where companion_name matches
+ * this user's display_name (case-insensitive) from 'legacy' to 'confirmed'.
+ * This fires once per session — silent, no UI impact if nothing matches.
+ */
+export async function resolveCompanionTags(user) {
+    if (!user?.id || !user?.display_name) return;
+
+    const { data: matches, error } = await supabase
+        .from('gig_companions')
+        .select('id')
+        .ilike('companion_name', user.display_name)
+        .eq('status', 'legacy')
+        .neq('owner_id', user.id); // don't match self-tags
+
+    if (error) { console.warn('resolveCompanionTags:', error.message); return; }
+    if (!matches?.length) return;
+
+    const ids = matches.map(r => r.id);
+
+    const { error: updateError } = await supabase
+        .from('gig_companions')
+        .update({
+            companion_user_id: user.id,
+            status: 'confirmed',
+            updated_at: new Date().toISOString(),
+        })
+        .in('id', ids);
+
+    if (updateError) {
+        console.warn('resolveCompanionTags update:', updateError.message);
+        return;
+    }
+
+    console.log(`resolveCompanionTags: promoted ${ids.length} legacy companion row(s) for ${user.display_name}`);
+}

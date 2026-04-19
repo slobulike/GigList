@@ -20,6 +20,8 @@ const WORKER_URL = 'https://setlistfm-proxy.richard-lipscombe.workers.dev';
 
 let isDirty = false;   // true when in-memory data differs from last-loaded CSV
 let editingKey = null; // Journal Key of the gig being edited, null for new gig
+// Companion selector state — array of { name, userId, status, avatarUrl }
+let _companions = [];
 
 // ─── DIRTY-STATE TRACKING ────────────────────────────────────────────────────
 
@@ -200,7 +202,10 @@ const renderEditorModal = (entry) => {
     _val('editor-date',       toInputDate(entry.Date || ''));
     _val('editor-band',       entry.Band       || '');
     _val('editor-venue',      entry.OfficialVenue || '');
-    _val('editor-went-with',  entry['Went With'] || '');
+// Companions loaded async after modal opens — see _loadCompanionsForModal
+    _companions = [];
+    _renderCompanionPills();
+    setTimeout(() => _loadCompanionsForModal(entry), 0);
     _val('editor-support',    entry['Notable Support'] || '');
     _val('editor-lineups',    entry['Festival Lineups'] || '');
     _val('editor-comments',   entry.Comments   || '');
@@ -451,7 +456,7 @@ window.saveGig = async () => {
         festival: isFest === 'Y',
         festival_lineups: _get('editor-lineups').trim(),
         notable_support: _get('editor-support').trim(),
-        went_with: _get('editor-went-with').trim(),
+        went_with: _companions.map(c => c.name).join(' / '),
         comments: isBandWrite ? 'Historical Artist Entry' : _get('editor-comments').trim(),
         price: _get('editor-price').trim(),
         photos: _get('editor-photos').trim(),
@@ -467,6 +472,21 @@ window.saveGig = async () => {
             .upsert(supabaseRow, { onConflict: 'journal_key, user_id' });
 
         if (dbError) throw dbError;
+
+        // 4a. Save companions to gig_companions
+        if (!isBandWrite && _companions.length > 0) {
+            // Re-fetch the journal row to get its id
+            const { data: journalRow } = await supabase
+                .from('journals')
+                .select('id')
+                .eq('journal_key', journalKey)
+                .eq('user_id', session.user.id)
+                .single();
+
+            if (journalRow?.id) {
+                await _saveCompanions(journalRow.id, session.user.id);
+            }
+        }
 
         // 4. Trigger Setlist Lookup (personal users only, not band archive writes)
         if (!isBandWrite) {
@@ -556,8 +576,10 @@ window.saveGig = async () => {
                             }
                         }
                     } catch (err) {
-                        console.error("Setlist lookup failed:", err);
-                        window.showToast?.(err.message, 'error');
+                        console.error('Final Save Error:', err);
+                        _showError(err.message || 'Could not save show.');
+                    } finally {
+                        setSaveBtnLabel(saveBtnOrigLabel || 'Save Show', false);
                     }
                 }
             } catch (lookupErr) {
@@ -567,23 +589,53 @@ window.saveGig = async () => {
             }
         }
 
-        // 5. Update Local State and UI
-        if (window.refreshData) {
-            await window.refreshData();
-        } else {
-            // Manual local update if refreshData isn't available
-            const gigRow = { ...supabaseRow, 'Journal Key': journalKey, 'Band': band, 'Date': dateStr };
-            if (editingKey) {
-                const idx = window.journalData.findIndex(g => g['Journal Key'] === editingKey);
-                if (idx !== -1) window.journalData[idx] = gigRow;
-            } else {
-                window.journalData.push(gigRow);
-            }
-        }
+       // 5. Update local journalData in memory with CSV-format keys
+       const gigRow = {
+           'Journal Key':      journalKey,
+           'Date':             dateStr,
+           'Band':             supabaseRow.band,
+           'OfficialVenue':    supabaseRow.official_venue,
+           'Venue':            supabaseRow.venue,
+           'Went With':        supabaseRow.went_with,
+           'Notable Support':  supabaseRow.notable_support,
+           'Festival?':        isFest,
+           'Festival Lineups': supabaseRow.festival_lineups,
+           'Comments':         supabaseRow.comments,
+           'Price':            supabaseRow.price,
+           'Photos':           supabaseRow.photos,
+           'Review URL':       supabaseRow.review_url,
+           // Enrichment fields normally set by loadAppData
+           safeKey:            journalKey.replace(/'/g, "\\'").replace(/"/g, "&quot;"),
+           type:               'past',
+           // Snake_case mirrors
+           journal_key:        journalKey,
+           official_venue:     supabaseRow.official_venue,
+           band:               supabaseRow.band,
+           date:               dateStr,
+       };
 
-        closeEditorModal();
-        if (window.showToast) window.showToast('Show Saved ✓', 'success');
-        if (window.refreshUI) window.refreshUI();
+       if (editingKey) {
+           const idx = (window.journalData || []).findIndex(g =>
+               (g['Journal Key'] || '').toString().trim() === editingKey.toString().trim()
+           );
+           if (idx !== -1) {
+               window.journalData[idx] = gigRow;
+           } else {
+               // Key changed (venue/date edited) — remove old, add new
+               window.journalData = (window.journalData || []).filter(
+                   g => (g['Journal Key'] || '').toString().trim() !== editingKey.toString().trim()
+               );
+               window.journalData.push(gigRow);
+           }
+       } else {
+           (window.journalData = window.journalData || []).push(gigRow);
+       }
+
+       window.filteredResults = [...window.journalData];
+
+       closeEditorModal();
+       if (window.showToast) window.showToast('Show Saved ✓', 'success');
+       if (window.refreshUI) window.refreshUI();
 
     } catch (err) {
         console.error('Final Save Error:', err);
@@ -701,6 +753,17 @@ window.deleteGig = async () => {
 
     const isBandWrite = window.isBandMode && window.currentUser?.is_admin;
 
+    // ── Save button feedback ──────────────────────────────────────────────────────
+    const saveBtn = document.querySelector('#editor-modal button[onclick="saveGig()"]');
+    const saveBtnOrigLabel = saveBtn?.textContent;
+    const setSaveBtnLabel = (label, disabled = true) => {
+        if (!saveBtn) return;
+        saveBtn.textContent = label;
+        saveBtn.disabled = disabled;
+        saveBtn.classList.toggle('opacity-50', disabled);
+    };
+    setSaveBtnLabel('Saving…');
+
     let dbError;
     if (isBandWrite) {
         const { error } = await supabase
@@ -753,12 +816,378 @@ const _showError = (msg) => {
     }
 };
 
+// ─── COMPANION SELECTOR ───────────────────────────────────────────────────────
+
+/**
+ * Renders the current _companions array as pills in #companion-pills.
+ */
+function _renderCompanionPills() {
+    const container = document.getElementById('companion-pills');
+    if (!container) return;
+
+    container.innerHTML = _companions.map((c, i) => {
+        const colours = {
+            confirmed: 'bg-emerald-50 border-emerald-200 text-emerald-800',
+            legacy:    'bg-slate-100 border-slate-200 text-slate-700',
+            pending:   'bg-amber-50 border-amber-200 text-amber-800',
+        };
+        const cls = colours[c.status] || colours.legacy;
+        const initial = (c.name || '?')[0].toUpperCase();
+
+        // Share button for legacy (unmatched) companions
+        const shareBtn = c.status === 'legacy'
+            ? `<button type="button"
+                       data-share="${i}"
+                       title="Invite ${c.name} to GigList"
+                       class="ml-0.5 text-slate-400 hover:text-indigo-500 transition-colors">
+                   <i data-lucide="share-2" class="w-3 h-3 inline-block"></i>
+               </button>`
+            : '';
+
+        const statusDot = c.status === 'confirmed'
+            ? `<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0"></span>`
+            : c.status === 'pending'
+            ? `<span class="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0"></span>`
+            : '';
+
+        return `<span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-bold ${cls}">
+            <span class="w-5 h-5 rounded-full bg-white/60 flex items-center justify-center text-[10px] font-black flex-shrink-0">${initial}</span>
+            ${statusDot}
+            ${c.name}
+            ${shareBtn}
+            <button type="button"
+                    data-remove="${i}"
+                    aria-label="Remove ${c.name}"
+                    class="ml-0.5 opacity-50 hover:opacity-100 transition-opacity">
+                <i data-lucide="x" class="w-3 h-3 inline-block"></i>
+            </button>
+        </span>`;
+    }).join('');
+
+    // Wire remove buttons
+    container.querySelectorAll('[data-remove]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            _companions.splice(parseInt(btn.dataset.remove), 1);
+            _renderCompanionPills();
+        });
+    });
+
+    // Wire share buttons
+    container.querySelectorAll('[data-share]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const companion = _companions[parseInt(btn.dataset.share)];
+            if (!companion) return;
+            _shareInvite(companion.name);
+        });
+    });
+
+    if (window.lucide) lucide.createIcons();
+}
+
+/**
+ * Loads companions for the modal.
+ * Edit mode: reads from gig_companions for this journal entry.
+ * New gig with prefill (e.g. festival): parses legacy went_with string.
+ */
+async function _loadCompanionsForModal(entry) {
+    // Edit mode — load from gig_companions
+    if (entry.id) {
+        const { data: rows } = await supabase
+            .from('gig_companions')
+            .select('*')
+            .eq('journal_id', entry.id)
+            .eq('owner_id', (await supabase.auth.getSession()).data.session?.user?.id);
+
+        if (rows?.length) {
+            _companions = rows.map(r => ({
+                name:      r.companion_name,
+                userId:    r.companion_user_id || null,
+                status:    r.status || 'legacy',
+                avatarUrl: null,
+            }));
+            _renderCompanionPills();
+            return;
+        }
+    }
+
+    // New gig or no gig_companions rows yet — fall back to went_with free text
+    const wentWith = entry['Went With'] || entry.went_with || '';
+    if (wentWith) {
+        _companions = wentWith.split('/').map(n => n.trim()).filter(Boolean).map(name => ({
+            name,
+            userId: null,
+            status: 'legacy',
+            avatarUrl: null,
+        }));
+        _renderCompanionPills();
+    }
+}
+
+/**
+ * Searches for companion suggestions.
+ * Returns { buddies: [...], others: [...] } — profiles array with match metadata.
+ */
+async function _searchCompanions(query) {
+    const q = query.trim().toLowerCase();
+    if (q.length < 2) return { buddies: [], others: [] };
+
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return { buddies: [], others: [] };
+
+    const userId = session.user.id;
+
+    // Get accepted buddy ids
+    const { data: buddyRows } = await supabase
+        .from('buddies')
+        .select('requester_id, addressee_id')
+        .eq('status', 'accepted')
+        .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`);
+
+    const buddyIds = new Set(
+        (buddyRows || []).map(r => r.requester_id === userId ? r.addressee_id : r.requester_id)
+    );
+
+    // Search profiles by display_name
+    const { data: profiles } = await supabase
+        .from('profiles')
+        .select('id, display_name, username, avatar_url')
+        .ilike('display_name', `%${q}%`)
+        .neq('id', userId)
+        .limit(10);
+
+    const results = (profiles || []).filter(p => p.display_name);
+    const buddies = results.filter(p => buddyIds.has(p.id));
+    const others  = results.filter(p => !buddyIds.has(p.id));
+
+    return { buddies, others };
+}
+
+/**
+ * Renders the companion dropdown with buddy and other sections.
+ */
+function _renderCompanionDropdown(query, buddies, others, rawName) {
+    const dropdown = document.getElementById('companion-dropdown');
+    if (!dropdown) return;
+
+    const alreadyAdded = new Set(_companions.map(c => c.name.toLowerCase()));
+
+    const makeItem = (profile, isBuddy) => {
+        const name = profile.display_name;
+        if (alreadyAdded.has(name.toLowerCase())) return '';
+        const initial = name[0].toUpperCase();
+        const badge = isBuddy
+            ? `<span class="text-[9px] font-black uppercase tracking-widest text-emerald-600">Gig Buddy</span>`
+            : `<span class="text-[9px] font-black uppercase tracking-widest text-slate-400">GigList</span>`;
+        return `<li role="option"
+                    class="flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-indigo-50 transition-colors"
+                    data-name="${name}"
+                    data-userid="${profile.id}"
+                    data-status="${isBuddy ? 'confirmed' : 'pending'}">
+            <span class="w-7 h-7 rounded-full bg-indigo-100 flex items-center justify-center text-xs font-black text-indigo-600 flex-shrink-0">${initial}</span>
+            <span class="flex-1 min-w-0">
+                <span class="block text-sm font-bold text-slate-800">${name}</span>
+                ${badge}
+            </span>
+        </li>`;
+    };
+
+    let html = '';
+
+    if (buddies.length) {
+        html += `<li class="px-4 pt-2.5 pb-1 text-[9px] font-black uppercase tracking-widest text-indigo-400 pointer-events-none">Gig Buddies</li>`;
+        html += buddies.map(p => makeItem(p, true)).join('');
+    }
+
+    if (others.length) {
+        html += `<li class="px-4 pt-2.5 pb-1 text-[9px] font-black uppercase tracking-widest text-slate-400 pointer-events-none">On GigList</li>`;
+        html += others.map(p => makeItem(p, false)).join('');
+    }
+
+    // Always offer "add as-is" if the typed name isn't already added
+    if (rawName.trim() && !alreadyAdded.has(rawName.trim().toLowerCase())) {
+        html += `<li role="option"
+                     class="flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-slate-50 transition-colors border-t border-slate-100"
+                     data-name="${rawName.trim()}"
+                     data-userid=""
+                     data-status="legacy">
+            <span class="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center text-xs font-black text-slate-500 flex-shrink-0">+</span>
+            <span class="flex-1 min-w-0">
+                <span class="block text-sm font-bold text-slate-700">Add "${rawName.trim()}"</span>
+                <span class="text-[9px] font-black uppercase tracking-widest text-slate-400">Not on GigList yet</span>
+            </span>
+        </li>`;
+    }
+
+    if (!html) {
+        dropdown.classList.add('hidden');
+        return;
+    }
+
+    dropdown.innerHTML = html;
+    dropdown.classList.remove('hidden');
+
+    // Wire item clicks
+    dropdown.querySelectorAll('li[data-name]').forEach(li => {
+        li.addEventListener('mousedown', (e) => {
+            e.preventDefault(); // prevent input blur before click fires
+            _addCompanion({
+                name:   li.dataset.name,
+                userId: li.dataset.userid || null,
+                status: li.dataset.status,
+            });
+        });
+    });
+}
+
+/**
+ * Adds a companion pill and, if status is 'pending' (GigList user but not buddy),
+ * fires a background buddy request.
+ */
+function _addCompanion({ name, userId, status }) {
+    const input = document.getElementById('companion-input');
+    const dropdown = document.getElementById('companion-dropdown');
+
+    // Prevent duplicates
+    if (_companions.some(c => c.name.toLowerCase() === name.toLowerCase())) {
+        if (input) input.value = '';
+        if (dropdown) dropdown.classList.add('hidden');
+        return;
+    }
+
+    _companions.push({ name, userId: userId || null, status: status || 'legacy', avatarUrl: null });
+    _renderCompanionPills();
+
+    if (input) input.value = '';
+    if (dropdown) dropdown.classList.add('hidden');
+
+    // Background buddy request for GigList users who aren't buddies yet
+    if (status === 'pending' && userId) {
+        _requestBuddyInBackground(userId, name);
+    }
+}
+
+/**
+ * Fires a buddy request in the background when adding a GigList user
+ * who isn't yet a buddy. Silent — no modal, just a toast.
+ */
+async function _requestBuddyInBackground(targetUserId, displayName) {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+
+    const [a, b] = [session.user.id, targetUserId].sort();
+    const { error } = await supabase.from('buddies').upsert(
+        { requester_id: a, addressee_id: b, status: 'pending' },
+        { onConflict: 'requester_id,addressee_id', ignoreDuplicates: true }
+    );
+
+    if (!error && window.showToast) {
+        window.showToast(`Gig buddy request sent to ${displayName}`, 'info');
+    }
+}
+
+/**
+ * Upserts all current _companions to gig_companions for the given journal.
+ * Deletes any existing rows for this journal/owner first to handle removals.
+ */
+async function _saveCompanions(journalId, ownerId) {
+    // Delete existing rows for this journal entry owned by this user
+    await supabase
+        .from('gig_companions')
+        .delete()
+        .eq('journal_id', journalId)
+        .eq('owner_id', ownerId);
+
+    if (_companions.length === 0) return;
+
+    const rows = _companions.map(c => ({
+        journal_id:         journalId,
+        owner_id:           ownerId,
+        companion_name:     c.name,
+        companion_user_id:  c.userId || null,
+        status:             c.status || 'legacy',
+    }));
+
+    const { error } = await supabase.from('gig_companions').insert(rows);
+    if (error) console.error('gig_companions save failed:', error.message);
+}
+
+/**
+ * Shares an invite link for a legacy (unmatched) companion via Web Share API.
+ */
+async function _shareInvite(name) {
+    const url = `${window.location.origin}/index.html`;
+    const shareData = {
+        title: 'Join me on GigList',
+        text:  `${name}, I've been adding our gig memories to GigList — come join so I can tag you properly!`,
+        url,
+    };
+    try {
+        if (navigator.share) {
+            await navigator.share(shareData);
+        } else {
+            await navigator.clipboard.writeText(`${shareData.text} ${url}`);
+            if (window.showToast) window.showToast('Invite link copied!', 'success');
+        }
+    } catch (err) {
+        if (err.name !== 'AbortError') console.warn('Share failed:', err);
+    }
+}
+
+/**
+ * Wires up the companion typeahead input.
+ */
+function initCompanionSelector() {
+    const input    = document.getElementById('companion-input');
+    const dropdown = document.getElementById('companion-dropdown');
+    if (!input || !dropdown) return;
+
+    let _searchTimer = null;
+
+    input.addEventListener('input', () => {
+        const val = input.value.trim();
+        if (val.length < 2) { dropdown.classList.add('hidden'); return; }
+
+        clearTimeout(_searchTimer);
+        _searchTimer = setTimeout(async () => {
+            const { buddies, others } = await _searchCompanions(val);
+            _renderCompanionDropdown(val, buddies, others, val);
+        }, 250);
+    });
+
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && input.value.trim()) {
+            e.preventDefault();
+            // If dropdown has a highlighted item, let mousedown handle it.
+            // Otherwise add the typed name as legacy.
+            const first = dropdown.querySelector('li[data-name]');
+            if (first && !dropdown.classList.contains('hidden')) {
+                _addCompanion({
+                    name:   first.dataset.name,
+                    userId: first.dataset.userid || null,
+                    status: first.dataset.status,
+                });
+            } else {
+                _addCompanion({ name: input.value.trim(), userId: null, status: 'legacy' });
+            }
+        }
+        if (e.key === 'Escape') dropdown.classList.add('hidden');
+    });
+
+    // Close dropdown on outside click
+    document.addEventListener('click', (e) => {
+        if (!input.contains(e.target) && !dropdown.contains(e.target)) {
+            dropdown.classList.add('hidden');
+        }
+    });
+}
+
 // ─── INIT (wire comboboxes once DOM is ready) ─────────────────────────────────
 
 export const initEditor = () => {
     wireCombobox('editor-band',    'editor-band-list',    getArtistOptions);
     wireCombobox('editor-venue',   'editor-venue-list',   getVenueOptions);
     wireCombobox('editor-support', 'editor-support-list', getSupportOptions);
+    initCompanionSelector();
 };
 
 // ─── FESTIVAL PREFILL MODAL ───────────────────────────────────────────────────

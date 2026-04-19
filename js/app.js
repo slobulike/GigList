@@ -1,10 +1,8 @@
 /**
  * GigList Core Engine
- * v3.9.0 — 2026-04-19
+ * v4.0.0 — 2026-04-19
  * -------------------------------------------------------------------
- * ✅ Extracted social logic into js/modules/social.js
- * ✅ Extracted switcher logic into js/modules/switcher.js
- * ✅ Migrated from follows to buddies table
+ * ✅ Created new Feed tab tp visualise shows in a new way
  */
 
 import * as Data from './modules/data.js';
@@ -21,8 +19,9 @@ import { initEditor, exportCSV } from './modules/editor.js';
 import { supabase } from './modules/supabase.js';
 import { runSetlistSync } from './modules/setlist-sync.js';
 import { runOnboarding, checkCompanionTags, handleZeroSyncResult } from './modules/onboarding.js';
-import { initSocial, checkGigOverlap, rebuildSwitcherPanel } from './modules/social.js';
+import { initSocial, checkGigOverlap, rebuildSwitcherPanel, resolveCompanionTags } from './modules/social.js';
 import { initModeSwitcher } from './modules/switcher.js';
+import * as Feed from './modules/feed.js';
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
@@ -67,15 +66,15 @@ let currentUser = null;
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "3.9.0";
+const APP_VERSION = "4.0.0";
 
 window.toggleListView = UI.toggleListView;
 window.activeView = window.activeView || 'list';
-window.journalData = window.journalData || [];
 window.renderMap = UI.renderMap;
 window.currentSort = { column: 'Date', ascending: false };
-window.switchGame = Games.switchGame;
-window.startNewPuzzle = Games.startNewPuzzle;
+
+// Games modules are dormant — kept in place for future revival
+// window.switchGame and window.startNewPuzzle removed from global scope
 
 export async function initApp() {
     // Check URL params FIRST
@@ -267,9 +266,10 @@ export async function initApp() {
     initEditor();
 
     // Load social data FIRST so _following is ready when the switcher panel builds
-    if (currentUser?.isAuthUser && (currentUser?.Type === 'Personal' || currentUser?.Type === 'Friend')) {
-        await initSocial(currentUser);
-    }
+        if (currentUser?.isAuthUser && (currentUser?.Type === 'Personal' || currentUser?.Type === 'Friend')) {
+            await initSocial(currentUser);
+            resolveCompanionTags(currentUser); // fire-and-forget, no await needed
+        }
 
     initModeSwitcher(currentUser);
 
@@ -481,6 +481,10 @@ window.switchView = (viewId) => {
         } else {
             renderBadges(window.journalData);
         }
+    }
+
+    if (viewId === 'feed') {
+        Feed.init(window.journalData || [], window.performanceData || []);
     }
 
     window.scrollTo(0, 0);

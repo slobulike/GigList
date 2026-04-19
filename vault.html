@@ -314,50 +314,20 @@
         <div id="calendarContainer" class="hidden space-y-8"></div>
     </section>
 
-    <section id="view-map" class="view-section hidden space-y-4" role="region" aria-label="Games" aria-hidden="true">
+    <section id="view-feed" class="view-section hidden space-y-4 pb-4" role="region" aria-label="Feed" aria-hidden="true">
         <div class="flex justify-between items-end mb-2">
-            <h2 class="text-4xl font-black italic tracking-tighter text-slate-900">Games</h2>
-            <div class="flex gap-2 bg-slate-200 p-1 rounded-full border border-slate-300">
-                <button onclick="window.switchGame('quiz')" id="nav-quiz" class="px-3 py-1 text-[10px] font-black uppercase rounded-full bg-white shadow-sm text-indigo-600">Quiz</button>
-                <button onclick="window.switchGame('puzzle')" id="nav-puzzle" class="px-3 py-1 text-[10px] font-black uppercase rounded-full text-slate-500">Puzzle</button>
+            <div>
+                <h2 class="text-4xl font-black italic tracking-tighter text-slate-900">Feed</h2>
+                <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-0.5">Your gig history, today</p>
             </div>
         </div>
 
-        <div id="game-arena" class="relative h-[70vh] min-h-[500px] w-full rounded-[2.5rem] shadow-2xl border-4 border-white overflow-hidden bg-slate-900 p-8 flex flex-col">
-
-            <div id="quiz-container" class="flex flex-col h-full">
-                <div id="quiz-header" class="flex justify-between items-center mb-8">
-                    <div class="px-4 py-2 bg-indigo-500 rounded-full">
-                        <span id="quiz-score" class="text-white font-black italic">SCORE: 0</span>
-                    </div>
-                    <div id="quiz-timer" class="text-amber-400 font-mono font-bold text-xl">00:30</div>
-                </div>
-
-                <div id="quiz-body" class="flex-grow flex flex-col justify-center items-center text-center">
-                    <div id="question-container" class="mb-10">
-                        <p id="quiz-question" class="text-2xl md:text-3xl font-black text-white italic uppercase tracking-tight leading-tight">
-                            Press Start to Test Your Memory!
-                        </p>
-                    </div>
-                    <div id="quiz-options" class="grid grid-cols-1 gap-3 w-full max-w-md">
-                        <button onclick="window.startQuiz()" class="bg-indigo-600 text-white p-5 rounded-2xl font-black uppercase tracking-widest hover:scale-105 transition-all">
-                            Start Quiz
-                        </button>
-                    </div>
-                </div>
+        <div id="feed-cards-container" class="space-y-4">
+            <!-- Feed cards rendered by feed.js -->
+            <div class="animate-pulse space-y-4">
+                <div class="h-64 bg-slate-200 rounded-[2rem]"></div>
+                <div class="h-64 bg-slate-200 rounded-[2rem]"></div>
             </div>
-
-            <div id="puzzle-section" class="hidden flex flex-col items-center justify-center h-full">
-                <h3 class="text-xl font-black italic uppercase mb-4 text-white">Gig Scrambler</h3>
-
-                <div id="puzzle-grid" class="grid w-full max-w-[320px] md:max-w-md gap-1 bg-white/10 p-1 rounded-xl shadow-inner border border-white/20">
-                </div>
-
-                <button onclick="window.startNewPuzzle()" class="mt-6 bg-indigo-500 hover:bg-indigo-600 text-white px-8 py-3 rounded-full font-black uppercase italic text-xs tracking-widest transition-all active:scale-95">
-                    NEW GIG
-                </button>
-            </div>
-
         </div>
     </section>
 
@@ -384,9 +354,9 @@
         <i data-lucide="database" class="w-6" aria-hidden="true"></i>
         <span class="text-[9px] font-black uppercase">Data</span>
     </button>
-    <button onclick="switchView('map')" id="nav-map" class="nav-item text-slate-400 flex flex-col items-center gap-1 flex-1" aria-current="false" aria-label="Games">
-        <i data-lucide="gamepad-2" class="w-6" aria-hidden="true"></i>
-        <span class="text-[9px] font-black uppercase">Games</span>
+    <button onclick="switchView('feed')" id="nav-feed" class="nav-item text-slate-400 flex flex-col items-center gap-1 flex-1" aria-current="false" aria-label="Feed">
+        <i data-lucide="sparkles" class="w-6" aria-hidden="true"></i>
+        <span class="text-[9px] font-black uppercase">Feed</span>
     </button>
     <button onclick="switchView('achievements')" id="nav-achievements" class="nav-item text-slate-400 flex flex-col items-center gap-1 flex-1" aria-current="false" aria-label="Achievements">
         <i data-lucide="ticket" class="w-6" aria-hidden="true"></i>
@@ -469,7 +439,6 @@
                     <input type="text" id="setlistIdInput"
                            placeholder="Your setlist.fm username"
                            autocomplete="off"
-                           autocorrect="off"
                            autocapitalize="off"
                            spellcheck="false"
                            class="flex-1 bg-white px-4 py-3 rounded-xl text-sm font-bold border-none shadow-sm outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800">
@@ -677,11 +646,26 @@
             </div>
 
             <!-- Went With -->
-            <div>
-                <label for="editor-went-with" class="block text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-2">Went With</label>
-                <input type="text" id="editor-went-with"
-                       placeholder="Names separated by / …"
-                       class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all">
+            <!-- Went With — companion selector -->
+            <div id="companion-selector-section">
+                <label class="block text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-2">Went With</label>
+
+                <!-- Pill container -->
+                <div id="companion-pills"
+                     class="flex flex-wrap gap-2 mb-2 empty:hidden"></div>
+
+                <!-- Typeahead input -->
+                <div class="relative">
+                    <input type="text" id="companion-input"
+                           placeholder="Add a person…"
+                           aria-label="Add a companion"
+                           autocomplete="off"
+                           class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all">
+                    <ul id="companion-dropdown"
+                        role="listbox"
+                        class="hidden absolute z-20 left-0 right-0 bg-white border border-slate-200 rounded-2xl shadow-xl mt-1 overflow-hidden max-h-56 overflow-y-auto"></ul>
+                </div>
+                <p class="text-[10px] text-slate-400 mt-1.5 px-1">Type a name — gig buddies appear first. Press Enter or pick from the list.</p>
             </div>
 
             <!-- Comments -->
