@@ -113,6 +113,10 @@ function _buildSwitcherPanel() {
               isPersonal,
               isPersonal ? '' : "window._switchToPersonal()")}
 
+        <!-- TODO: Re-enable once Profile screens exist — buddies will link to their profile page,
+             not their journal data. The journal overlay is now handled by the buddy filter bar in
+             the Data tab. See backlog item: Profile screens with avatars. -->
+        <!--
         ${following.length > 0 ? `
         <div class="border-t border-slate-100">
             <button onclick="window._toggleFollowingSection(this)" role="menuitem"
@@ -130,7 +134,7 @@ function _buildSwitcherPanel() {
                 )).join('')}
             </div>
         </div>` : ''}
-
+        -->
         <div class="border-t border-slate-100">
             <button onclick="window._toggleBandSection(this)" role="menuitem"
                     class="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-colors"
@@ -227,7 +231,8 @@ window._switchToBand = (bandName) => {
     window.location.href = `vault.html?band=${encodeURIComponent(bandName)}`;
 };
 
-window._switchToFriend = (userId, username) => {
-    closeSwitcher();
-    window.location.href = `vault.html?friend=${userId}&friendName=${encodeURIComponent(username)}`;
-};
+// TODO: Re-enable once Profile screens exist — this will navigate to a buddy's profile page.
+// window._switchToFriend = (userId, username) => {
+//     closeSwitcher();
+//     window.location.href = `vault.html?friend=${userId}&friendName=${encodeURIComponent(username)}`;
+// };

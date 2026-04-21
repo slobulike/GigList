@@ -1,8 +1,10 @@
 /**
  * GigList Core Engine
- * v4.0.0 — 2026-04-19
+ * v4.0.1 — 2026-04-21
  * -------------------------------------------------------------------
- * ✅ Created new Feed tab tp visualise shows in a new way
+ * ✅ Added buddies tab
+ * ✅ Buddy avatar shown on data list view
+ * ✅ Games and Achievements currently hidden
  */
 
 import * as Data from './modules/data.js';
@@ -10,7 +12,7 @@ import * as Charts from './modules/charts.js';
 import * as UI from './modules/ui.js';
 import { initArchiveButton } from './modules/ui.js';
 import { parseDate } from './modules/utils.js';
-import { renderBadges, renderBandBadges } from './modules/achievements.js';
+// achievements.js import retained — renderBadges/renderBandBadges used by Profile screen (future)
 import { renderCalendar } from './modules/calendar.js';
 import './modules/quiz.js';
 import * as Games from './modules/games.js';
@@ -22,6 +24,7 @@ import { runOnboarding, checkCompanionTags, handleZeroSyncResult } from './modul
 import { initSocial, checkGigOverlap, rebuildSwitcherPanel, resolveCompanionTags } from './modules/social.js';
 import { initModeSwitcher } from './modules/switcher.js';
 import * as Feed from './modules/feed.js';
+import { initBuddies } from './modules/buddies.js';
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
@@ -66,7 +69,7 @@ let currentUser = null;
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "4.0.0";
+const APP_VERSION = "4.0.1";
 
 window.toggleListView = UI.toggleListView;
 window.activeView = window.activeView || 'list';
@@ -87,18 +90,23 @@ export async function initApp() {
     // 1. Check Supabase auth session
     const { data: { session } } = await supabase.auth.getSession();
 
-    if (friendParam && session) {
-        currentUser = {
-            ...( (await supabase.from('profiles').select('*').eq('id', session.user.id).single()).data || {} ),
-            UserName:    decodeURIComponent(friendName),
-            Type:        'Friend',
-            friendId:    friendParam,
-            id:          session.user.id,
-            isAuthUser:  true
-        };
-    } else if (bandParam) {
-        const { data: bandRow } = await supabase
-            .from('bands')
+    // TODO: Re-enable once Profile screens exist. Friend mode (persona-swap via ?friend= URL param)
+    // has been retired in favour of the buddy filter bar in the Data tab. Keep this block so it's
+    // easy to restore when we build profile pages — at that point ?friend= will navigate to a
+    // profile screen rather than loading someone else's journal data as your own.
+    //
+    // if (friendParam && session) {
+    //     currentUser = {
+    //         ...( (await supabase.from('profiles').select('*').eq('id', session.user.id).single()).data || {} ),
+    //         UserName:    decodeURIComponent(friendName),
+    //         Type:        'Friend',
+    //         friendId:    friendParam,
+    //         id:          session.user.id,
+    //         isAuthUser:  true
+    //     };
+    // } else if (bandParam) {
+    if (bandParam) {
+        const { data: bandRow } = await supabase            .from('bands')
             .select('*')
             .ilike('name', bandParam)
             .single();
@@ -146,26 +154,12 @@ export async function initApp() {
 
     // Set Mode Flags
     window.isBandMode   = data.user.Type === 'Band';
-    window.isFriendMode  = data.user.Type === 'Friend';
+    window.isFriendMode  = false; // Friend mode retired — buddy journal overlay is in the Data tab filter bar
     window.currentArtist = data.user.UserName;
 
     // 2. Apply Band Mode / Friend Mode Branding
-    if (window.isFriendMode) {
-        document.body.classList.add('band-mode');
-        const topHeader = document.querySelector('header');
-        if (topHeader) {
-            topHeader.classList.add('bg-indigo-600', 'border-b-2', 'border-black/10');
-            topHeader.classList.remove('bg-white/80', 'backdrop-blur-xl');
-            const logoIcon = document.getElementById('header-logo-icon');
-            if (logoIcon) { logoIcon.style.backgroundColor = 'rgba(255,255,255,0.2)'; logoIcon.style.boxShadow = 'none'; }
-            const titleEl = document.getElementById('header-page-title');
-            if (titleEl) { titleEl.textContent = `${currentUser.UserName}'s Gig List`; titleEl.style.color = 'white'; }
-            const dateEl = document.getElementById('header-date-display');
-            if (dateEl) dateEl.style.color = 'rgba(255,255,255,0.7)';
-            const badge = document.getElementById('userIdentity');
-            if (badge) { badge.style.color = 'white'; badge.style.backgroundColor = 'rgba(255,255,255,0.2)'; badge.innerText = '...'; }
-        }
-    }
+    // TODO: isFriendMode branding removed — re-enable if Friend mode is restored for profile pages
+    // if (window.isFriendMode) { ... }
 
     if (window.isBandMode) {
         document.body.classList.add('band-mode');
@@ -266,12 +260,17 @@ export async function initApp() {
     initEditor();
 
     // Load social data FIRST so _following is ready when the switcher panel builds
-        if (currentUser?.isAuthUser && (currentUser?.Type === 'Personal' || currentUser?.Type === 'Friend')) {
+        if (currentUser?.isAuthUser && currentUser?.Type === 'Personal') {
             await initSocial(currentUser);
             resolveCompanionTags(currentUser); // fire-and-forget, no await needed
         }
 
     initModeSwitcher(currentUser);
+
+    // Buddies tab — personal mode only
+    if (currentUser?.Type === 'Personal') {
+        await initBuddies(currentUser);
+    }
 
     // ── Onboarding & companion notifications ─────────────────────────────────
     if (currentUser?.Type === 'Personal') {
@@ -475,14 +474,6 @@ window.switchView = (viewId) => {
         activeNav.setAttribute('aria-current', 'page');
     }
 
-    if (viewId === 'achievements') {
-        if (window.isBandMode) {
-            renderBandBadges(window.performanceData);
-        } else {
-            renderBadges(window.journalData);
-        }
-    }
-
     if (viewId === 'feed') {
         Feed.init(window.journalData || [], window.performanceData || []);
     }
@@ -510,7 +501,9 @@ window.applyChartFilter = (type, value) => {
 function initEventListeners() {
     const search = document.getElementById('searchInput');
     if (search) {
-        search.addEventListener('input', () => refreshUI());
+        search.addEventListener('input', () => {
+            refreshUI();
+        });
     }
 }
 
@@ -518,13 +511,19 @@ function initEventListeners() {
 
 window.viewGigDetails = (key) => {
     UI.openGigModal(key, window.journalData, window.performanceData);
+
     if (currentUser?.isAuthUser && !window.isBandMode) {
         setTimeout(() => window.loadGigAttendees(key), 100);
         const entry = (window.journalData || []).find(g => g['Journal Key'] === key);
         if (entry) setTimeout(() => initArchiveButton(entry), 150);
     }
+
     const entry = (window.journalData || []).find(g => g['Journal Key'] === key);
-    window.track('gig_modal_open', { band: entry?.Band, venue: entry?.OfficialVenue, key });
+    window.track('gig_modal_open', {
+        band:  entry?.Band,
+        venue: entry?.OfficialVenue,
+        key,
+    });
 };
 window.openGigModal = window.viewGigDetails;
 
@@ -536,6 +535,8 @@ window.closeModal = () => {
         modal.setAttribute('aria-hidden', 'true');
         document.body.style.overflow = 'auto';
     }
+    // Restore read-only state based on actual mode, not buddy overlay
+    window.isReadOnly = (window.isBandMode && !currentUser?.is_admin);
 };
 
 // ─── SETTINGS MODAL ───────────────────────────────────────────────────────────
@@ -896,6 +897,7 @@ window.handleUpcomingToggle = () => {
 
     UI.updateStats(currentData);
 };
+
 
 window.handleSort = (column) => {
     if (window.currentSort.column === column) {

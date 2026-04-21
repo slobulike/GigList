@@ -596,6 +596,37 @@ export const renderTable = (data) => {
                                 </span>`;
                         }
 
+                        // --- BUDDY PILLS ---
+                        // Show which accepted buddies also attended this show.
+                        // Uses window._buddyJournalKeys (populated by initBuddies) and
+                        // window._following for display names. Mirrors the stable colour
+                        // hash from buddies.js so colours are consistent across the app.
+                        let buddyPills = '';
+                        if (!window.isBandMode) {
+                            const buddyKeys   = window._buddyJournalKeys || {};
+                            const buddyList   = window._following || [];
+                            const _tileColours = [
+                                { bg: 'bg-indigo-100',  text: 'text-indigo-700'  },
+                                { bg: 'bg-violet-100',  text: 'text-violet-700'  },
+                                { bg: 'bg-emerald-100', text: 'text-emerald-700' },
+                                { bg: 'bg-amber-100',   text: 'text-amber-700'   },
+                                { bg: 'bg-rose-100',    text: 'text-rose-700'    },
+                                { bg: 'bg-sky-100',     text: 'text-sky-700'     },
+                            ];
+                            const gigKey = gig['Journal Key'];
+                            const attending = buddyList.filter(b => buddyKeys[b.id]?.has(gigKey));
+                            if (attending.length) {
+                                buddyPills = '<div class="flex items-center gap-1 mt-1 flex-wrap">' +
+                                    attending.map(b => {
+                                        const hash    = (b.id || '').split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+                                        const colour  = _tileColours[hash % _tileColours.length];
+                                        const initials = (b.display_name || b.username || '?').slice(0, 2).toUpperCase();
+                                        return `<span class="inline-flex items-center justify-center w-5 h-5 rounded-full text-[8px] font-black ${colour.bg} ${colour.text}" title="${b.display_name || b.username}">${initials}</span>`;
+                                    }).join('') +
+                                '</div>';
+                            }
+                        }
+
                         const displayValue = window.isBandMode ? deriveType(gig) : gig.Band;
                         const badgeClass = typeColors[displayValue] || 'text-slate-600 bg-slate-50 border-slate-100';
 
@@ -613,6 +644,7 @@ export const renderTable = (data) => {
                                         ${cameraIcon}
                                     </div>
                                     ${matchLabels}
+                                    ${buddyPills}
                                 </div>
                             </td>
                             <td class="p-4 text-xs text-slate-600 font-medium">

@@ -197,7 +197,8 @@
                        class="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all shadow-sm">
             </div>
 
-            <div class="grid grid-cols-3 gap-4">
+
+            <div id="dc-stats-grid" class="grid grid-cols-3 gap-4">
                 <div class="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-center">
                     <p class="text-xs text-slate-500 uppercase tracking-widest font-bold">Gigs</p>
                     <h3 id="dc-stat-gigs" class="text-2xl font-black text-indigo-600">0</h3>
@@ -214,7 +215,7 @@
 
             <div class="grid grid-cols-1 gap-4">
 
-                <div class="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm relative group h-64">
+                <div id="yearChartContainer" class="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm relative group h-64">
                     <div class="flex justify-between items-start mb-2">
                         <p class="text-[10px] font-black uppercase text-slate-400">Yearly History</p>
                         <button onclick="openChartModal('year')" class="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-slate-100 rounded-lg text-slate-400">
@@ -331,17 +332,84 @@
         </div>
     </section>
 
-    <section id="view-achievements" class="view-section hidden pt-6 text-center space-y-4" role="region" aria-label="Achievements" aria-hidden="true">
-        <div class="space-y-6">
-            <div class="space-y-1">
-                <h2 class="text-4xl font-black italic tracking-tighter text-slate-900">Your Badges</h2>
-                <p class="text-slate-400 font-bold text-sm">Your gig list achievements</p>
+    <section id="view-buddies" class="view-section hidden space-y-4 pb-4" role="region" aria-label="Buddies" aria-hidden="true">
+        <!-- Buddy tiles — rendered by buddies.js -->
+        <div id="buddies-tile-view">
+            <div class="flex items-end justify-between mb-2">
+                <div>
+                    <h2 class="text-4xl font-black italic tracking-tighter text-slate-900">Buddies</h2>
+                    <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-0.5">Your gig crew</p>
+                </div>
             </div>
-
-            <div id="badges-grid" class="grid grid-cols-2 md:grid-cols-3 gap-6">
+            <div id="buddy-tiles-container" class="space-y-3">
+                <!-- Tiles injected by buddies.js -->
             </div>
         </div>
 
+        <!-- Buddy drill-in panel — slides in over the tile view -->
+        <div id="buddy-drill-in"
+             class="fixed inset-0 z-[200] bg-[#f8fafc] translate-x-full transition-transform duration-300 ease-in-out overflow-y-auto"
+             aria-hidden="true">
+
+            <!-- Drill-in header -->
+            <div class="sticky top-0 bg-white/90 backdrop-blur-xl border-b border-slate-100 z-10 px-4 py-3 flex items-center gap-3">
+                <button id="buddy-back-btn"
+                        onclick="window.closeBuddyDrillIn()"
+                        aria-label="Back to Buddies"
+                        class="flex items-center justify-center w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 transition-all active:scale-95 flex-shrink-0">
+                    <i data-lucide="chevron-left" class="w-5 h-5" aria-hidden="true"></i>
+                </button>
+                <div class="min-w-0">
+                    <p id="buddy-drill-name" class="text-base font-black text-slate-900 leading-none truncate">--</p>
+                    <p id="buddy-drill-meta" class="text-[10px] font-bold text-slate-400 mt-0.5">-- shows</p>
+                </div>
+            </div>
+
+            <!-- Drill-in body — injected by buddies.js -->
+            <div id="buddy-drill-body" class="px-4 pt-4 pb-32 max-w-md mx-auto space-y-6">
+                <!-- Stats headlines -->
+                <div id="buddy-drill-stats" class="grid grid-cols-3 gap-3"></div>
+
+                <!-- Year chart -->
+                <div id="buddy-drill-year-chart-wrap" class="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm h-56">
+                    <p class="text-[10px] font-black uppercase text-slate-400 mb-2">Yearly History</p>
+                    <div class="h-40">
+                        <canvas id="buddy-year-chart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Top bands chart -->
+                <div id="buddy-drill-bands-chart-wrap" class="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm">
+                    <p class="text-[10px] font-black uppercase text-slate-400 mb-4">Top Bands</p>
+                    <div class="h-[280px] relative">
+                        <canvas id="buddy-bands-chart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Shared only toggle -->
+                <div class="flex items-center justify-between bg-white rounded-2xl px-4 py-3 border border-slate-100 shadow-sm">
+                    <span class="text-sm font-black text-slate-700">Shared shows only</span>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" id="buddy-drill-shared-toggle" class="hidden peer"
+                               onchange="window.handleBuddyDrillSharedToggle()">
+                        <span class="w-10 h-5 bg-slate-200 rounded-full peer peer-checked:bg-indigo-600 transition-colors after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-5"></span>
+                    </label>
+                </div>
+
+                <!-- Search within buddy's data -->
+                <div class="relative w-full">
+                    <i data-lucide="search" class="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"></i>
+                    <input type="text"
+                           id="buddy-drill-search"
+                           placeholder="Search this list…"
+                           aria-label="Search buddy's shows"
+                           class="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all shadow-sm">
+                </div>
+
+                <!-- Table/list renders here -->
+                <div id="buddy-drill-table"></div>
+            </div>
+        </div>
     </section>
 </main>
 
@@ -358,9 +426,9 @@
         <i data-lucide="sparkles" class="w-6" aria-hidden="true"></i>
         <span class="text-[9px] font-black uppercase">Feed</span>
     </button>
-    <button onclick="switchView('achievements')" id="nav-achievements" class="nav-item text-slate-400 flex flex-col items-center gap-1 flex-1" aria-current="false" aria-label="Achievements">
-        <i data-lucide="ticket" class="w-6" aria-hidden="true"></i>
-        <span class="text-[9px] font-black uppercase">Achievements</span>
+    <button onclick="switchView('buddies')" id="nav-buddies" class="nav-item text-slate-400 flex flex-col items-center gap-1 flex-1" aria-current="false" aria-label="Buddies">
+        <i data-lucide="users" class="w-6" aria-hidden="true"></i>
+        <span class="text-[9px] font-black uppercase">Buddies</span>
     </button>
 </nav>
 
