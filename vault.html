@@ -38,7 +38,21 @@
             <p id="header-date-display" class="text-[10px] text-slate-400 font-bold mt-0.5 leading-none">--</p>
         </div>
     </a>
-    <div id="userIdentity" class="text-[10px] font-black uppercase tracking-widest text-slate-400 bg-slate-100 px-3 py-2 rounded-full flex-shrink-0 cursor-pointer">Sign In</div>
+    <!-- TODO (step 3): update JS block in app.js to call openProfile() instead of openSettings() once profile.js is wired -->
+    <div id="userIdentity"
+         class="flex-shrink-0 cursor-pointer"
+         role="button"
+         aria-label="Open profile"
+         tabindex="0">
+        <!-- Signed-out state — replaced by JS when authed -->
+        <span id="userIdentity-signin" class="text-[10px] font-black uppercase tracking-widest text-slate-400 bg-slate-100 px-3 py-2 rounded-full">Sign In</span>
+        <!-- Avatar circle — shown when authed, hidden until JS populates it -->
+        <div id="userIdentity-avatar"
+             class="hidden w-9 h-9 rounded-full bg-indigo-600 flex items-center justify-center overflow-hidden ring-2 ring-white shadow-sm hover:ring-indigo-200 transition-all">
+            <img id="userIdentity-avatar-img" src="" alt="" class="hidden w-full h-full object-cover">
+            <span id="userIdentity-avatar-initials" class="text-[11px] font-black text-white leading-none"></span>
+        </div>
+    </div>
 </header>
 
 <main class="pt-20 pb-32 px-4 max-w-md mx-auto">
@@ -335,12 +349,31 @@
     <section id="view-buddies" class="view-section hidden space-y-4 pb-4" role="region" aria-label="Buddies" aria-hidden="true">
         <!-- Buddy tiles — rendered by buddies.js -->
         <div id="buddies-tile-view">
-            <div class="flex items-end justify-between mb-2">
+            <div class="flex items-end justify-between mb-4">
                 <div>
                     <h2 class="text-4xl font-black italic tracking-tighter text-slate-900">Buddies</h2>
                     <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-0.5">Your gig crew</p>
                 </div>
             </div>
+
+            <!-- Find Buddies search — moved from Settings modal, relabelled -->
+            <div class="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-5 space-y-4 mb-4">
+                <p class="text-[10px] font-black uppercase text-indigo-500 tracking-widest">Find Buddies</p>
+                <div class="relative">
+                    <input type="text" id="friend-search-input"
+                           placeholder="Search by username…"
+                           aria-label="Search for a buddy by username"
+                           autocomplete="off"
+                           class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all">
+                    <button onclick="window.searchFriends()"
+                            aria-label="Search"
+                            class="absolute right-2 top-1/2 -translate-y-1/2 bg-indigo-600 text-white p-2 rounded-xl hover:bg-indigo-700 transition-colors">
+                        <i data-lucide="search" class="w-4 h-4" aria-hidden="true"></i>
+                    </button>
+                </div>
+                <div id="friend-search-results" class="hidden space-y-2"></div>
+            </div>
+
             <div id="buddy-tiles-container" class="space-y-3">
                 <!-- Tiles injected by buddies.js -->
             </div>
@@ -411,6 +444,235 @@
             </div>
         </div>
     </section>
+    <!-- ── PROFILE VIEW ──────────────────────────────────────────────────────── -->
+    <section id="view-profile"
+             class="view-section hidden space-y-5 pb-8"
+             role="region"
+             aria-label="Profile"
+             aria-hidden="true">
+
+        <!-- Back button — shown when viewing a buddy's profile, hidden for own profile -->
+        <button id="profile-back-btn"
+                onclick="window.closeProfileView()"
+                aria-label="Back"
+                class="hidden items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-500 hover:text-indigo-600 transition-colors active:scale-95">
+            <i data-lucide="chevron-left" class="w-4 h-4" aria-hidden="true"></i>
+            Back
+        </button>
+
+        <!-- ── Header block ── -->
+        <div class="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-6 flex items-center gap-5">
+            <!-- Avatar -->
+            <div class="relative flex-shrink-0">
+                <div id="profile-avatar-wrap"
+                     class="w-20 h-20 rounded-full bg-indigo-600 flex items-center justify-center overflow-hidden ring-4 ring-indigo-50">
+                    <img id="profile-avatar-img" src="" alt="" class="hidden w-full h-full object-cover">
+                    <span id="profile-avatar-initials" class="text-2xl font-black text-white leading-none"></span>
+                </div>
+                <!-- Edit button — own profile only, hidden for buddy view -->
+                <button id="profile-avatar-edit-btn"
+                        onclick="document.getElementById('profile-avatar-input').click()"
+                        aria-label="Change avatar"
+                        class="absolute -bottom-1 -right-1 w-7 h-7 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full flex items-center justify-center shadow-lg transition-all active:scale-95">
+                    <i data-lucide="camera" class="w-3.5 h-3.5" aria-hidden="true"></i>
+                </button>
+                <input type="file" id="profile-avatar-input" accept="image/*" class="hidden" onchange="window.handleAvatarUpload(event)">
+            </div>
+
+            <!-- Name / meta -->
+            <div class="flex-1 min-w-0">
+                <h2 id="profile-display-name" class="text-2xl font-black tracking-tight text-slate-900 leading-none truncate">--</h2>
+                <p id="profile-username" class="text-[10px] font-black uppercase tracking-widest text-slate-400 mt-1">@--</p>
+                <p id="profile-member-since" class="text-[10px] text-slate-400 mt-1">Member since --</p>
+                <!-- Shared shows callout — buddy view only -->
+                <p id="profile-shared-callout" class="hidden text-[10px] font-black text-indigo-500 mt-1.5"></p>
+            </div>
+        </div>
+
+        <!-- ── Music identity ── -->
+        <div class="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-6 space-y-4">
+            <div class="flex items-center justify-between">
+                <p class="text-[10px] font-black uppercase text-indigo-500 tracking-widest">Music Identity</p>
+                <!-- Edit toggle — own profile only -->
+                <button id="profile-identity-edit-btn"
+                        onclick="window.toggleIdentityEdit()"
+                        class="text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-indigo-600 transition-colors">
+                    Edit
+                </button>
+            </div>
+
+            <!-- Display mode -->
+            <div id="profile-identity-display" class="space-y-3">
+                <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 bg-indigo-50 rounded-xl flex items-center justify-center flex-shrink-0">
+                        <i data-lucide="music-2" class="w-4 h-4 text-indigo-500" aria-hidden="true"></i>
+                    </div>
+                    <div class="min-w-0">
+                        <p class="text-[9px] font-black uppercase tracking-widest text-slate-400">Favourite Band</p>
+                        <p id="profile-fav-band" class="text-sm font-black text-slate-800 truncate">--</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 bg-indigo-50 rounded-xl flex items-center justify-center flex-shrink-0">
+                        <i data-lucide="map-pin" class="w-4 h-4 text-indigo-500" aria-hidden="true"></i>
+                    </div>
+                    <div class="min-w-0">
+                        <p class="text-[9px] font-black uppercase tracking-widest text-slate-400">Favourite Venue</p>
+                        <p id="profile-fav-venue" class="text-sm font-black text-slate-800 truncate">--</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 bg-amber-50 rounded-xl flex items-center justify-center flex-shrink-0">
+                        <i data-lucide="star" class="w-4 h-4 text-amber-500" aria-hidden="true"></i>
+                    </div>
+                    <div class="min-w-0">
+                        <p class="text-[9px] font-black uppercase tracking-widest text-slate-400">Favourite Show</p>
+                        <p id="profile-fav-show" class="text-sm font-black text-slate-800 truncate">--</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Edit mode — hidden until Edit tapped -->
+            <div id="profile-identity-edit" class="hidden space-y-3">
+                <div>
+                    <label for="profile-edit-band" class="block text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1.5">Favourite Band</label>
+                    <input type="text" id="profile-edit-band"
+                           placeholder="Most-seen, or your all-time favourite…"
+                           class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all">
+                </div>
+                <div>
+                    <label for="profile-edit-venue" class="block text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1.5">Favourite Venue</label>
+                    <input type="text" id="profile-edit-venue"
+                           placeholder="The one you keep coming back to…"
+                           class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all">
+                </div>
+                <div>
+                    <label for="profile-edit-show" class="block text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1.5">Favourite Show</label>
+                    <input type="text" id="profile-edit-show"
+                           placeholder="Search your gig history…"
+                           autocomplete="off"
+                           class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all">
+                    <ul id="profile-edit-show-list"
+                        role="listbox"
+                        class="hidden bg-white border border-slate-200 rounded-2xl shadow-xl mt-1 overflow-hidden max-h-48 overflow-y-auto"></ul>
+                </div>
+                <button onclick="window.saveIdentity()"
+                        class="w-full py-3 text-sm font-black text-white bg-indigo-600 hover:bg-indigo-700 rounded-2xl transition-all active:scale-95 uppercase tracking-widest">
+                    Save
+                </button>
+            </div>
+        </div>
+
+        <!-- ── Stats strip ── -->
+        <div id="profile-stats-grid" class="grid grid-cols-2 gap-3">
+            <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm text-center">
+                <p class="text-[9px] font-black uppercase text-slate-400 tracking-widest">Total Gigs</p>
+                <p id="profile-stat-gigs" class="text-3xl font-black text-indigo-600 leading-none mt-1">--</p>
+            </div>
+            <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm text-center">
+                <p class="text-[9px] font-black uppercase text-slate-400 tracking-widest">Years Active</p>
+                <p id="profile-stat-years" class="text-3xl font-black text-slate-800 leading-none mt-1">--</p>
+            </div>
+            <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm text-center">
+                <p class="text-[9px] font-black uppercase text-slate-400 tracking-widest">Venues</p>
+                <p id="profile-stat-venues" class="text-3xl font-black text-slate-800 leading-none mt-1">--</p>
+            </div>
+            <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm text-center">
+                <p class="text-[9px] font-black uppercase text-slate-400 tracking-widest">First Show</p>
+                <p id="profile-stat-first-show" class="text-sm font-black text-slate-800 leading-tight mt-1 px-1">--</p>
+            </div>
+        </div>
+
+        <!-- ── Achievements ── -->
+        <!-- TODO (step 6): migrate achievements.js rendering into this section -->
+        <div id="profile-achievements-section" class="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-6">
+            <p class="text-[10px] font-black uppercase text-indigo-500 tracking-widest mb-4">Achievements</p>
+            <div id="profile-achievements-container" class="space-y-2">
+                <!-- Injected by profile.js / achievements.js -->
+                <p class="text-xs text-slate-400 italic">Loading achievements…</p>
+            </div>
+        </div>
+
+        <!-- ── Settings actions — own profile only, hidden for buddy view ── -->
+        <div id="profile-settings-section" class="space-y-3">
+
+            <p class="text-[10px] font-black uppercase text-slate-400 tracking-widest px-1">Account</p>
+
+            <!-- Privacy -->
+            <div class="bg-white rounded-[2rem] border border-slate-100 shadow-sm px-5 py-4">
+                <div class="flex items-center justify-between gap-4">
+                    <div>
+                        <p class="text-sm font-black text-slate-800">Public Profile</p>
+                        <p class="text-[10px] text-slate-400 mt-0.5 leading-relaxed">Anyone can send you a buddy request. Off = requests need your approval.</p>
+                    </div>
+                    <button id="privacy-toggle"
+                            onclick="window.togglePrivacy()"
+                            role="switch"
+                            aria-checked="false"
+                            class="relative flex-shrink-0 w-12 h-6 rounded-full transition-colors duration-200 bg-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
+                        <span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 translate-x-0" id="privacy-knob"></span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Setlist.fm sync -->
+            <!-- NOTE: #setlistIdInput, #sync-progress, #sync-status IDs are referenced by onboarding flow — do not rename -->
+            <div class="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-5">
+                <label for="setlistIdInput" class="block text-[10px] font-black uppercase text-indigo-500 mb-3 tracking-widest">Sync Setlist.fm</label>
+                <div class="flex gap-2">
+                    <input type="text" id="setlistIdInput"
+                           placeholder="Your setlist.fm username"
+                           autocomplete="off"
+                           autocapitalize="off"
+                           spellcheck="false"
+                           class="flex-1 bg-slate-50 px-4 py-3 rounded-xl text-sm font-bold border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800">
+                    <button onclick="window.syncSetlistFm()"
+                            aria-label="Run Sync"
+                            class="bg-indigo-600 text-white px-4 py-3 rounded-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200">
+                        <i data-lucide="refresh-cw" class="w-5 h-5"></i>
+                    </button>
+                </div>
+                <div class="hidden mt-3 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                    <div id="sync-progress" class="h-full bg-indigo-500 rounded-full transition-all duration-500" style="width:0%"></div>
+                </div>
+                <p id="sync-status" class="text-[10px] text-slate-400 mt-3 italic leading-relaxed">This will pull your full history, venues, and setlists.</p>
+                <button onclick="window.showNoSetlistTip()"
+                        class="mt-2 text-[10px] font-black text-slate-400 hover:text-indigo-500 transition-colors uppercase tracking-widest">
+                    I don't have a setlist.fm account &rarr;
+                </button>
+            </div>
+
+            <!-- Export -->
+            <div class="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-5">
+                <p class="text-[10px] font-black uppercase text-indigo-500 mb-3 tracking-widest">Export Your Archive</p>
+                <button onclick="window.exportCSV()"
+                        class="w-full flex items-center justify-center gap-2 bg-slate-50 border border-slate-200 hover:border-indigo-400 hover:text-indigo-600 text-slate-600 font-black text-sm py-3 rounded-2xl transition-all active:scale-[0.98]">
+                    <i data-lucide="download" class="w-4 h-4" aria-hidden="true"></i>
+                    Download CSV
+                </button>
+                <p class="text-[10px] text-slate-400 mt-3 italic leading-relaxed">Your data, always yours.</p>
+            </div>
+
+            <!-- Sign out -->
+            <button onclick="window.signOut()"
+                    class="w-full py-4 text-red-400 font-bold text-sm hover:text-red-600 transition-colors flex items-center justify-center gap-2">
+                <i data-lucide="log-out" class="w-4 h-4" aria-hidden="true"></i>
+                Sign Out
+            </button>
+
+            <div class="pt-4 border-t border-slate-100 flex justify-between items-center opacity-40">
+                <p class="text-[9px] font-black uppercase tracking-widest text-slate-500">GigList</p>
+                <div class="flex items-center gap-1.5">
+                    <span class="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
+                    <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest">
+                        BUILD <span id="app-version-display">--</span>
+                    </p>
+                </div>
+            </div>
+        </div>
+
+    </section>
+
 </main>
 
 <nav class="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-2xl border-t border-slate-100 px-6 pt-3 pb-8 flex justify-between items-center z-50" aria-label="Main navigation">
@@ -432,6 +694,22 @@
     </button>
 </nav>
 
+<!--
+    LEGACY MODAL — ONBOARDING USE ONLY
+    ====================================
+    This modal is no longer accessible via the normal UI.
+    It is kept intact because onboarding.js calls window.openSettings() / window.closeSettings()
+    to surface the setlist.fm sync step during new-user onboarding.
+
+    DO NOT remove or rename:
+      - #settingsModal
+      - #setlistIdInput        ← referenced by onboarding.js
+      - #sync-progress         ← referenced by onboarding.js / setlist-sync.js
+      - #sync-status           ← referenced by onboarding.js / setlist-sync.js
+
+    TODO (post-profile): refactor onboarding.js to call openSetlistSync() directly,
+    then retire this modal entirely.
+-->
 <div id="settingsModal"
      class="fixed inset-0 bg-slate-900/60 backdrop-blur-md hidden z-[110] flex items-start justify-center p-4 overflow-y-auto"
      role="dialog"
@@ -443,118 +721,43 @@
     <div class="bg-white rounded-[3rem] w-full max-w-md p-10 relative shadow-2xl my-auto">
         <button onclick="window.closeSettings()"
                 class="absolute top-6 right-6 text-slate-400 hover:text-slate-600 transition-colors"
-                aria-label="Close Settings">
+                aria-label="Close">
             <i data-lucide="x"></i>
         </button>
 
         <div class="text-center mb-8">
             <div class="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center mx-auto text-indigo-600 mb-4">
-                <i data-lucide="settings-2" class="w-8"></i>
+                <i data-lucide="refresh-cw" class="w-8"></i>
             </div>
-            <h2 id="settingsTitle" class="text-2xl font-black tracking-tight text-slate-800">User Settings</h2>
-            <p class="text-slate-400 text-xs font-bold uppercase tracking-widest mt-1">Profile & Data Sources</p>
+            <h2 id="settingsTitle" class="text-2xl font-black tracking-tight text-slate-800">Sync Setlist.fm</h2>
+            <p class="text-slate-400 text-xs font-bold uppercase tracking-widest mt-1">Import your gig history</p>
         </div>
 
-        <div class="space-y-6">
-
-            <!-- 1. FRIENDS — most used, always at top -->
-            <div id="settings-friends-section" class="bg-slate-50 p-6 rounded-[2rem] border border-slate-100 space-y-4">
-                <p class="text-[10px] font-black uppercase text-indigo-500 tracking-widest">Friends</p>
-
-                <div class="relative">
-                    <input type="text" id="friend-search-input"
-                           placeholder="Search by username…"
-                           aria-label="Search for a friend by username"
-                           autocomplete="off"
-                           class="w-full bg-white border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all">
-                    <button onclick="window.searchFriends()"
-                            class="absolute right-2 top-1/2 -translate-y-1/2 bg-indigo-600 text-white p-2 rounded-xl hover:bg-indigo-700 transition-colors">
-                        <i data-lucide="search" class="w-4 h-4" aria-hidden="true"></i>
-                    </button>
-                </div>
-                <div id="friend-search-results" class="hidden space-y-2"></div>
-
-                <div id="following-list" class="space-y-2">
-                    <p class="text-[10px] font-black uppercase text-slate-400 tracking-widest">Following</p>
-                    <div id="following-users" class="space-y-2">
-                        <p class="text-xs text-slate-400 italic">Loading…</p>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 2. PRIVACY -->
-            <div id="settings-privacy-section" class="bg-slate-50 p-6 rounded-[2rem] border border-slate-100">
-                <p class="text-[10px] font-black uppercase text-indigo-500 mb-4 tracking-widest">Privacy</p>
-                <div class="flex items-center justify-between gap-4">
-                    <div>
-                        <p class="text-sm font-black text-slate-800">Public Profile</p>
-                        <p class="text-[10px] text-slate-400 mt-0.5 leading-relaxed">Anyone can follow you without approval. Off = follow requests need your approval.</p>
-                    </div>
-                    <button id="privacy-toggle"
-                            onclick="window.togglePrivacy()"
-                            role="switch"
-                            aria-checked="false"
-                            class="relative flex-shrink-0 w-12 h-6 rounded-full transition-colors duration-200 bg-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
-                        <span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 translate-x-0" id="privacy-knob"></span>
-                    </button>
-                </div>
-            </div>
-
-            <!-- 3. SYNC SETLIST.FM -->
-            <div class="bg-slate-50 p-6 rounded-[2rem] border border-slate-100">
-                <label for="setlistIdInput" class="block text-[10px] font-black uppercase text-indigo-500 mb-3 tracking-widest">Sync Setlist.fm</label>
-                <div class="flex gap-2">
-                    <input type="text" id="setlistIdInput"
-                           placeholder="Your setlist.fm username"
-                           autocomplete="off"
-                           autocapitalize="off"
-                           spellcheck="false"
-                           class="flex-1 bg-white px-4 py-3 rounded-xl text-sm font-bold border-none shadow-sm outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800">
-                    <button onclick="window.syncSetlistFm()"
-                            aria-label="Run Sync"
-                            class="bg-indigo-600 text-white px-4 py-3 rounded-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200">
-                        <i data-lucide="refresh-cw" class="w-5 h-5"></i>
-                    </button>
-                </div>
-                <!-- Progress bar — hidden until sync starts -->
-                <div class="hidden mt-3 h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                    <div id="sync-progress" class="h-full bg-indigo-500 rounded-full transition-all duration-500" style="width:0%"></div>
-                </div>
-                <!-- Status text — updated by syncSetlistFm() -->
-                <p id="sync-status" class="text-[10px] text-slate-400 mt-3 italic leading-relaxed">This will pull your full history, venues, and setlists.</p>
-                <button onclick="window.showNoSetlistTip()"
-                        class="mt-2 text-[10px] font-black text-slate-400 hover:text-indigo-500 transition-colors uppercase tracking-widest">
-                    I don't have a setlist.fm account &rarr;
+        <!-- NOTE: IDs below use -legacy suffix to avoid conflicts with profile screen.
+             TODO (step 3): update onboarding.js to reference these -legacy IDs,
+             then the profile screen becomes the single canonical source. -->
+        <div class="space-y-4">
+            <div class="flex gap-2">
+                <input type="text" id="setlistIdInput-legacy"
+                       placeholder="Your setlist.fm username"
+                       autocomplete="off"
+                       autocapitalize="off"
+                       spellcheck="false"
+                       class="flex-1 bg-slate-50 px-4 py-3 rounded-xl text-sm font-bold border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800">
+                <button onclick="window.syncSetlistFm()"
+                        aria-label="Run Sync"
+                        class="bg-indigo-600 text-white px-4 py-3 rounded-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200">
+                    <i data-lucide="refresh-cw" class="w-5 h-5"></i>
                 </button>
             </div>
-
-            <!-- 4. EXPORT -->
-            <div id="settings-export-section" class="bg-slate-50 p-6 rounded-[2rem] border border-slate-100">
-                <p class="text-[10px] font-black uppercase text-indigo-500 mb-3 tracking-widest">Export Your Archive</p>
-                <button onclick="window.exportCSV()"
-                        class="w-full flex items-center justify-center gap-2 bg-white border border-slate-200 hover:border-indigo-400 hover:text-indigo-600 text-slate-600 font-black text-sm py-3 rounded-2xl transition-all active:scale-[0.98]">
-                    <i data-lucide="download" class="w-4 h-4" aria-hidden="true"></i>
-                    Download CSV
-                </button>
-                <p class="text-[10px] text-slate-400 mt-3 italic leading-relaxed">Downloads your full gig history as a CSV file. Your data, always yours.</p>
+            <div class="hidden mt-3 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                <div id="sync-progress-legacy" class="h-full bg-indigo-500 rounded-full transition-all duration-500" style="width:0%"></div>
             </div>
-
-            <!-- 5. SIGN OUT — least used, always last -->
-            <button onclick="window.signOut()"
-                    class="w-full py-4 text-red-400 font-bold text-sm hover:text-red-600 transition-colors flex items-center justify-center gap-2">
-                <i data-lucide="log-out" class="w-4 h-4" aria-hidden="true"></i>
-                Sign Out
+            <p id="sync-status-legacy" class="text-[10px] text-slate-400 mt-1 italic leading-relaxed">This will pull your full history, venues, and setlists.</p>
+            <button onclick="window.showNoSetlistTip()"
+                    class="mt-1 text-[10px] font-black text-slate-400 hover:text-indigo-500 transition-colors uppercase tracking-widest">
+                I don't have a setlist.fm account &rarr;
             </button>
-
-            <div class="pt-6 border-t border-slate-100 flex justify-between items-center opacity-40">
-                <p class="text-[9px] font-black uppercase tracking-widest text-slate-500">GigList</p>
-                <div class="flex items-center gap-1.5">
-                    <span class="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
-                    <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest">
-                        BUILD <span id="app-version-display">2.4.0</span>
-                    </p>
-                </div>
-            </div>
         </div>
     </div>
 </div>

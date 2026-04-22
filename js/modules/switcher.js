@@ -80,14 +80,12 @@ function _buildSwitcherPanel() {
     const currentUser   = window.currentUser;
     const isPersonal    = currentUser.Type === 'Personal';
     const isBand        = currentUser.Type === 'Band';
-    const isFriend      = currentUser.Type === 'Friend';
     const bands         = window._switcherBands || [];
     const currentBand   = isBand ? currentUser.UserName : null;
-    const currentFriend = isFriend ? currentUser.friendId : null;
     const following     = window._following || [];
 
     const bandsExpanded     = isBand;
-    const followingExpanded = isFriend || (following.length > 0 && !isBand);
+    const followingExpanded = following.length > 0 && !isBand;
 
     const panel = document.createElement('div');
     panel.id        = 'mode-switcher-panel';
@@ -108,33 +106,32 @@ function _buildSwitcherPanel() {
         </button>`;
 
     panel.innerHTML = `
-        ${row(isFriend ? 'My Gig List' : (window.authDisplayName || 'My Gig List'),
+        ${row(window.authDisplayName || 'My Gig List',
               'Personal Archive',
               isPersonal,
               isPersonal ? '' : "window._switchToPersonal()")}
 
-        <!-- TODO: Re-enable once Profile screens exist — buddies will link to their profile page,
-             not their journal data. The journal overlay is now handled by the buddy filter bar in
-             the Data tab. See backlog item: Profile screens with avatars. -->
-        <!--
         ${following.length > 0 ? `
         <div class="border-t border-slate-100">
             <button onclick="window._toggleFollowingSection(this)" role="menuitem"
                     class="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-colors"
                     aria-expanded="${followingExpanded}" aria-controls="switcher-following-list">
                 <span class="w-5 flex-shrink-0"></span>
-                <span class="flex-1 text-sm font-black text-slate-900">Gig Buddies</span>
+                <span class="flex-1 text-sm font-black text-slate-900">Buddies</span>
                 <i data-lucide="chevron-${followingExpanded ? 'up' : 'down'}" class="w-4 h-4 text-slate-400 pointer-events-none" aria-hidden="true"></i>
             </button>
             <div id="switcher-following-list" class="${followingExpanded ? '' : 'hidden'} bg-slate-50/50">
-                ${following.map(f => row(
-                    f.username, 'Personal Archive',
-                    f.id === currentFriend,
-                    f.id === currentFriend ? '' : `window._switchToFriend('${f.id}', '${f.username.replace(/'/g, "\\'")}')`
-                )).join('')}
+                ${following.map(f => `
+                    <button onclick="window._closeSwitcher(); window.openProfile('${f.id}')" role="menuitem"
+                            class="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-colors">
+                        <span class="w-5 flex-shrink-0"></span>
+                        <span class="flex-1 min-w-0">
+                            <span class="block text-sm font-black text-slate-900 truncate">${f.display_name || f.username}</span>
+                            <span class="block text-[10px] text-slate-400 font-bold uppercase tracking-widest">Profile</span>
+                        </span>
+                    </button>`).join('')}
             </div>
         </div>` : ''}
-        -->
         <div class="border-t border-slate-100">
             <button onclick="window._toggleBandSection(this)" role="menuitem"
                     class="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-colors"
@@ -231,8 +228,5 @@ window._switchToBand = (bandName) => {
     window.location.href = `vault.html?band=${encodeURIComponent(bandName)}`;
 };
 
-// TODO: Re-enable once Profile screens exist — this will navigate to a buddy's profile page.
-// window._switchToFriend = (userId, username) => {
-//     closeSwitcher();
-//     window.location.href = `vault.html?friend=${userId}&friendName=${encodeURIComponent(username)}`;
-// };
+// _switchToFriend retired — buddy navigation now uses window.openProfile(userId)
+// See switcher panel Buddies section above.

@@ -83,21 +83,16 @@ function renderBuddyTiles(buddies) {
 
     if (!buddies.length) {
         container.innerHTML = `
-            <div class="text-center py-16 space-y-4">
+            <div class="text-center py-12 space-y-4">
                 <div class="w-16 h-16 bg-indigo-50 rounded-3xl flex items-center justify-center mx-auto">
                     <i data-lucide="users" class="w-8 h-8 text-indigo-300" aria-hidden="true"></i>
                 </div>
                 <div class="space-y-1">
                     <p class="text-sm font-black text-slate-700">No buddies yet</p>
                     <p class="text-xs text-slate-400 leading-relaxed max-w-[220px] mx-auto">
-                        Find friends who've been to the same shows — search for them in Settings.
+                        Search for friends above to get started.
                     </p>
                 </div>
-                <button onclick="window.openSettings()"
-                        class="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black uppercase tracking-widest px-5 py-2.5 rounded-full transition-all active:scale-95">
-                    <i data-lucide="search" class="w-3.5 h-3.5" aria-hidden="true"></i>
-                    Find Buddies
-                </button>
             </div>`;
         if (window.lucide) lucide.createIcons();
         return;
@@ -107,26 +102,36 @@ function renderBuddyTiles(buddies) {
 
     container.innerHTML = buddies.map(buddy => {
         const colour   = buddyColour(buddy.id);
-        const initials = (buddy.display_name || buddy.username || '?').slice(0, 2).toUpperCase();
-        const totalGigs = _buddyJournalKeys[buddy.id]?.size ?? 0;
+        const initials   = (buddy.display_name || buddy.username || '?').slice(0, 2).toUpperCase();
+        const totalGigs  = _buddyJournalKeys[buddy.id]?.size ?? 0;
         const sharedGigs = [...(_buddyJournalKeys[buddy.id] || [])].filter(k => myKeys.has(k)).length;
+        const safeName   = (buddy.display_name || buddy.username || '').replace(/'/g, "\\'");
+        const avatarHtml = buddy.avatar_url
+            ? `<img src="${buddy.avatar_url}" alt="${buddy.display_name || buddy.username}" class="w-full h-full object-cover rounded-2xl">`
+            : `<span class="font-black text-lg">${initials}</span>`;
 
         return `
-            <button onclick="window.openBuddyDrillIn('${buddy.id}', '${(buddy.display_name || buddy.username || '').replace(/'/g, "\\'")}')"
-                    class="w-full bg-white rounded-[1.5rem] border border-slate-100 shadow-sm p-4 flex items-center gap-4 hover:border-indigo-200 hover:shadow-md transition-all active:scale-[0.99] text-left"
-                    aria-label="View ${buddy.display_name || buddy.username}'s shows">
-                <div class="w-12 h-12 rounded-2xl ${colour.bg} ${colour.text} flex items-center justify-center font-black text-lg flex-shrink-0">
-                    ${initials}
-                </div>
-                <div class="flex-1 min-w-0">
-                    <p class="text-sm font-black text-slate-900 truncate">${buddy.display_name || buddy.username}</p>
-                    <p class="text-[10px] text-slate-400 font-bold mt-0.5">
-                        ${totalGigs} show${totalGigs !== 1 ? 's' : ''}
-                        ${sharedGigs ? `<span class="text-indigo-500">· ${sharedGigs} in common</span>` : ''}
-                    </p>
-                </div>
-                <i data-lucide="chevron-right" class="w-4 h-4 text-slate-300 flex-shrink-0" aria-hidden="true"></i>
-            </button>`;
+            <div class="w-full bg-white rounded-[1.5rem] border border-slate-100 shadow-sm p-4 flex items-center gap-4 hover:border-indigo-200 hover:shadow-md transition-all">
+                <!-- Avatar tap → profile screen -->
+                <button onclick="window.openProfile('${buddy.id}')"
+                        class="w-12 h-12 rounded-2xl ${colour.bg} ${colour.text} flex items-center justify-center flex-shrink-0 overflow-hidden hover:ring-2 hover:ring-indigo-400 hover:ring-offset-1 transition-all active:scale-95"
+                        aria-label="View ${buddy.display_name || buddy.username}'s profile">
+                    ${avatarHtml}
+                </button>
+                <!-- Row tap → drill-in -->
+                <button onclick="window.openBuddyDrillIn('${buddy.id}', '${safeName}')"
+                        class="flex-1 min-w-0 flex items-center gap-3 text-left active:scale-[0.99] transition-all"
+                        aria-label="View ${buddy.display_name || buddy.username}'s shows">
+                    <div class="flex-1 min-w-0">
+                        <p class="text-sm font-black text-slate-900 truncate">${buddy.display_name || buddy.username}</p>
+                        <p class="text-[10px] text-slate-400 font-bold mt-0.5">
+                            ${totalGigs} show${totalGigs !== 1 ? 's' : ''}
+                            ${sharedGigs ? `<span class="text-indigo-500">· ${sharedGigs} in common</span>` : ''}
+                        </p>
+                    </div>
+                    <i data-lucide="chevron-right" class="w-4 h-4 text-slate-300 flex-shrink-0" aria-hidden="true"></i>
+                </button>
+            </div>`;
     }).join('');
 
     if (window.lucide) lucide.createIcons();

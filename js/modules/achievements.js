@@ -111,7 +111,7 @@ const drawBadges = (container, badgeDefs) => {
  * Main Journal Render Function
  */
 export const renderBadges = (journalData) => {
-    const badgeContainer = document.getElementById('badges-grid');
+    const badgeContainer = document.getElementById('profile-achievements-container');
     if (!badgeContainer) return;
 
     const totalGigs = journalData.length;
@@ -217,17 +217,11 @@ export const renderBadges = (journalData) => {
             id: 'festival-pro',
             name: 'Mud & Music',
             goal: 3,
-            current: journalData.filter(g => {
-                const festValue = g['Festival?'] || "";
-                return festValue.trim().toUpperCase().startsWith('Y');
-            }).length,
+            current: journalData.filter(g => g.Festival === true || g['Festival'] === true).length,
             rarity: 'rare',
             desc: 'Attended 3+ Festivals',
             icon: 'tent',
-            earned: journalData.filter(g => {
-                const festValue = g['Festival?'] || "";
-                return festValue.trim().toUpperCase().startsWith('Y');
-            }).length >= 3
+            earned: journalData.filter(g => g.Festival === true || g['Festival'] === true).length >= 3
         }
     ];
 
@@ -240,7 +234,7 @@ export const renderBadges = (journalData) => {
  * Band Mode Render Function
  */
 export const renderBandBadges = (performanceData) => {
-    const badgeContainer = document.getElementById('badges-grid');
+    const badgeContainer = document.getElementById('profile-achievements-container');
     if (!badgeContainer || !performanceData) return;
 
     // Use window.currentArtist set by app.js — works with both localStorage (Phase 1/2) and Supabase auth (Phase 3)

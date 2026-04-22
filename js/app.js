@@ -1,10 +1,10 @@
 /**
  * GigList Core Engine
- * v4.0.1 — 2026-04-21
+ * v4.1.0 — 2026-04-22
  * -------------------------------------------------------------------
- * ✅ Added buddies tab
- * ✅ Buddy avatar shown on data list view
- * ✅ Games and Achievements currently hidden
+ * ✅ Added profile tab (to replace settings modal)
+ * ✅ Added ability to upload avatar image
+ * ✅ Reintroduced achievements into new profile tab
  */
 
 import * as Data from './modules/data.js';
@@ -25,6 +25,7 @@ import { initSocial, checkGigOverlap, rebuildSwitcherPanel, resolveCompanionTags
 import { initModeSwitcher } from './modules/switcher.js';
 import * as Feed from './modules/feed.js';
 import { initBuddies } from './modules/buddies.js';
+import { initProfile } from './modules/profile.js';
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
@@ -69,7 +70,7 @@ let currentUser = null;
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "4.0.1";
+const APP_VERSION = "4.1.0";
 
 window.toggleListView = UI.toggleListView;
 window.activeView = window.activeView || 'list';
@@ -184,11 +185,17 @@ export async function initApp() {
             const dateEl = document.getElementById('header-date-display');
             if (dateEl) dateEl.style.color = 'rgba(255,255,255,0.7)';
 
-            const badge = document.getElementById('userIdentity');
-            if (badge) {
-                badge.style.color = 'white';
-                badge.style.backgroundColor = 'rgba(255,255,255,0.2)';
-                badge.innerText = '...';
+            // Tint the sign-in pill for band mode; avatar circle keeps its own colour
+            const signinPill = document.getElementById('userIdentity-signin');
+            if (signinPill) {
+                signinPill.style.color = 'white';
+                signinPill.style.backgroundColor = 'rgba(255,255,255,0.2)';
+            }
+            // Add a subtle white ring to the avatar circle so it reads on the blue header
+            const avatarCircle = document.getElementById('userIdentity-avatar');
+            if (avatarCircle) {
+                avatarCircle.classList.remove('ring-white');
+                avatarCircle.classList.add('ring-white/60');
             }
         }
     }
@@ -225,21 +232,8 @@ export async function initApp() {
     }
     window.authDisplayName = authDisplayName;
 
-    const identityEl = document.getElementById('userIdentity');
-    if (identityEl) {
-        if (!currentUser.isAuthUser) {
-            identityEl.innerText = 'Sign In';
-            identityEl.onclick = () => window.location.href = 'index.html';
-        } else {
-            identityEl.innerText = authDisplayName;
-            identityEl.style.cursor = 'pointer';
-            identityEl.setAttribute('role', 'button');
-            identityEl.setAttribute('aria-label', 'Open User Settings');
-            identityEl.setAttribute('tabindex', '0');
-            identityEl.onclick = window.openSettings;
-            identityEl.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') window.openSettings(); };
-        }
-    }
+    // Header avatar + onclick wiring handled by profile.js initProfile()
+    // (previously set innerText / onclick directly here)
 
     window.venueLookup = window.allVenues;
     window.track('app_load', {
@@ -270,6 +264,7 @@ export async function initApp() {
     // Buddies tab — personal mode only
     if (currentUser?.Type === 'Personal') {
         await initBuddies(currentUser);
+        await initProfile(currentUser);
     }
 
     // ── Onboarding & companion notifications ─────────────────────────────────
@@ -450,6 +445,13 @@ window.rotateCarousel = (direction) => {
 // ─── VIEW SWITCHING ───────────────────────────────────────────────────────────
 
 window.switchView = (viewId) => {
+    // Profile view is accessed via openProfile(), not switchView()
+    // Redirect so carousel CTAs and other internal links don't break
+    if (viewId === 'profile') {
+        window.openProfile?.(null);
+        return;
+    }
+
     document.querySelectorAll('.view-section').forEach(s => {
         s.classList.add('hidden');
         s.setAttribute('aria-hidden', 'true');
@@ -542,6 +544,10 @@ window.closeModal = () => {
 // ─── SETTINGS MODAL ───────────────────────────────────────────────────────────
 
 window.openSettings = function() {
+    // ONBOARDING USE ONLY — this modal is no longer accessible via normal UI.
+    // The profile screen (view-profile) is the canonical home for settings.
+    // This function is retained because onboarding.js calls it to surface
+    // the setlist.fm sync step. See vault.html legacy modal comment for full context.
     window.track('settings_open');
     const modal = document.getElementById('settingsModal');
     if (!modal) return;
@@ -549,30 +555,8 @@ window.openSettings = function() {
     modal.classList.remove('hidden');
     modal.setAttribute('aria-hidden', 'false');
 
-    const isUnauthenticated = !window.currentUser?.isAuthUser;
-    const exportSection  = document.getElementById('settings-export-section');
-    const setlistSection = document.getElementById('setlistIdInput')?.closest('.bg-slate-50');
-    const friendsSection = document.getElementById('settings-friends-section');
-    const privacySection = document.getElementById('settings-privacy-section');
-
-    if (exportSection)  exportSection.classList.toggle('hidden', isUnauthenticated);
-    if (setlistSection) setlistSection.classList.toggle('hidden', isUnauthenticated);
-    if (friendsSection) friendsSection.classList.toggle('hidden', isUnauthenticated);
-    if (privacySection) privacySection.classList.toggle('hidden', isUnauthenticated);
-
-    if (!isUnauthenticated) {
-        // Social state (buddy list, privacy) is initialised by initSocial() on load
-    }
-
-    document.getElementById('setlistIdInput')?.focus();
-
-    const friendInput = document.getElementById('friend-search-input');
-    if (friendInput && !friendInput._enterWired) {
-        friendInput._enterWired = true;
-        friendInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') window.searchFriends();
-        });
-    }
+    // Focus the (legacy-suffixed) setlist input inside this modal
+    document.getElementById('setlistIdInput-legacy')?.focus();
 
     if (window.lucide) lucide.createIcons();
 };
