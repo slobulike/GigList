@@ -20,6 +20,7 @@
         .view-section { animation: fadeIn 0.4s ease-out; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         .nav-item.active { color: #4f46e5; }
+        .band-nav-item.active { color: #189BCC; }
     </style>
     <link rel="stylesheet" href="css/style.css">
     <link rel="icon" type="image/png" href="assets/icon-512.png">
@@ -73,7 +74,7 @@
                 <p id="stat-artist-label" class="text-[8px] font-black uppercase text-slate-400">Artists</p>
                 <p id="stat-artists" class="text-lg font-black text-slate-800">--</p>
             </div>
-            <!-- Band mode: Fans count (read-only). Personal mode: Rank -->
+            <!-- Band mode: Fans count (derived from journals). Personal mode: Rank -->
             <div id="stat-fourth-tile" class="bg-white p-3 rounded-2xl border border-indigo-100 bg-indigo-50/30 shadow-sm text-center">
                 <p id="stat-fourth-label" class="text-[8px] font-black uppercase text-indigo-400">Rank</p>
                 <p id="stat-rank" class="text-lg font-black text-indigo-700">--</p>
@@ -140,15 +141,6 @@
             </div>
         </div>
 
-        <!-- Favourite button — band mode only, shown via JS -->
-        <button id="btn-favourite"
-                onclick="window.toggleFavourite()"
-                class="hidden w-full flex items-center justify-center gap-2 py-2.5 rounded-2xl border-2 border-slate-200 text-slate-500 text-[11px] font-black uppercase tracking-widest transition-all hover:border-pink-400 hover:text-pink-500 active:scale-[0.98]"
-                aria-label="Favourite this band">
-            <i data-lucide="heart" class="w-4 h-4" aria-hidden="true"></i>
-            <span id="btn-favourite-label">Add to Favourites</span>
-            <span id="btn-favourite-count" class="text-slate-300 font-bold normal-case tracking-normal"></span>
-        </button>
 
         <!-- Next show / days since countdown card -->
         <div id="countdown-card" class="bg-indigo-600 rounded-[1.5rem] p-4 flex items-center justify-between" aria-live="polite">
@@ -199,18 +191,32 @@
             </button>
         </div>
 
-        <!-- Unsaved changes banner removed — Supabase is now the primary store -->
-
         <div class="space-y-4 pt-4">
-            <div class="relative w-full">
-                <i data-lucide="search" class="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"></i>
-                <input type="text"
-                       id="searchInput"
-                       aria-label="Search for artists, venues, or songs"
-                       placeholder="Search artists, venues, or songs..."
-                       class="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all shadow-sm">
+            <div class="flex gap-2 items-center">
+                <div class="relative flex-1">
+                    <i data-lucide="search" class="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"></i>
+                    <input type="text"
+                           id="searchInput"
+                           aria-label="Search for artists, venues, or songs"
+                           placeholder="Search artists, venues, or songs..."
+                           class="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all shadow-sm">
+                </div>
+                <button id="filter-drawer-btn"
+                        onclick="window._filtersModule?.openFilterDrawer()"
+                        class="flex items-center gap-2 px-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm text-slate-600 hover:border-indigo-400 hover:text-indigo-600 transition-all shadow-sm flex-shrink-0">
+                    <i data-lucide="sliders-horizontal" class="w-4 h-4"></i>
+                    <span>Filter</span>
+                </button>
             </div>
 
+            <!-- Filter summary line -->
+            <div id="filter-summary-line" class="hidden flex items-center justify-between px-1">
+                <p id="filter-summary-text" class="text-xs text-slate-500"></p>
+                <button onclick="window._filtersModule?.clearAllFilters()"
+                        class="text-xs text-indigo-500 hover:text-indigo-700 transition-colors">
+                    Clear all
+                </button>
+            </div>
 
             <div id="dc-stats-grid" class="grid grid-cols-3 gap-4">
                 <div class="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-center">
@@ -673,9 +679,90 @@
 
     </section>
 
+
+    <!-- ── BAND MODE: SHOWS VIEW ──────────────────────────────────────────────── -->
+    <section id="view-band-shows"
+             class="band-view-section hidden space-y-6"
+             role="region"
+             aria-label="Band Shows"
+             aria-hidden="true">
+
+        <div class="flex items-center justify-between">
+            <h2 class="text-4xl font-black italic tracking-tighter text-slate-900">Shows</h2>
+        </div>
+
+        <div class="space-y-4 pt-4">
+            <div class="relative w-full">
+                <i data-lucide="search" class="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"></i>
+                <input type="text"
+                       id="band-shows-search"
+                       aria-label="Search shows"
+                       placeholder="Search shows, venues…"
+                       oninput="window.bandShowsSearch(this.value)"
+                       class="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm focus:ring-2 focus:ring-[#189BCC] outline-none transition-all shadow-sm">
+            </div>
+        </div>
+
+        <div id="band-shows-table"></div>
+    </section>
+
+    <!-- ── BAND MODE: STORY VIEW ─────────────────────────────────────────────── -->
+    <section id="view-band-story"
+             class="band-view-section hidden space-y-6"
+             role="region"
+             aria-label="Band Story"
+             aria-hidden="true">
+
+        <div class="flex items-center justify-between">
+            <h2 class="text-4xl font-black italic tracking-tighter text-slate-900">Story</h2>
+        </div>
+
+        <!-- Stat cards grid — populated by band.js -->
+        <div id="band-story-stats" class="grid grid-cols-2 gap-3"></div>
+
+        <!-- Year chart -->
+        <div class="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm h-64">
+            <p class="text-[10px] font-black uppercase text-slate-400 mb-2">Yearly History</p>
+            <div class="h-44">
+                <canvas id="band-story-year-chart"></canvas>
+            </div>
+        </div>
+
+        <!-- Top Songs chart — populated when performanceData available -->
+        <div id="band-story-songs-wrap" class="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm hidden h-72">
+            <p class="text-[10px] font-black uppercase text-slate-400 mb-2">Top Songs</p>
+            <div class="h-56">
+                <canvas id="band-story-songs-chart"></canvas>
+            </div>
+        </div>
+    </section>
+
+    <!-- ── BAND MODE: FANS VIEW ──────────────────────────────────────────────── -->
+    <section id="view-band-fans"
+             class="band-view-section hidden space-y-6"
+             role="region"
+             aria-label="Band Fans"
+             aria-hidden="true">
+
+        <div class="flex items-center justify-between">
+            <h2 class="text-4xl font-black italic tracking-tighter text-slate-900">Fans</h2>
+        </div>
+
+        <!-- Fan tiles — populated by band.js -->
+        <div id="band-fans-list" class="space-y-3">
+            <!-- Loading skeleton -->
+            <div id="band-fans-loading" class="animate-pulse space-y-3">
+                <div class="h-20 bg-slate-200 rounded-[1.5rem]"></div>
+                <div class="h-20 bg-slate-200 rounded-[1.5rem]"></div>
+                <div class="h-20 bg-slate-200 rounded-[1.5rem]"></div>
+            </div>
+        </div>
+    </section>
+
 </main>
 
-<nav class="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-2xl border-t border-slate-100 px-6 pt-3 pb-8 flex justify-between items-center z-50" aria-label="Main navigation">
+<!-- Personal nav — hidden in band mode -->
+<nav id="main-nav" class="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-2xl border-t border-slate-100 px-6 pt-3 pb-8 flex justify-between items-center z-50" aria-label="Main navigation">
     <button onclick="switchView('home')" id="nav-home" class="nav-item active flex flex-col items-center gap-1 flex-1" aria-current="page" aria-label="Home">
         <i data-lucide="layout-grid" class="w-6" aria-hidden="true"></i>
         <span class="text-[9px] font-black uppercase">Home</span>
@@ -691,6 +778,28 @@
     <button onclick="switchView('buddies')" id="nav-buddies" class="nav-item text-slate-400 flex flex-col items-center gap-1 flex-1" aria-current="false" aria-label="Buddies">
         <i data-lucide="users" class="w-6" aria-hidden="true"></i>
         <span class="text-[9px] font-black uppercase">Buddies</span>
+    </button>
+</nav>
+
+<!-- Band mode nav — hidden by default, shown in band mode via JS -->
+<nav id="band-nav" class="hidden fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-2xl border-t border-slate-100 px-6 pt-3 pb-8 flex justify-between items-center z-50" aria-label="Band navigation">
+    <button onclick="window.switchBandView('shows')" id="band-nav-shows"
+            class="band-nav-item active text-[#189BCC] bg-white shadow-sm flex flex-col items-center gap-1 flex-1 rounded-xl py-1 transition-all"
+            aria-current="page" aria-label="Shows">
+        <i data-lucide="list-music" class="w-6" aria-hidden="true"></i>
+        <span class="text-[9px] font-black uppercase">Shows</span>
+    </button>
+    <button onclick="window.switchBandView('story')" id="band-nav-story"
+            class="band-nav-item text-slate-400 flex flex-col items-center gap-1 flex-1 rounded-xl py-1 transition-all"
+            aria-current="false" aria-label="Story">
+        <i data-lucide="bar-chart-2" class="w-6" aria-hidden="true"></i>
+        <span class="text-[9px] font-black uppercase">Story</span>
+    </button>
+    <button onclick="window.switchBandView('fans')" id="band-nav-fans"
+            class="band-nav-item text-slate-400 flex flex-col items-center gap-1 flex-1 rounded-xl py-1 transition-all"
+            aria-current="false" aria-label="Fans">
+        <i data-lucide="heart" class="w-6" aria-hidden="true"></i>
+        <span class="text-[9px] font-black uppercase">Fans</span>
     </button>
 </nav>
 
@@ -999,9 +1108,11 @@
 
 <script type="module">
     import { initApp } from './js/app.js';
+    import { initFilters } from './js/modules/filters.js';
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initApp);
+        document.addEventListener('DOMContentLoaded', () => { initFilters(); initApp(); });
     } else {
+        initFilters();
         initApp();
     }
 </script>

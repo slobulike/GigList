@@ -120,8 +120,8 @@ export const updateRank = (data) => {
     const labelEl = document.getElementById('stat-fourth-label');
 
     if (window.isBandMode) {
-        if (labelEl) labelEl.textContent = 'GigList Fans';
-        // Count is populated by updateFavouriteButton — start with --
+        if (labelEl) labelEl.textContent = 'Fans';
+        // Fan count is loaded async by band.js — start with --
         if (rankEl) rankEl.textContent = '--';
     } else {
         if (labelEl) labelEl.textContent = 'Rank';
@@ -130,60 +130,6 @@ export const updateRank = (data) => {
     }
 };
 
-export const updateFavouriteButton = async () => {
-    const btn       = document.getElementById('btn-favourite');
-    const label     = document.getElementById('btn-favourite-label');
-    const countEl   = document.getElementById('btn-favourite-count');
-    const rankEl    = document.getElementById('stat-rank');
-    if (!btn) return;
-
-    if (!window.isBandMode) { btn.classList.add('hidden'); return; }
-
-    btn.classList.remove('hidden');
-    const bandName = window.currentArtist;
-    const user     = window.currentUser;
-
-    const { supabase } = await import('./supabase.js');
-
-    // Get fan count
-    const { count } = await supabase
-        .from('band_fans')
-        .select('*', { count: 'exact', head: true })
-        .eq('band_name', bandName);
-
-    if (rankEl)   rankEl.textContent  = count ?? 0;
-    if (countEl)  countEl.textContent = count ? `· ${count} fan${count !== 1 ? 's' : ''}` : '';
-
-    if (!user?.isAuthUser) {
-        // Unauthenticated — show count but clicking goes to sign in
-        if (label) label.textContent = `Sign in to Favourite ${bandName}`;
-        btn.classList.remove('border-pink-400', 'text-pink-500', 'bg-pink-50');
-        return;
-    }
-
-    // Check if current user has favourited
-    const { data: fav } = await supabase
-        .from('band_fans')
-        .select('id')
-        .eq('band_name', bandName)
-        .eq('user_id', user.id)
-        .maybeSingle();
-
-    window._isFavourite = !!fav;
-
-    if (fav) {
-        if (label) label.textContent = `Favourited ${bandName}`;
-        btn.classList.add('border-pink-400', 'text-pink-500', 'bg-pink-50');
-        // Replace heart with filled heart
-        const icon = btn.querySelector('[data-lucide]');
-        if (icon) { icon.setAttribute('data-lucide', 'heart'); icon.style.fill = 'currentColor'; }
-    } else {
-        if (label) label.textContent = `Add ${bandName} to Favourites`;
-        btn.classList.remove('border-pink-400', 'text-pink-500', 'bg-pink-50');
-        const icon = btn.querySelector('[data-lucide]');
-        if (icon) { icon.setAttribute('data-lucide', 'heart'); icon.style.fill = 'none'; }
-    }
-};
 
 
 export const renderOTDBanner = (data) => {

@@ -1,5 +1,4 @@
 const CACHE_NAME = 'gig-list-v1';
-// Add every file you want to work offline
 const ASSETS = [
   './',
   './index.html',
@@ -11,7 +10,8 @@ const ASSETS = [
   './data/venues.csv',
   './data/performances.csv',
   './assets/icon-192.png',
-  './assets/icon-512.png'
+  './assets/icon-512.png',
+  './assets/badge-72.png'
 ];
 
 
@@ -30,12 +30,52 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     fetch(event.request)
       .then((response) => {
-        // If network is successful, return it
         return response;
       })
       .catch(() => {
-        // If network fails (offline), look in cache
         return caches.match(event.request);
       })
+  );
+});
+
+// ─── Push Notifications ───────────────────────────────────────────────────────
+
+self.addEventListener('push', (event) => {
+  if (!event.data) return;
+
+  const data = event.data.json();
+  const { title, body, url, tag, icon } = data;
+
+  // Quiet hours: 10pm–8am local time
+  const hour = new Date().getHours();
+  if (hour >= 22 || hour < 8) return;
+
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      tag: tag || 'giglist',
+      icon: icon || '/GigList/assets/icon-192.png',
+      badge: '/GigList/assets/badge-72.png',
+      data: { url: url || '/GigList/' },
+      vibrate: [100, 50, 100],
+    })
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+
+  const url = event.notification.data?.url || '/GigList/';
+
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+      for (const client of windowClients) {
+        if (client.url.includes(self.location.origin) && 'focus' in client) {
+          client.focus();
+          return client.navigate(url);
+        }
+      }
+      if (clients.openWindow) return clients.openWindow(url);
+    })
   );
 });

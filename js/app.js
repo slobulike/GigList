@@ -1,10 +1,10 @@
 /**
  * GigList Core Engine
- * v4.1.0 — 2026-04-22
+ * v4.2.0 — 2026-04-23
  * -------------------------------------------------------------------
- * ✅ Added profile tab (to replace settings modal)
- * ✅ Added ability to upload avatar image
- * ✅ Reintroduced achievements into new profile tab
+ * ✅ Overhauled band mode with own more relevant nav
+ * ✅ Added new filter slide in modal to the data tab
+ * ✅ Refactored charts to use filtered data
  */
 
 import * as Data from './modules/data.js';
@@ -26,6 +26,8 @@ import { initModeSwitcher } from './modules/switcher.js';
 import * as Feed from './modules/feed.js';
 import { initBuddies } from './modules/buddies.js';
 import { initProfile } from './modules/profile.js';
+import { initBandMode } from './modules/band.js';
+import { applyFilters, buildSummaryLine, hasActiveFilters } from './modules/filters.js';
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
@@ -70,7 +72,7 @@ let currentUser = null;
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "4.1.0";
+const APP_VERSION = "4.2.0";
 
 window.toggleListView = UI.toggleListView;
 window.activeView = window.activeView || 'list';
@@ -146,6 +148,8 @@ export async function initApp() {
         };
     }
 
+    document.addEventListener('filtersChanged', _applyFiltersAndRender);
+
     // 1. Load Data
     const data = await Data.loadAppData(currentUser);
     window.currentUser = currentUser;
@@ -185,19 +189,32 @@ export async function initApp() {
             const dateEl = document.getElementById('header-date-display');
             if (dateEl) dateEl.style.color = 'rgba(255,255,255,0.7)';
 
-            // Tint the sign-in pill for band mode; avatar circle keeps its own colour
-            const signinPill = document.getElementById('userIdentity-signin');
-            if (signinPill) {
-                signinPill.style.color = 'white';
-                signinPill.style.backgroundColor = 'rgba(255,255,255,0.2)';
-            }
-            // Add a subtle white ring to the avatar circle so it reads on the blue header
+            // Auth display: show avatar if signed in, tint sign-in pill if not
+            const signinPill   = document.getElementById('userIdentity-signin');
             const avatarCircle = document.getElementById('userIdentity-avatar');
-            if (avatarCircle) {
-                avatarCircle.classList.remove('ring-white');
-                avatarCircle.classList.add('ring-white/60');
+
+            if (currentUser.isAuthUser) {
+                // Avatar initials set after authDisplayName resolves — see block below
+                if (signinPill)   signinPill.classList.add('hidden');
+                if (avatarCircle) {
+                    avatarCircle.classList.remove('ring-white');
+                    avatarCircle.classList.add('ring-white/60');
+                }
+            } else {
+                // Unauthenticated — tint the sign-in pill for visibility on blue header
+                if (signinPill) {
+                    signinPill.style.color = 'white';
+                    signinPill.style.backgroundColor = 'rgba(255,255,255,0.2)';
+                }
             }
         }
+
+        // Hide personal nav, show band nav
+        document.getElementById('main-nav')?.classList.add('hidden');
+        document.getElementById('band-nav')?.classList.remove('hidden');
+
+        // Hide all personal view sections so band views start clean
+        document.querySelectorAll('.view-section').forEach(s => s.classList.add('hidden'));
     }
 
     // 3. Metadata & Identity
@@ -232,7 +249,18 @@ export async function initApp() {
     }
     window.authDisplayName = authDisplayName;
 
-    // Header avatar + onclick wiring handled by profile.js initProfile()
+    // In band mode, profile.js is not called — wire avatar initials directly
+    if (window.isBandMode && currentUser.isAuthUser) {
+        const avatarCircle   = document.getElementById('userIdentity-avatar');
+        const avatarInitials = document.getElementById('userIdentity-avatar-initials');
+        if (avatarCircle && avatarInitials) {
+            avatarCircle.classList.remove('hidden');
+            avatarInitials.textContent = (authDisplayName || 'U').slice(0, 2).toUpperCase();
+            avatarCircle.onclick = () => window.openProfile?.(null);
+        }
+    }
+
+    // Header avatar + onclick wiring handled by profile.js initProfile() in Personal mode
     // (previously set innerText / onclick directly here)
 
     window.venueLookup = window.allVenues;
@@ -260,6 +288,11 @@ export async function initApp() {
         }
 
     initModeSwitcher(currentUser);
+
+    // Band mode — initialise tabs and fan data
+    if (currentUser?.Type === 'Band') {
+        await initBandMode(currentUser, data.journalData, data.performanceData);
+    }
 
     // Buddies tab — personal mode only
     if (currentUser?.Type === 'Personal') {
@@ -311,11 +344,35 @@ export async function initApp() {
     }
 }
 
+function _applyFiltersAndRender() {
+  refreshUI();
+
+  // Update summary line
+  const filtered = window.filteredResults;
+  const summaryLine = document.getElementById('filter-summary-line');
+  const summaryText = document.getElementById('filter-summary-text');
+  if (summaryLine && summaryText) {
+    const active = hasActiveFilters();
+    summaryLine.classList.toggle('hidden', !active);
+    if (active) {
+      summaryText.textContent = buildSummaryLine(filtered.length, window.journalData.length);
+    }
+  }
+
+  // Update filter button active state
+  const filterBtn = document.getElementById('filter-drawer-btn');
+  if (filterBtn) {
+    filterBtn.classList.toggle('border-indigo-400', hasActiveFilters());
+    filterBtn.classList.toggle('text-indigo-600', hasActiveFilters());
+  }
+}
+
 function refreshUI() {
     const includeFuture = document.getElementById('upcoming-toggle')?.checked;
     const searchVal = document.getElementById('searchInput')?.value || '';
 
-    const results = Data.filterGigs(searchVal, window.journalData, includeFuture);
+    const searchResults = Data.filterGigs(searchVal, window.journalData, includeFuture);
+    const results = applyFilters(searchResults);
     window.filteredResults = results;
 
     const sortedResults = Data.sortGigs(results, window.currentSort.column, window.currentSort.ascending);
@@ -323,7 +380,6 @@ function refreshUI() {
     UI.updateCurrentDate();
     UI.updateStats(results);
     UI.updateRank(results);
-    UI.updateFavouriteButton();
     UI.updateTicker(results);
     UI.renderOTDBanner(results);
     UI.renderCarousel(results);
@@ -671,52 +727,6 @@ window.track = (event, properties = {}) => {
 
 
 
-
-// ─── BAND FAVOURITE TOGGLE ────────────────────────────────────────────────────
-
-window.toggleFavourite = async () => {
-    if (!window.isBandMode) return;
-
-    if (!currentUser?.isAuthUser) {
-        window.location.href = 'index.html';
-        return;
-    }
-
-    const bandName = window.currentArtist;
-    const userId   = currentUser.id;
-    const btn      = document.getElementById('btn-favourite');
-    const label    = document.getElementById('btn-favourite-label');
-    const countEl  = document.getElementById('btn-favourite-count');
-    const rankEl   = document.getElementById('stat-rank');
-
-    const wasFavourite = window._isFavourite;
-    window._isFavourite = !wasFavourite;
-
-    const currentCount = parseInt(rankEl?.textContent || '0', 10) || 0;
-    const newCount     = wasFavourite ? Math.max(0, currentCount - 1) : currentCount + 1;
-    if (rankEl)  rankEl.textContent  = newCount;
-    if (countEl) countEl.textContent = newCount ? `· ${newCount} fan${newCount !== 1 ? 's' : ''}` : '';
-
-    if (window._isFavourite) {
-        if (label) label.textContent = `Favourited ${bandName}`;
-        btn?.classList.add('border-pink-400', 'text-pink-500', 'bg-pink-50');
-        const icon = btn?.querySelector('[data-lucide]');
-        if (icon) icon.style.fill = 'currentColor';
-    } else {
-        if (label) label.textContent = `Add ${bandName} to Favourites`;
-        btn?.classList.remove('border-pink-400', 'text-pink-500', 'bg-pink-50');
-        const icon = btn?.querySelector('[data-lucide]');
-        if (icon) icon.style.fill = 'none';
-    }
-
-    if (wasFavourite) {
-        await supabase.from('band_fans').delete()
-            .eq('band_name', bandName).eq('user_id', userId);
-    } else {
-        await supabase.from('band_fans')
-            .insert({ band_name: bandName, user_id: userId });
-    }
-};
 
 // ─── SCRAPBOOK PHOTO UPLOAD ───────────────────────────────────────────────────
 
