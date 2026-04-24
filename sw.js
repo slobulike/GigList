@@ -54,8 +54,8 @@ self.addEventListener('push', (event) => {
   const { title, body, url, tag, icon } = data;
 
   // The current time is 4:50 PM, so this check will pass right now!
-  const hour = new Date().getHours();
-  if (hour >= 22 || hour < 8) return;
+  //const hour = new Date().getHours();
+  //if (hour >= 22 || hour < 8) return;
 
   event.waitUntil(
     self.registration.showNotification(title || 'Strictly GigList', {
