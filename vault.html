@@ -621,6 +621,26 @@
                 </div>
             </div>
 
+            <!-- Push Notifications -->
+            <div class="bg-white rounded-[2rem] border border-slate-100 shadow-sm px-5 py-4" data-push-row>
+                <div class="flex items-center justify-between gap-4">
+                    <div>
+                        <p class="text-sm font-black text-slate-800">Push Notifications</p>
+                        <p id="push-toggle-label" class="text-[10px] text-slate-400 mt-0.5 leading-relaxed">Get notified about gig buddies and memories.</p>
+                        <p id="push-ios-hint" class="hidden text-[10px] text-amber-500 mt-0.5 leading-relaxed">
+                            Add GigList to your home screen to enable on iOS
+                        </p>
+                    </div>
+                    <button
+                            id="push-toggle-btn"
+                            role="switch"
+                            aria-checked="false"
+                            class="relative flex-shrink-0 w-12 h-6 rounded-full transition-colors duration-200 bg-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
+                        <span data-knob class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 translate-x-0"></span>
+                    </button>
+                </div>
+            </div>
+
             <!-- Setlist.fm sync -->
             <!-- NOTE: #setlistIdInput, #sync-progress, #sync-status IDs are referenced by onboarding flow — do not rename -->
             <div class="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-5">

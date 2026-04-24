@@ -1,10 +1,8 @@
 /**
  * GigList Core Engine
- * v4.2.0 — 2026-04-23
+ * v4.3.0 — 2026-04-24
  * -------------------------------------------------------------------
- * ✅ Overhauled band mode with own more relevant nav
- * ✅ Added new filter slide in modal to the data tab
- * ✅ Refactored charts to use filtered data
+ * ✅ Push notification infrastructure added to cloudflare, supabase and app
  */
 
 import * as Data from './modules/data.js';

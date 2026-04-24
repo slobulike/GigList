@@ -16,6 +16,7 @@
 
 import { supabase } from './supabase.js';
 import { renderBadges } from './achievements.js';
+import { initPushUI } from './push.js';
 
 // ─── MODULE STATE ─────────────────────────────────────────────────────────────
 
@@ -32,6 +33,7 @@ export async function initProfile(currentUser) {
     _currentUser = currentUser;
     _populateHeaderAvatar(currentUser);
     _initPrivacyToggle(currentUser);
+    await initPushUI(supabase);
 }
 
 // ─── HEADER AVATAR ────────────────────────────────────────────────────────────
@@ -203,6 +205,7 @@ async function _renderOwnProfile() {
 
     // ── Privacy toggle initial state ──
     _setPrivacyToggleState(user.is_public);
+    await initPushUI(supabase);
 
     // ── Achievements ──
     _renderAchievements(window.journalData || []);
