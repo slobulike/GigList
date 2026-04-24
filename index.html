@@ -478,8 +478,18 @@
 </script>
 <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/GigList/sw.js');
-    }
+  // Using './sw.js' ensures it looks in the current folder,
+  // regardless of the domain name.
+  navigator.serviceWorker.register('./sw.js')
+    .then(reg => {
+      console.log('SW Registered with scope:', reg.scope);
+      // Now initialize your Push UI
+      if (typeof initPushUI === 'function') {
+        initPushUI(supabase);
+      }
+    })
+    .catch(err => console.error('SW Registration failed:', err));
+}
 </script>
 </body>
 </html>

@@ -43,20 +43,28 @@ self.addEventListener('fetch', (event) => {
 self.addEventListener('push', (event) => {
   if (!event.data) return;
 
-  const data = event.data.json();
+  let data;
+  try {
+    data = event.data.json();
+  } catch (e) {
+    // This catches the DevTools "Test" string and prevents the crash
+    data = { title: 'Strictly GigList', body: event.data.text() };
+  }
+
   const { title, body, url, tag, icon } = data;
 
-  // Quiet hours: 10pm–8am local time
+  // The current time is 4:50 PM, so this check will pass right now!
   const hour = new Date().getHours();
   if (hour >= 22 || hour < 8) return;
 
   event.waitUntil(
-    self.registration.showNotification(title, {
-      body,
+    self.registration.showNotification(title || 'Strictly GigList', {
+      body: body || 'New update available',
       tag: tag || 'giglist',
-      icon: icon || '/GigList/assets/icon-192.png',
-      badge: '/GigList/assets/badge-72.png',
-      data: { url: url || '/GigList/' },
+      // Remove the leading slash to keep it relative to the SW location
+      icon: icon || './assets/icon-192.png',
+      badge: './assets/badge-72.png',
+      data: { url: url || './' },
       vibrate: [100, 50, 100],
     })
   );
