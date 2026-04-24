@@ -1139,6 +1139,31 @@
 
 <!-- Toast notification container -->
 <div id="toast-container" class="fixed bottom-24 left-1/2 -translate-x-1/2 z-[500] flex flex-col items-center gap-2 pointer-events-none" aria-live="polite" aria-atomic="false"></div>
+<script>
+    // Wait for the window to load to ensure all other scripts (like Supabase) are ready
+    window.addEventListener('load', () => {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('./sw.js')
+          .then(reg => {
+            console.log('SW Registered with scope:', reg.scope);
 
+            // We need to pass the supabase instance to initPushUI.
+            // We check the global window object for your Supabase client.
+            const supabaseInstance = window.supabase;
+
+            if (typeof initPushUI === 'function') {
+              if (supabaseInstance) {
+                initPushUI(supabaseInstance);
+              } else {
+                console.warn('[Push] Supabase instance not found on window. check initialization.');
+                // Even if Supabase isn't ready, we call it to set up the UI basics
+                initPushUI(null);
+              }
+            }
+          })
+          .catch(err => console.error('SW Registration failed:', err));
+      }
+    });
+</script>
 </body>
 </html>
