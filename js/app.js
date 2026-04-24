@@ -1,8 +1,8 @@
 /**
  * GigList Core Engine
- * v4.3.2 — 2026-04-24
+ * v4.3.3 — 2026-04-24
  * -------------------------------------------------------------------
- * ✅ Push notification infrastructure added to cloudflare, supabase and app
+ * ✅ Push bug fixes
  */
 
 import * as Data from './modules/data.js';
@@ -70,7 +70,7 @@ let currentUser = null;
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "4.3.2";
+const APP_VERSION = "4.3.3";
 
 window.toggleListView = UI.toggleListView;
 window.activeView = window.activeView || 'list';

@@ -136,6 +136,7 @@ export async function initPushUI(supabase) {
 
   // Derive state from browser + DB — never assume
   const state = await getPushState(supabase);
+  console.log('[Push] Initial state:', state, 'permission:', Notification.permission);
 
   if (state === 'unsupported') {
     btn.closest('[data-push-row]')?.classList.add('hidden');
@@ -169,11 +170,16 @@ export async function initPushUI(supabase) {
 
   fresh.addEventListener('click', async () => {
     const currentlyOn = fresh.getAttribute('aria-checked') === 'true';
+    console.log('[Push] Toggle clicked, currentlyOn:', currentlyOn);
+    console.log('[Push] Notification.permission:', Notification.permission);
+
     if (currentlyOn) {
       const ok = await unsubscribeFromPush(supabase);
       if (ok) update(fresh, false);
     } else {
+      console.log('[Push] Attempting to subscribe...');
       const ok = await subscribeToPush(supabase);
+      console.log('[Push] Subscribe result:', ok);
       if (ok) update(fresh, true);
     }
   });
