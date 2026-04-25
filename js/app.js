@@ -1,8 +1,10 @@
 /**
  * GigList Core Engine
- * v4.3.4 — 2026-04-25
+ * v4.3.5 — 2026-04-25
  * -------------------------------------------------------------------
- * ✅ Push and buddy logic fixes
+ * ✅ Added spinner and implemented on push subscribe call
+ * ✅ Refactored performances and venues load to filter by user relevant data to reduce load size
+ * ✅ Added indexes to performances and venues tables
  */
 
 import * as Data from './modules/data.js';
@@ -65,6 +67,33 @@ window.showToast = (message, type = 'info', duration = 3500) => {
     }, duration);
 };
 
+// ─── SPINNER OVERLAY ──────────────────────────────────────────────────────────
+
+window.showSpinner = (message = '') => {
+    const overlay = document.getElementById('spinner-overlay');
+    const msg     = document.getElementById('spinner-message');
+    if (!overlay) return;
+    if (msg) msg.textContent = message;
+    overlay.classList.remove('hidden');
+};
+
+window.hideSpinner = () => {
+    document.getElementById('spinner-overlay')?.classList.add('hidden');
+};
+
+/**
+ * Wraps an async function with spinner show/hide.
+ * Always hides the spinner even if the function throws.
+ * Usage: await window.withSpinner('Saving…', () => someAsyncFn())
+ */
+window.withSpinner = async (message, fn) => {
+    window.showSpinner(message);
+    try {
+        return await fn();
+    } finally {
+        window.hideSpinner();
+    }
+};
 
 let currentUser = null;
 let homeCarousel = [];

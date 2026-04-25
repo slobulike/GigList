@@ -718,7 +718,26 @@ const getHomeBase = (venueStats, venuesLookup) => {
     return topVenue ? [topVenue.lat, topVenue.lng] : [51.507, -0.127];
 };
 
-export const renderMap = (data) => {
+async function ensureLeaflet() {
+    if (window.L) return; // already loaded
+
+    await new Promise((resolve, reject) => {
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = 'https://unpkg.com/leaflet/dist/leaflet.css';
+        document.head.appendChild(link);
+
+        const script = document.createElement('script');
+        script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+        script.onload = resolve;
+        script.onerror = reject;
+        document.head.appendChild(script);
+    });
+}
+
+export const renderMap = async (data) => {
+    await ensureLeaflet();
+
     const mapCanvas = document.getElementById('map-canvas');
     if (!mapCanvas) return;
 

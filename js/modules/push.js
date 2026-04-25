@@ -182,11 +182,11 @@ export async function initPushUI(supabase) {
     console.log('[Push] Notification.permission:', Notification.permission);
 
     if (currentlyOn) {
-      const ok = await unsubscribeFromPush(supabase);
+      const ok = await window.withSpinner('Turning off notifications…', () => unsubscribeFromPush(supabase));
       if (ok) update(fresh, false);
     } else {
       console.log('[Push] Attempting to subscribe...');
-      const ok = await subscribeToPush(supabase);
+      const ok = await window.withSpinner('Enabling notifications…', () => subscribeToPush(supabase));
       console.log('[Push] Subscribe result:', ok);
       if (ok) update(fresh, true);
     }

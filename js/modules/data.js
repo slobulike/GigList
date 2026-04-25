@@ -54,6 +54,20 @@ export const sortGigs = (data, column, ascending = true) => {
  * Phase 3 note: this replaces the CSV fetch/Papa.parse approach.
  * The shape of the returned data is identical to the old CSV version
  * so nothing else in the app needs to change.
+ *
+ * Phase 4 perf note: both performances and venues are now scoped to the
+ * user's journal rather than fetching entire tables.
+ *
+ * Load order:
+ *   1. Journals (must come first — we need bands + venue names to scope steps 2 & 3)
+ *   2. Performances + Venues in parallel (both scoped to journal content)
+ *
+ * This recovers the parallel fetch benefit while keeping payloads minimal:
+ *   - performances: filtered by .in('artist', journalBands)  [index: performances_artist_idx]
+ *   - venues:       filtered by .in('official_name', journalVenues) [index: venues_official_name_idx]
+ *
+ * A user with no shows gets 0 bytes for both. A heavy user gets only their
+ * relevant slice rather than the entire global dataset.
  */
 export const loadAppData = async (user) => {
     const escapeHTMLAttr = (str) => {
@@ -64,10 +78,8 @@ export const loadAppData = async (user) => {
     const now = new Date();
     now.setHours(0, 0, 0, 0);
 
-    // Load venues first — needed to enrich journal and performance rows
-    const venueLookup = await loadVenues();
-
-    // Load journal rows
+    // ── Step 1: Journals ──────────────────────────────────────────────────────
+    // Must resolve first so we can extract bands + venue names for scoped fetches.
     // Band mode: fetch by band name (null user_id rows)
     // Individual mode: fetch by authenticated user's id
     let journalQuery;
@@ -93,37 +105,66 @@ export const loadAppData = async (user) => {
             .range(0, 9999);
     }
 
-    // Load performances in parallel with journals
-    const [journalRes, perfRes] = await Promise.all([
-        journalQuery,
-        supabase.from('performances').select('*').range(0, 99999)
+    const journalRes = await journalQuery;
+    if (journalRes.error) throw new Error(`Failed to load journals: ${journalRes.error.message}`);
+
+    let journalData = journalRes.data || [];
+
+    // Derive scoping sets from the raw journal rows (pre-normalisation, snake_case keys)
+    const journalBands  = [...new Set(journalData.map(r => r.band).filter(Boolean))];
+    const journalVenues = [...new Set(journalData.map(r => r.official_venue).filter(Boolean))];
+
+    // ── Step 2: Performances + Venues in parallel ─────────────────────────────
+    // Both are now scoped to the user's journal content.
+    // Falls back to empty for users with no shows (new signups etc.).
+    const [perfRes, venueRes] = await Promise.all([
+        journalBands.length > 0
+            ? supabase.from('performances').select('*').in('artist', journalBands)
+            : Promise.resolve({ data: [], error: null }),
+        journalVenues.length > 0
+            ? supabase.from('venues').select('*').in('official_name', journalVenues)
+            : Promise.resolve({ data: [], error: null }),
     ]);
 
-    if (journalRes.error) throw new Error(`Failed to load journals: ${journalRes.error.message}`);
-    if (perfRes.error)   throw new Error(`Failed to load performances: ${perfRes.error.message}`);
+    if (perfRes.error)  throw new Error(`Failed to load performances: ${perfRes.error.message}`);
+    if (venueRes.error) throw new Error(`Failed to load venues: ${venueRes.error.message}`);
 
-    let journalData     = journalRes.data || [];
+    // Build venue lookup from scoped results and stash on window for map/editor use
+    const venueLookup = {};
+    (venueRes.data || []).forEach(v => {
+        if (v.official_name) {
+            venueLookup[v.official_name] = {
+                lat:      parseFloat(v.latitude)  || null,
+                lng:      parseFloat(v.longitude) || null,
+                city:     v.city     || 'Unknown City',
+                country:  v.country  || 'Unknown Country',
+                capacity: v.capacity || 'Unknown',
+            };
+        }
+    });
+    window.allVenues = venueLookup;
+
     let performanceData = perfRes.data    || [];
 
     // Normalise column names from Supabase snake_case to the app's expected format
     // Supabase returns lowercase column names; the app expects the original CSV casing
     journalData = journalData.map(row => ({
         ...row,
-        Band:              row.band             || row.Band             || '',
-        OfficialVenue:     row.official_venue   || row.OfficialVenue    || '',
-        'Journal Key':     row.journal_key      || row['Journal Key']   || '',
-        'Festival?':       row.festival ? 'Y' : 'N',
+        Band:               row.band             || row.Band             || '',
+        OfficialVenue:      row.official_venue   || row.OfficialVenue    || '',
+        'Journal Key':      row.journal_key      || row['Journal Key']   || '',
+        'Festival?':        row.festival ? 'Y' : 'N',
         'Festival Lineups': row.festival_lineups || row['Festival Lineups'] || '',
-        'Notable Support': row.notable_support  || row['Notable Support']  || '',
-        'Went With':       row.went_with        || row['Went With']     || '',
-        Comments:          row.comments         || row.Comments         || '',
-        Photos:            row.photos           || row.Photos           || '',
-        'Review URL':      row.review_url       || row['Review URL']    || '',
-        Price:             row.price            || row.Price            || '',
-        Date:              row.date             || row.Date             || '',
-        Year:              row.year             || row.Year             || '',
-        Month:             row.month            || row.Month            || '',
-        Day:               row.day              || row.Day              || '',
+        'Notable Support':  row.notable_support  || row['Notable Support']  || '',
+        'Went With':        row.went_with        || row['Went With']     || '',
+        Comments:           row.comments         || row.Comments         || '',
+        Photos:             row.photos           || row.Photos           || '',
+        'Review URL':       row.review_url       || row['Review URL']    || '',
+        Price:              row.price            || row.Price            || '',
+        Date:               row.date             || row.Date             || '',
+        Year:               row.year             || row.Year             || '',
+        Month:              row.month            || row.Month            || '',
+        Day:                row.day              || row.Day              || '',
     }));
 
     performanceData = performanceData.map(p => ({
@@ -164,11 +205,21 @@ export const loadAppData = async (user) => {
 
 /**
  * Loads the venue lookup from Supabase.
+ *
+ * @param {string[]|null} officialVenues - Optional list of venue names to scope the fetch.
+ *   Pass null (default) to fetch all venues — used by the editor's venue search and
+ *   any other caller that needs the full table. loadAppData passes the user's journal
+ *   venues here to keep the payload minimal on app load.
+ *
  * Falls back to the CSV file if Supabase is unavailable.
  */
-export const loadVenues = async () => {
-    // Try Supabase first
-    const { data, error } = await supabase.from('venues').select('*');
+export const loadVenues = async (officialVenues = null) => {
+    // Try Supabase first — scope to provided names if given
+    let venueQuery = supabase.from('venues').select('*');
+    if (officialVenues && officialVenues.length > 0) {
+        venueQuery = venueQuery.in('official_name', officialVenues);
+    }
+    const { data, error } = await venueQuery;
 
     if (!error && data && data.length > 0) {
         const lookup = {};
@@ -214,7 +265,6 @@ export const loadVenues = async () => {
         });
     });
 };
-
 
 
 export const getUniqueSongCount = (filteredGigs) => {

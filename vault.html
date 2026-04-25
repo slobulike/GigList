@@ -9,8 +9,6 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" media="print" onload="this.media='all'">
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
     <script src="https://unpkg.com/lucide@latest" defer></script>
 
 
@@ -1165,5 +1163,14 @@
       }
     });
 </script>
+<!-- Full-screen spinner overlay -->
+<div id="spinner-overlay" class="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm hidden" aria-live="polite" aria-label="Loading">
+    <div class="flex flex-col items-center gap-4">
+        <svg class="w-10 h-10 animate-spin text-indigo-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+        </svg>
+        <p id="spinner-message" class="text-white text-sm font-semibold tracking-wide"></p>
+    </div>
+</div>
 </body>
 </html>
