@@ -1,18 +1,120 @@
 import { buildPushHTTPRequest } from '@pushforge/builder';
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
+// ─── Notification Registry ────────────────────────────────────────────────────
+//
+// To add a new notification type:
+//   1. Add an entry here defining the webhook event and payload builder
+//   2. Add a Supabase Database Webhook pointing to /push/webhook/<key>
+//   That's it.
+//
+// Each entry has:
+//   event:       'INSERT' | 'UPDATE' — the Supabase webhook event type
+//   description: human-readable note for future you
+//   shouldFire(record, oldRecord) → bool
+//     Optional guard — return false to skip silently. Defaults to true if omitted.
+//   getRecipientIds(record, oldRecord, env) → Promise<string[]>
+//     Return the user IDs who should receive the notification.
+//   buildPayload(record, oldRecord, env) → Promise<{ title, body, url, tag }>
+//     Return the notification content.
 
-async function getSubscriptions(env, userIds) {
-  const url = `${env.SUPABASE_URL}/rest/v1/push_subscriptions?user_id=in.(${userIds.join(',')})`;
-  const res = await fetch(url, {
+const NOTIFICATIONS = {
+
+  'buddy-request': {
+    event: 'INSERT',
+    description: 'Notify the recipient when someone sends them a buddy request',
+    shouldFire: (record) => record.status === 'pending',
+    getRecipientIds: async (record) => {
+      // Notify whoever is NOT the initiator
+      const recipientId = record.initiator_id === record.requester_id
+        ? record.addressee_id
+        : record.requester_id;
+      return [recipientId];
+    },
+    buildPayload: async (record, _old, env) => {
+      const username = await getUsername(env, record.initiator_id);
+      return {
+        title: '🎸 New buddy request',
+        body: `${username} wants to be your gig buddy!`,
+        url: '/GigList/',
+        tag: 'buddy-request',
+      };
+    },
+  },
+
+  'buddy-accepted': {
+    event: 'UPDATE',
+    description: 'Notify the initiator when their buddy request is accepted',
+    shouldFire: (record, oldRecord) =>
+      oldRecord?.status === 'pending' && record.status === 'accepted',
+    getRecipientIds: async (record) => [record.initiator_id],
+    buildPayload: async (record, _old, env) => {
+      // The acceptor is whoever is NOT the initiator
+      const acceptorId = record.initiator_id === record.requester_id
+        ? record.addressee_id
+        : record.requester_id;
+      const username = await getUsername(env, acceptorId);
+      return {
+        title: '🎉 Buddy request accepted!',
+        body: `${username} accepted your request — check out their gig history!`,
+        url: '/GigList/',
+        tag: 'buddy-accepted',
+      };
+    },
+  },
+
+  // ── Future notification types go here ──────────────────────────────────────
+  //
+  // 'new-gig': {
+  //   event: 'INSERT',
+  //   description: 'Notify gig buddies when someone logs a new show',
+  //   getRecipientIds: async (record, _old, env) => { ... },
+  //   buildPayload: async (record, _old, env) => ({ ... }),
+  // },
+
+};
+
+// ─── Supabase Helpers ─────────────────────────────────────────────────────────
+
+async function supabaseFetch(env, path) {
+  const res = await fetch(`${env.SUPABASE_URL}/rest/v1/${path}`, {
     headers: {
       apikey: env.SUPABASE_SERVICE_KEY,
       Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
     },
   });
-  if (!res.ok) return [];
+  if (!res.ok) return null;
   return res.json();
 }
+
+async function getUsername(env, userId) {
+  const rows = await supabaseFetch(env, `profiles?id=eq.${userId}&select=display_name,username`);
+  const profile = rows?.[0];
+  return profile?.display_name || profile?.username || 'Someone';
+}
+
+async function getSubscriptions(env, userIds) {
+  if (!userIds?.length) return [];
+  const rows = await supabaseFetch(
+    env,
+    `push_subscriptions?user_id=in.(${userIds.join(',')})`
+  );
+  return rows ?? [];
+}
+
+async function deleteStaleSubscription(env, endpoint) {
+  await fetch(
+    `${env.SUPABASE_URL}/rest/v1/push_subscriptions?endpoint=eq.${encodeURIComponent(endpoint)}`,
+    {
+      method: 'DELETE',
+      headers: {
+        apikey: env.SUPABASE_SERVICE_KEY,
+        Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+      },
+    }
+  );
+}
+
+// ─── Push Helpers ─────────────────────────────────────────────────────────────
 
 async function sendPush(env, sub, payload) {
   const { endpoint, headers, body } = await buildPushHTTPRequest({
@@ -40,65 +142,122 @@ async function sendPush(env, sub, payload) {
   return res;
 }
 
-async function sendToSubscriptions(env, subscriptions, payload) {
-  return Promise.allSettled(
+async function dispatchToUsers(env, userIds, payload) {
+  const subscriptions = await getSubscriptions(env, userIds);
+  if (!subscriptions.length) return { sent: 0, total: 0 };
+
+  const results = await Promise.allSettled(
     subscriptions.map((sub) => sendPush(env, sub, payload))
   );
-}
 
-async function deleteStaleSubscription(env, endpoint) {
-  await fetch(
-    `${env.SUPABASE_URL}/rest/v1/push_subscriptions?endpoint=eq.${encodeURIComponent(endpoint)}`,
-    {
-      method: 'DELETE',
-      headers: {
-        apikey: env.SUPABASE_SERVICE_KEY,
-        Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-      },
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i];
+    if (r.status === 'rejected') {
+      console.error(`[push] failed for ${subscriptions[i].user_id}:`, r.reason?.statusCode, r.reason?.body);
+      if (r.reason?.statusCode === 410) {
+        await deleteStaleSubscription(env, subscriptions[i].endpoint);
+      }
     }
-  );
+  }
+
+  return {
+    sent: results.filter((r) => r.status === 'fulfilled').length,
+    total: subscriptions.length,
+  };
 }
 
-// ─── Cron: On This Day ───────────────────────────────────────────────────────
+// ─── Webhook Handler ──────────────────────────────────────────────────────────
+
+async function handleWebhook(notificationKey, request, env) {
+  const sig = request.headers.get('x-webhook-secret') || '';
+  if (sig !== env.WEBHOOK_SECRET) {
+    console.warn(`[webhook] Unauthorized request for ${notificationKey}`);
+    return new Response('Unauthorized', { status: 401 });
+  }
+
+  const definition = NOTIFICATIONS[notificationKey];
+  if (!definition) {
+    return new Response('Unknown notification type', { status: 404 });
+  }
+
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return new Response('Invalid JSON', { status: 400 });
+  }
+
+  const record = body.record;
+  const oldRecord = body.old_record ?? null;
+
+  if (definition.shouldFire && !definition.shouldFire(record, oldRecord)) {
+    console.log(`[webhook] ${notificationKey} — shouldFire returned false, skipping`);
+    return new Response('ok');
+  }
+
+  try {
+    const [recipientIds, payload] = await Promise.all([
+      definition.getRecipientIds(record, oldRecord, env),
+      definition.buildPayload(record, oldRecord, env),
+    ]);
+
+    if (!recipientIds?.length) {
+      console.log(`[webhook] ${notificationKey} — no recipients, skipping`);
+      return new Response('ok');
+    }
+
+    const result = await dispatchToUsers(env, recipientIds, payload);
+    console.log(`[webhook] ${notificationKey} — sent ${result.sent}/${result.total}`);
+    return new Response(JSON.stringify(result), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  } catch (err) {
+    console.error(`[webhook] ${notificationKey} error:`, err);
+    return new Response('Internal error', { status: 500 });
+  }
+}
+
+// ─── Cron: On This Day ────────────────────────────────────────────────────────
 
 async function handleOnThisDay(env) {
   const today = new Date();
   const month = today.getMonth() + 1;
   const day = today.getDate();
 
-  const gigsRes = await fetch(
-    `${env.SUPABASE_URL}/rest/v1/gigs?select=id,artist,venue,date,user_id&date=gte.2000-01-01`,
-    {
-      headers: {
-        apikey: env.SUPABASE_SERVICE_KEY,
-        Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-      },
-    }
+  console.log(`[cron] On This Day — checking for gigs on ${month}/${day}`);
+
+  const allGigs = await supabaseFetch(
+    env,
+    `gigs?select=id,artist,venue,date,user_id&date=gte.2000-01-01`
   );
 
-  if (!gigsRes.ok) return;
-  const allGigs = await gigsRes.json();
+  if (!allGigs?.length) return;
 
   const matches = allGigs.filter((g) => {
     const d = new Date(g.date);
-    return d.getMonth() + 1 === month && d.getDate() === day;
+    return d.getUTCMonth() + 1 === month && d.getUTCDate() === day;
   });
 
-  if (matches.length === 0) return;
+  if (matches.length === 0) {
+    console.log('[cron] On This Day — no matches today');
+    return;
+  }
 
   const byUser = matches.reduce((acc, gig) => {
-    if (!acc[gig.user_id]) acc[gig.user_id] = [];
-    acc[gig.user_id].push(gig);
+    (acc[gig.user_id] ??= []).push(gig);
     return acc;
   }, {});
 
   const userIds = Object.keys(byUser);
   const subscriptions = await getSubscriptions(env, userIds);
 
+  console.log(`[cron] On This Day — ${matches.length} gig(s) for ${userIds.length} user(s), ${subscriptions.length} subscription(s)`);
+
   for (const sub of subscriptions) {
     const userGigs = byUser[sub.user_id];
     if (!userGigs) continue;
 
+    userGigs.sort((a, b) => new Date(a.date) - new Date(b.date));
     const gig = userGigs[0];
     const yearsAgo = today.getFullYear() - new Date(gig.date).getFullYear();
     const extra = userGigs.length > 1 ? ` (+${userGigs.length - 1} more)` : '';
@@ -118,28 +277,29 @@ async function handleOnThisDay(env) {
   }
 }
 
-// ─── HTTP Handler ────────────────────────────────────────────────────────────
+// ─── HTTP Handler ─────────────────────────────────────────────────────────────
+
+const CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-webhook-secret',
+};
 
 async function handleRequest(request, env) {
   const url = new URL(request.url);
-  const corsHeaders = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-  };
 
   if (request.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+    return new Response(null, { headers: CORS });
   }
 
-  // GET /push/vapid-public-key — client fetches this on load
+  // GET /push/vapid-public-key
   if (request.method === 'GET' && url.pathname === '/push/vapid-public-key') {
     return new Response(JSON.stringify({ key: env.VAPID_PUBLIC_KEY }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      headers: { ...CORS, 'Content-Type': 'application/json' },
     });
   }
 
-  // POST /push/send — internal trigger from app logic
+  // POST /push/send — manual/internal trigger (testing and admin)
   if (request.method === 'POST' && url.pathname === '/push/send') {
     const auth = request.headers.get('Authorization');
     if (auth !== `Bearer ${env.INTERNAL_SECRET}`) {
@@ -147,133 +307,26 @@ async function handleRequest(request, env) {
     }
 
     const { userIds, payload } = await request.json();
-
     if (!userIds?.length || !payload) {
       return new Response('Bad request', { status: 400 });
     }
 
-    const subscriptions = await getSubscriptions(env, userIds);
-    if (!subscriptions.length) {
-      return new Response(JSON.stringify({ sent: 0 }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-
-    const results = await sendToSubscriptions(env, subscriptions, payload);
-
-    // Log rejections for debugging
-    for (const result of results) {
-      if (result.status === 'rejected') {
-        console.error('Push failed:', result.reason?.statusCode, result.reason?.message, result.reason?.body);
-      }
-    }
-
-    // Clean up expired subscriptions (HTTP 410 = unsubscribed)
-    for (let i = 0; i < results.length; i++) {
-      if (results[i].status === 'rejected' && results[i].reason?.statusCode === 410) {
-        await deleteStaleSubscription(env, subscriptions[i].endpoint);
-      }
-    }
-
-    const sent = results.filter((r) => r.status === 'fulfilled').length;
-    return new Response(JSON.stringify({
-      sent,
-      total: subscriptions.length,
-      results: results.map(r => r.status === 'rejected'
-        ? { status: 'rejected', code: r.reason?.statusCode, message: r.reason?.message, body: r.reason?.body }
-        : { status: 'fulfilled' }
-      ),
-    }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    const result = await dispatchToUsers(env, userIds, payload);
+    return new Response(JSON.stringify(result), {
+      headers: { ...CORS, 'Content-Type': 'application/json' },
     });
   }
 
-  // POST /push/buddy-accepted — Supabase webhook: buddies status → accepted
-  if (request.method === 'POST' && url.pathname === '/push/buddy-accepted') {
-    const sig = request.headers.get('x-supabase-signature') || '';
-    if (sig !== env.WEBHOOK_SECRET) return new Response('Unauthorized', { status: 401 });
-
-    const payload = await request.json();
-    const record = payload.record;
-
-    const profileRes = await fetch(
-      `${env.SUPABASE_URL}/rest/v1/profiles?id=eq.${record.addressee_id}&select=username`,
-      { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
-    );
-    const profiles = await profileRes.json();
-    const username = profiles[0]?.username || 'Someone';
-
-    const subs = await getSubscriptions(env, [record.requester_id]);
-    for (const sub of subs) {
-      try {
-        await sendPush(env, sub, {
-          title: '🎸 New Gig Buddy!',
-          body: `${username} accepted your gig buddy request`,
-          url: '/GigList/',
-          tag: 'buddy-accepted',
-        });
-      } catch (err) {
-        if (err.statusCode === 410) await deleteStaleSubscription(env, sub.endpoint);
-      }
-    }
-    return new Response('ok');
+  // POST /push/webhook/:type — Supabase Database Webhook entry point
+  const webhookMatch = url.pathname.match(/^\/push\/webhook\/([a-z-]+)$/);
+  if (request.method === 'POST' && webhookMatch) {
+    return handleWebhook(webhookMatch[1], request, env);
   }
 
-  // POST /push/new-gig — Supabase webhook: journals INSERT
-  if (request.method === 'POST' && url.pathname === '/push/new-gig') {
-    const sig = request.headers.get('x-supabase-signature') || '';
-    if (sig !== env.WEBHOOK_SECRET) return new Response('Unauthorized', { status: 401 });
-
-    const payload = await request.json();
-    const record = payload.record;
-
-    if (!record.user_id) return new Response('ok');
-
-    const profileRes = await fetch(
-      `${env.SUPABASE_URL}/rest/v1/profiles?id=eq.${record.user_id}&select=username`,
-      { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
-    );
-    const profiles = await profileRes.json();
-    const username = profiles[0]?.username || 'Your gig buddy';
-
-    const buddiesRes = await fetch(
-      `${env.SUPABASE_URL}/rest/v1/buddies?or=(requester_id.eq.${record.user_id},addressee_id.eq.${record.user_id})&status=eq.accepted&select=requester_id,addressee_id`,
-      { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
-    );
-    const buddies = await buddiesRes.json();
-    if (!buddies?.length) return new Response('ok');
-
-    const buddyIds = buddies.map(b =>
-      b.requester_id === record.user_id ? b.addressee_id : b.requester_id
-    );
-
-    const subs = await getSubscriptions(env, buddyIds);
-    for (const sub of subs) {
-      try {
-        await sendPush(env, sub, {
-          title: '🎟️ New show added',
-          body: `${username} just logged ${record.band} at ${record.official_venue}`,
-          url: '/GigList/',
-          tag: 'new-gig',
-        });
-      } catch (err) {
-        if (err.statusCode === 410) await deleteStaleSubscription(env, sub.endpoint);
-      }
-    }
-    return new Response('ok');
-  }
-
-  // Temporary debug route
+  // GET /push/debug — subscription count (remove before v1)
   if (request.method === 'GET' && url.pathname === '/push/debug') {
-    const testUrl = `${env.SUPABASE_URL}/rest/v1/push_subscriptions?select=user_id,endpoint`;
-    const res = await fetch(testUrl, {
-      headers: {
-        apikey: env.SUPABASE_SERVICE_KEY,
-        Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-      },
-    });
-    const data = await res.json();
-    return new Response(JSON.stringify({ status: res.status, data }), {
+    const data = await supabaseFetch(env, 'push_subscriptions?select=user_id,endpoint');
+    return new Response(JSON.stringify({ count: data?.length ?? 0, data }), {
       headers: { 'Content-Type': 'application/json' },
     });
   }
@@ -281,14 +334,14 @@ async function handleRequest(request, env) {
   return new Response('Not found', { status: 404 });
 }
 
-// ─── Entry Point ─────────────────────────────────────────────────────────────
+// ─── Entry Point ──────────────────────────────────────────────────────────────
 
 export default {
   async fetch(request, env) {
     return handleRequest(request, env);
   },
 
-  async scheduled(event, env) {
+  async scheduled(_event, env) {
     await handleOnThisDay(env);
   },
 };

@@ -78,8 +78,15 @@ export async function subscribeToPush(supabase) {
     const { endpoint, keys } = subscription.toJSON();
 
     // Get authenticated user — required for user_id in the DB row
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) throw new Error('Not authenticated');
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+        // Try to refresh the session first
+        const { data: { session } } = await supabase.auth.refreshSession();
+        if (!session) {
+            window.showToast('Please sign in again to enable notifications', 'warning');
+            return false;
+        }
+    }
 
     // Check if already stored — avoids duplicate insert
     const { data: existing } = await supabase
@@ -92,6 +99,7 @@ export async function subscribeToPush(supabase) {
       const { error } = await supabase
         .from('push_subscriptions')
         .insert({ user_id: user.id, endpoint, p256dh: keys.p256dh, auth: keys.auth });
+      console.log('[Push] insert result:', error ?? 'success');
       if (error) throw error;
     }
 

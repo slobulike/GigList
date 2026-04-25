@@ -22,10 +22,12 @@ let _followers   = [];
 // buddies table enforces requester_id < addressee_id (UUID string comparison).
 // Always use these helpers to build the correct pair ordering.
 
-function _buddyPair(idA, idB) {
-    return idA < idB
+function _buddyPair(idA, idB, initiatorId) {
+    const pair = idA < idB
         ? { requester_id: idA, addressee_id: idB }
         : { requester_id: idB, addressee_id: idA };
+    if (initiatorId) pair.initiator_id = initiatorId;
+    return pair;
 }
 
 function _buddyFilter(q, myId, otherId) {
@@ -53,7 +55,7 @@ export async function initSocial(currentUser) {
     // Single query: all buddy rows involving me (both directions)
     const { data: allBuddyRows } = await supabase
         .from('buddies')
-        .select('requester_id, addressee_id, status')
+        .select('requester_id, addressee_id, initiator_id, status')
         .or(`requester_id.eq.${myId},addressee_id.eq.${myId}`);
 
     const rows = allBuddyRows || [];
@@ -63,10 +65,11 @@ export async function initSocial(currentUser) {
 
     const acceptedIds        = rows.filter(r => r.status === 'accepted').map(otherUserId);
     // Inbound pending: rows where I am the addressee and status is pending
-    const pendingInboundIds  = rows.filter(r => r.status === 'pending' && r.addressee_id === myId).map(r => r.requester_id);
+    const pendingInboundIds  = rows.filter(r => r.status === 'pending' && r.initiator_id !== myId).map(r => r.initiator_id);
     // Outbound pending: rows where I am the requester and status is pending
     const pendingOutboundIds = new Set(
-        rows.filter(r => r.status === 'pending' && r.requester_id === myId).map(r => r.addressee_id)
+        rows.filter(r => r.status === 'pending' && r.initiator_id === myId)
+            .map(r => r.requester_id === myId ? r.addressee_id : r.requester_id)
     );
 
     // Fetch profiles for accepted buddies and inbound pending requesters
@@ -236,7 +239,13 @@ window.followUser = async (userId, username, btn) => {
         .single();
 
     const buddyStatus = targetProfile?.is_public ? 'accepted' : 'pending';
-    const pair = _buddyPair(_currentUser.id, userId);
+    const pair = _buddyPair(_currentUser.id, userId, _currentUser.id);
+
+    console.log('[buddy insert]', {
+      currentUser: _currentUser?.id,
+      pair: _buddyPair(_currentUser.id, userId),
+      status: buddyStatus
+    });
 
     const { error } = await supabase.from('buddies').insert({
         ...pair,

@@ -1,8 +1,8 @@
 /**
  * GigList Core Engine
- * v4.3.3.1 — 2026-04-24
+ * v4.3.4 — 2026-04-25
  * -------------------------------------------------------------------
- * ✅ Push bug fixes
+ * ✅ Push and buddy logic fixes
  */
 
 import * as Data from './modules/data.js';
@@ -70,7 +70,7 @@ let currentUser = null;
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "4.3.3.1";
+const APP_VERSION = "4.3.4";
 
 window.toggleListView = UI.toggleListView;
 window.activeView = window.activeView || 'list';
