@@ -117,17 +117,31 @@ export const loadAppData = async (user) => {
     // ── Step 2: Performances + Venues in parallel ─────────────────────────────
     // Both are now scoped to the user's journal content.
     // Falls back to empty for users with no shows (new signups etc.).
-    const [perfRes, venueRes] = await Promise.all([
+    // Batch venues into chunks of 100 to avoid URL length limits on large datasets
+    const VENUE_CHUNK_SIZE = 100;
+    async function fetchVenuesInBatches(venueNames) {
+        if (!venueNames.length) return [];
+        const chunks = [];
+        for (let i = 0; i < venueNames.length; i += VENUE_CHUNK_SIZE) {
+            chunks.push(venueNames.slice(i, i + VENUE_CHUNK_SIZE));
+        }
+        const results = await Promise.all(
+            chunks.map(chunk => supabase.from('venues').select('*').in('official_name', chunk))
+        );
+        const errors = results.filter(r => r.error);
+        if (errors.length) throw new Error(`Failed to load venues: ${errors[0].error.message}`);
+        return results.flatMap(r => r.data || []);
+    }
+
+    const [perfRes, venueRows] = await Promise.all([
         journalBands.length > 0
             ? supabase.from('performances').select('*').in('artist', journalBands)
             : Promise.resolve({ data: [], error: null }),
-        journalVenues.length > 0
-            ? supabase.from('venues').select('*').in('official_name', journalVenues)
-            : Promise.resolve({ data: [], error: null }),
+        fetchVenuesInBatches(journalVenues),
     ]);
 
-    if (perfRes.error)  throw new Error(`Failed to load performances: ${perfRes.error.message}`);
-    if (venueRes.error) throw new Error(`Failed to load venues: ${venueRes.error.message}`);
+    if (perfRes.error) throw new Error(`Failed to load performances: ${perfRes.error.message}`);
+    const venueRes = { data: venueRows };
 
     // Build venue lookup from scoped results and stash on window for map/editor use
     const venueLookup = {};

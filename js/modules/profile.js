@@ -33,7 +33,9 @@ export async function initProfile(currentUser) {
     _currentUser = currentUser;
     _populateHeaderAvatar(currentUser);
     _initPrivacyToggle(currentUser);
-    await initPushUI(supabase);
+    // initPushUI involves serviceWorker.ready + a Supabase query — fire without
+    // awaiting so it doesn't block initProfile returning or the Promise.all in app.js
+    initPushUI(supabase);
 }
 
 // ─── HEADER AVATAR ────────────────────────────────────────────────────────────

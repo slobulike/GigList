@@ -455,7 +455,10 @@ export const renderTopSongsChart = (filteredJournal, canvasId, isModal = false) 
 /**
  * Modal Controller — called by HTML onclick="openChartModal('year')" etc.
  */
-window.openChartModal = function(chartType) {
+window.openChartModal = async function(chartType) {
+    // Ensure Chart.js is available before doing anything — it's loaded lazily
+    await window.ensureChartJs();
+
     const modal  = document.getElementById('chartModal');
     const canvas = document.getElementById('modalChartCanvas');
     if (!modal || !canvas) return;
@@ -492,6 +495,40 @@ window.openChartModal = function(chartType) {
     }
 
     if (window.lucide) lucide.createIcons();
+};
+
+/**
+ * Renders all dashboard charts. Called by app.js once Chart.js has been
+ * lazy-loaded (via ensureChartJs). Safe to call multiple times — each
+ * chart function destroys any existing instance before re-rendering.
+ */
+export const renderDashboardCharts = (results, performanceData) => {
+    const companionContainer = document.getElementById('companionChartContainer');
+    const songContainer      = document.getElementById('songChartContainer');
+    const topBandsContainer  = document.getElementById('topBandsChartContainer');
+
+    if (window.isBandMode) {
+        if (songContainer) {
+            songContainer.classList.remove('hidden');
+            renderTopSongsChart(results, 'topSongsChart');
+        }
+        if (companionContainer) companionContainer.classList.add('hidden');
+        if (topBandsContainer)  topBandsContainer.classList.add('hidden');
+    } else {
+        if (songContainer) songContainer.classList.add('hidden');
+
+        if (companionContainer) {
+            companionContainer.classList.remove('hidden');
+            renderCompanionChart(results, 'dashboardCompanionChart');
+        }
+
+        if (topBandsContainer) {
+            topBandsContainer.classList.remove('hidden');
+            renderTopBandsChart(results, performanceData, 'topBandsChart');
+        }
+    }
+
+    renderYearChart(results, 'dashboardYearChart');
 };
 
 window.closeChartModal = function() {

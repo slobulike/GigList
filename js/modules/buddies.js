@@ -68,10 +68,8 @@ export async function initBuddies(currentUser) {
     // Keys are now populated — re-render the table so buddy pills appear.
     // Call renderTable directly to avoid resetting search/filter state.
     if (window.filteredResults && typeof window.currentSort !== 'undefined') {
-        const { sortGigs } = await import('./data.js');
-        const { renderTable } = await import('./ui.js');
         const sorted = sortGigs(window.filteredResults, window.currentSort.column, window.currentSort.ascending);
-        renderTable(sorted);
+        UI.renderTable(sorted);
     }
 }
 

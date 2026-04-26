@@ -94,9 +94,10 @@ async function getUsername(env, userId) {
 
 async function getSubscriptions(env, userIds) {
   if (!userIds?.length) return [];
+  const quoted = userIds.map(id => `"${id}"`).join(',');
   const rows = await supabaseFetch(
     env,
-    `push_subscriptions?user_id=in.(${userIds.join(',')})`
+    `push_subscriptions?user_id=in.(${quoted})`
   );
   return rows ?? [];
 }
@@ -228,15 +229,27 @@ async function handleOnThisDay(env) {
 
   const allGigs = await supabaseFetch(
     env,
-    `gigs?select=id,artist,venue,date,user_id&date=gte.2000-01-01`
+   `journals?select=id,band,venue,date,user_id`
   );
 
-  if (!allGigs?.length) return;
+  // ADD: log total fetched so pagination truncation is visible
+  console.log(`[cron] On This Day — fetched ${allGigs?.length ?? 0} total gigs from Supabase`);
 
-  const matches = allGigs.filter((g) => {
-    const d = new Date(g.date);
-    return d.getUTCMonth() + 1 === month && d.getUTCDate() === day;
-  });
+  if (!allGigs?.length) {
+    console.warn('[cron] On This Day — no gigs returned at all (check Supabase connectivity)');
+    return;
+  }
+
+const matches = allGigs.filter((g) => {
+  if (!g.date || g.date === 'nan') return false;
+  if (!g.user_id) return false; // add this line
+  const parts = g.date.split('/');
+  if (parts.length !== 3) return false;
+  return parseInt(parts[0], 10) === day && parseInt(parts[1], 10) === month;
+});
+
+  // ADD: log the actual matches so you can see which gigs were candidates
+  console.log(`[cron] On This Day — ${matches.length} match(es):`, JSON.stringify(matches.map(g => ({ id: g.id, artist: g.artist, date: g.date, user_id: g.user_id }))));
 
   if (matches.length === 0) {
     console.log('[cron] On This Day — no matches today');
@@ -253,30 +266,44 @@ async function handleOnThisDay(env) {
 
   console.log(`[cron] On This Day — ${matches.length} gig(s) for ${userIds.length} user(s), ${subscriptions.length} subscription(s)`);
 
-  for (const sub of subscriptions) {
-    const userGigs = byUser[sub.user_id];
-    if (!userGigs) continue;
+  // ADD: log which users have subscriptions vs which don't
+  const subscribedUserIds = new Set(subscriptions.map(s => s.user_id));
+  const unsubscribed = userIds.filter(id => !subscribedUserIds.has(id));
+  if (unsubscribed.length) {
+    console.warn(`[cron] On This Day — no subscription found for user_id(s): ${unsubscribed.join(', ')}`);
+  }
 
-    userGigs.sort((a, b) => new Date(a.date) - new Date(b.date));
-    const gig = userGigs[0];
-    const yearsAgo = today.getFullYear() - new Date(gig.date).getFullYear();
-    const extra = userGigs.length > 1 ? ` (+${userGigs.length - 1} more)` : '';
+for (const sub of subscriptions) {
+  const userGigs = byUser[sub.user_id];
+  if (!userGigs) continue;
 
-    const payload = {
-      title: '🎸 On this day...',
-      body: `${yearsAgo} year${yearsAgo !== 1 ? 's' : ''} ago you saw ${gig.artist} at ${gig.venue}${extra}`,
-      url: '/GigList/',
-      tag: 'on-this-day',
-    };
+  userGigs.sort((a, b) => parseInt(a.date.split('/')[2], 10) - parseInt(b.date.split('/')[2], 10));
+  const gig = userGigs[0];
+  const yearsAgo = today.getFullYear() - parseInt(gig.date.split('/')[2], 10);
+  const extra = userGigs.length > 1 ? ` (+${userGigs.length - 1} more)` : '';
+
+  const payload = {
+    title: '🎸 On this day...',
+    body: `${yearsAgo} year${yearsAgo !== 1 ? 's' : ''} ago you saw ${gig.band} at ${gig.venue}${extra}`,
+    url: '/GigList/',
+    tag: 'on-this-day',
+  };
+
+    // ADD: log the payload being sent and to which endpoint
+    console.log(`[cron] On This Day — sending to user ${sub.user_id}, endpoint: ${sub.endpoint.slice(0, 60)}...`);
+    console.log(`[cron] On This Day — payload: "${payload.body}"`);
 
     try {
       await sendPush(env, sub, payload);
+      // ADD: explicit success log
+      console.log(`[cron] On This Day — push succeeded for user ${sub.user_id}`);
     } catch (err) {
+      // ADD: log the full error, not just the 410 handling
+      console.error(`[cron] On This Day — push failed for user ${sub.user_id}: status=${err.statusCode} body=${err.body}`);
       if (err.statusCode === 410) await deleteStaleSubscription(env, sub.endpoint);
     }
   }
 }
-
 // ─── HTTP Handler ─────────────────────────────────────────────────────────────
 
 const CORS = {

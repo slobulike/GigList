@@ -1,14 +1,15 @@
 /**
  * GigList Core Engine
- * v4.3.5 — 2026-04-25
+ * v4.4.0 — 2026-04-26
  * -------------------------------------------------------------------
- * ✅ Added spinner and implemented on push subscribe call
- * ✅ Refactored performances and venues load to filter by user relevant data to reduce load size
- * ✅ Added indexes to performances and venues tables
+ * ✅ Fixed cron job for "On this day" push
+ * ✅ Removed buddies from "For you"
+ * ✅ Fixed band mode query for Frank and NFG
  */
 
 import * as Data from './modules/data.js';
 import * as Charts from './modules/charts.js';
+import { renderDashboardCharts } from './modules/charts.js';
 import * as UI from './modules/ui.js';
 import { initArchiveButton } from './modules/ui.js';
 import { parseDate } from './modules/utils.js';
@@ -93,6 +94,29 @@ window.withSpinner = async (message, fn) => {
     } finally {
         window.hideSpinner();
     }
+};
+
+// ─── CHART.JS LAZY LOADER ─────────────────────────────────────────────────────
+
+/**
+ * Ensures Chart.js is loaded before any chart is rendered.
+ * The <script> tag for chart.js is removed from <head> so it no longer blocks
+ * first paint. This function injects it on demand and resolves once ready.
+ * Subsequent calls are instant (window.Chart already exists).
+ */
+let _chartJsPromise = null;
+window.ensureChartJs = () => {
+    if (window.Chart) return Promise.resolve();
+    if (_chartJsPromise) return _chartJsPromise;
+
+    _chartJsPromise = new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/chart.js';
+        script.onload = resolve;
+        script.onerror = () => reject(new Error('Failed to load Chart.js'));
+        document.head.appendChild(script);
+    });
+    return _chartJsPromise;
 };
 
 let currentUser = null;
@@ -322,9 +346,12 @@ export async function initApp() {
     }
 
     // Buddies tab — personal mode only
+    // initBuddies and initProfile have no dependency on each other so run in parallel
     if (currentUser?.Type === 'Personal') {
-        await initBuddies(currentUser);
-        await initProfile(currentUser);
+        await Promise.all([
+            initBuddies(currentUser),
+            initProfile(currentUser),
+        ]);
     }
 
     // ── Onboarding & companion notifications ─────────────────────────────────
@@ -342,7 +369,16 @@ export async function initApp() {
         }
     }
 
-    // ─── CLASHFINDER PREFILL ──────────────────────────────────────────────────
+    // ── Lazy Chart.js load ────────────────────────────────────────────────────
+    // Chart.js is no longer in <head> — load it in the background after the
+    // page is interactive, then render the dashboard charts for the first time.
+    // All subsequent refreshUI calls will find window.Chart already present.
+    window.ensureChartJs().then(() => {
+        const results = window.filteredResults || window.journalData || [];
+        renderDashboardCharts(results, window.performanceData || []);
+    }).catch(err => console.warn('Chart.js failed to load:', err));
+
+    // ── Clashfinder prefill ───────────────────────────────────────────────────
     const prefillType = params.get('prefill');
     if (prefillType === 'festival' && currentUser?.Type === 'Personal') {
         const prefillDate     = params.get('date')     || '';
@@ -416,28 +452,35 @@ function refreshUI() {
     const songContainer = document.getElementById('songChartContainer');
     const topBandsContainer = document.getElementById('topBandsChartContainer');
 
-    if (window.isBandMode) {
-        if (songContainer) {
-            songContainer.classList.remove('hidden');
-            Charts.renderTopSongsChart(results, 'topSongsChart');
-        }
-        if (companionContainer) companionContainer.classList.add('hidden');
-        if (topBandsContainer) topBandsContainer.classList.add('hidden');
-    } else {
-        if (songContainer) songContainer.classList.add('hidden');
+    // Dashboard charts are deferred until Chart.js is loaded.
+    // On first page load Chart.js hasn't been fetched yet — charts will render
+    // once ensureChartJs() resolves (triggered by first openChartModal call or
+    // explicit chart container visibility). On subsequent refreshUI calls after
+    // Chart.js is loaded, charts render synchronously as before.
+    if (window.Chart) {
+        if (window.isBandMode) {
+            if (songContainer) {
+                songContainer.classList.remove('hidden');
+                Charts.renderTopSongsChart(results, 'topSongsChart');
+            }
+            if (companionContainer) companionContainer.classList.add('hidden');
+            if (topBandsContainer) topBandsContainer.classList.add('hidden');
+        } else {
+            if (songContainer) songContainer.classList.add('hidden');
 
-        if (companionContainer) {
-            companionContainer.classList.remove('hidden');
-            Charts.renderCompanionChart(results, 'dashboardCompanionChart');
+            if (companionContainer) {
+                companionContainer.classList.remove('hidden');
+                Charts.renderCompanionChart(results, 'dashboardCompanionChart');
+            }
+
+            if (topBandsContainer) {
+                topBandsContainer.classList.remove('hidden');
+                Charts.renderTopBandsChart(results, window.performanceData, 'topBandsChart');
+            }
         }
 
-        if (topBandsContainer) {
-            topBandsContainer.classList.remove('hidden');
-            Charts.renderTopBandsChart(results, window.performanceData, 'topBandsChart');
-        }
+        Charts.renderYearChart(results, 'dashboardYearChart');
     }
-
-    Charts.renderYearChart(results, 'dashboardYearChart');
 
     const mapContainer = document.getElementById('mapContainer');
     if (mapContainer && !mapContainer.classList.contains('hidden')) {
