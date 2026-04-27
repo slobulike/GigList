@@ -1,8 +1,9 @@
 /**
  * GigList Core Engine
- * v4.4.1 — 2026-04-27
+ * v5.0.0 — 2026-04-27
  * -------------------------------------------------------------------
- * ✅ Made carousel swipable
+ * ✅ Collections are live!
+ * ✅ Users can catalogue items, add photos, memories
  */
 
 import * as Data from './modules/data.js';
@@ -121,7 +122,7 @@ let currentUser = null;
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "4.4.1";
+const APP_VERSION = "4.3.4";
 
 window.toggleListView = UI.toggleListView;
 window.activeView = window.activeView || 'list';
@@ -602,6 +603,15 @@ window.switchView = (viewId) => {
 
     if (viewId === 'feed') {
         Feed.init(window.journalData || [], window.performanceData || []);
+    }
+
+    if (viewId === 'collection') {
+        if (window._initCollection && window.currentUser) {
+            window._initCollection(window.currentUser);
+            // Populate avatar initials in collection header
+            const colInitials = document.getElementById('col-avatar-initials');
+            if (colInitials) colInitials.textContent = (window.authDisplayName || 'U').slice(0, 2).toUpperCase();
+        }
     }
 
     window.scrollTo(0, 0);
