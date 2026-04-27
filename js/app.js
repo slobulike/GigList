@@ -1,10 +1,8 @@
 /**
  * GigList Core Engine
- * v4.4.0 — 2026-04-26
+ * v4.4.1 — 2026-04-27
  * -------------------------------------------------------------------
- * ✅ Fixed cron job for "On this day" push
- * ✅ Removed buddies from "For you"
- * ✅ Fixed band mode query for Frank and NFG
+ * ✅ Made carousel swipable
  */
 
 import * as Data from './modules/data.js';
@@ -123,7 +121,7 @@ let currentUser = null;
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "4.3.4";
+const APP_VERSION = "4.4.1";
 
 window.toggleListView = UI.toggleListView;
 window.activeView = window.activeView || 'list';
@@ -631,6 +629,54 @@ function initEventListeners() {
     if (search) {
         search.addEventListener('input', () => {
             refreshUI();
+        });
+    }
+
+    // ── Carousel swipe (touch + mouse drag) ──────────────────────────────────
+    // Fixes the tap-only limitation — users can now swipe left/right on the
+    // home screen carousel cards. Same pattern used for Collection shelves.
+    const carouselEl = document.getElementById('now-card');
+    if (carouselEl) {
+        let touchStartX = 0;
+        let touchStartY = 0;
+        let isDragging  = false;
+        let dragStartX  = 0;
+
+        // Touch (mobile)
+        carouselEl.addEventListener('touchstart', (e) => {
+            touchStartX = e.touches[0].clientX;
+            touchStartY = e.touches[0].clientY;
+        }, { passive: true });
+
+        carouselEl.addEventListener('touchend', (e) => {
+            const dx = e.changedTouches[0].clientX - touchStartX;
+            const dy = e.changedTouches[0].clientY - touchStartY;
+            // Only treat as horizontal swipe if x movement dominates
+            if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 40) {
+                window.rotateCarousel(dx < 0 ? 1 : -1);
+            }
+        }, { passive: true });
+
+        // Mouse drag (desktop / PWA on tablet)
+        carouselEl.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            dragStartX = e.clientX;
+            carouselEl.style.cursor = 'grabbing';
+        });
+
+        carouselEl.addEventListener('mouseup', (e) => {
+            if (!isDragging) return;
+            isDragging = false;
+            carouselEl.style.cursor = '';
+            const dx = e.clientX - dragStartX;
+            if (Math.abs(dx) > 40) {
+                window.rotateCarousel(dx < 0 ? 1 : -1);
+            }
+        });
+
+        carouselEl.addEventListener('mouseleave', () => {
+            isDragging = false;
+            carouselEl.style.cursor = '';
         });
     }
 }
