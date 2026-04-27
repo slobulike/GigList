@@ -122,7 +122,7 @@ let currentUser = null;
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "4.3.4";
+const APP_VERSION = "5.0.0";
 
 window.toggleListView = UI.toggleListView;
 window.activeView = window.activeView || 'list';
