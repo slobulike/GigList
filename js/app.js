@@ -1,8 +1,9 @@
 /**
  * GigList Core Engine
- * v5.0.2 — 2026-04-28
+ * v5.0.3 — 2026-04-28
  * -------------------------------------------------------------------
- * ✅ Collection bug fixes: migration script to store band_name in supabase for search
+ * ✅ Collection bug fixes: fixed camera vs photo album picker
+ * ✅ Various UI/UX tweaks
  */
 
 import * as Data from './modules/data.js';

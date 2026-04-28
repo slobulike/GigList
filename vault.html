@@ -417,10 +417,10 @@
          aria-hidden="true"
          aria-label="Collection item editor"
          role="dialog">
-        <div class="bg-white rounded-t-[2rem] w-full max-w-md max-h-[92vh] overflow-y-auto pb-10">
+        <div class="bg-white rounded-t-[2rem] w-full max-w-md max-h-[92vh] flex flex-col overflow-hidden">
 
-            <!-- Handle + header -->
-            <div class="sticky top-0 bg-white rounded-t-[2rem] border-b border-slate-100 px-5 pt-4 pb-3 z-10">
+            <!-- Handle + header — never scrolls -->
+            <div class="flex-shrink-0 bg-white rounded-t-[2rem] border-b border-slate-100 px-5 pt-4 pb-3">
                 <div class="w-9 h-1 bg-slate-200 rounded-full mx-auto mb-4"></div>
                 <div class="flex items-center justify-between">
                     <h2 id="col-editor-modal-title" class="text-lg font-black text-slate-900">Add to collection</h2>
@@ -429,187 +429,168 @@
                 </div>
             </div>
 
-            <div class="px-5 pt-4 space-y-5">
+            <!-- Scrollable body — scrollbar track stays within card, never over the curves -->
+            <div class="overflow-y-auto flex-1 pb-10">
+                <div class="px-5 pt-4 space-y-5">
 
-                <!-- Type toggle -->
-                <div class="flex gap-1 p-1 bg-slate-100 rounded-2xl">
-                    <button type="button" id="col-type-btn-artefact" onclick="window.colEditorSetType('artefact')"
-                            class="flex-1 py-2.5 text-[11px] font-black uppercase tracking-widest rounded-xl transition-all"
-                            style="background:#c8a050;color:#111008">Artefact</button>
-                    <button type="button" id="col-type-btn-memory" onclick="window.colEditorSetType('memory')"
-                            class="flex-1 py-2.5 text-[11px] font-black uppercase tracking-widest rounded-xl transition-all text-slate-400">Memory</button>
-                </div>
-
-                <!-- Subtype grid -->
-                <div>
-                    <p id="col-editor-subtype-label" class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Item type</p>
-                    <div id="col-editor-subtype-grid" class="grid grid-cols-3 gap-2"></div>
-                </div>
-
-                <!-- Photo upload -->
-                <div>
-                    <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Photos</p>
-                    <div id="col-editor-photo-previews"></div>
-                    <label class="flex flex-col items-center justify-center gap-2 py-6 rounded-2xl border-2 border-dashed cursor-pointer transition-all hover:border-amber-400 hover:bg-amber-50"
-                           style="border-color:rgba(200,160,80,0.4);background:rgba(200,160,80,0.03)">
-                        <i data-lucide="camera" class="w-6 h-6" style="color:#c8a050" aria-hidden="true"></i>
-                        <span class="text-[12px] font-black" style="color:#c8a050">Take or choose a photo</span>
-                        <span class="text-[10px] text-slate-400">Just a photo is enough to save this</span>
-                        <input type="file" accept="image/*" multiple class="hidden" onchange="window.colEditorPhotoChange(this)">
-                    </label>
-                </div>
-
-                <!-- Title + Year -->
-                <div class="flex gap-3">
-                    <div class="flex-1">
-                        <label for="col-editor-title" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Title</label>
-                        <input type="text" id="col-editor-title" placeholder="Blue Album CD"
-                               class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
-                    </div>
-                    <div style="width:90px">
-                        <label for="col-editor-date" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Year</label>
-                        <input type="text" id="col-editor-date" placeholder="1994" maxlength="7"
-                               class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
-                    </div>
-                </div>
-
-                <!-- Band -->
-                <div class="relative">
-                    <input id="col-editor-band-input" type="text" placeholder="Band name (optional)"
-                           class="w-full px-4 py-3 rounded-2xl border border-slate-200 text-sm font-bold text-slate-700 focus:outline-none focus:border-amber-400 transition-colors" autocomplete="off">
-                    <ul id="col-editor-band-dropdown" class="hidden absolute z-20 w-full mt-1 bg-white border border-slate-200 rounded-2xl shadow-lg overflow-hidden max-h-48 overflow-y-auto"></ul>
-                </div>
-
-                <!-- Story -->
-                <div>
-                    <label for="col-editor-body" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Story / notes</label>
-                    <textarea id="col-editor-body" rows="3"
-                              placeholder="Any notes or the story behind this item…"
-                              class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors resize-none leading-relaxed"></textarea>
-                </div>
-
-                <!-- Catalogue fields (hidden for memories) -->
-                <div id="col-editor-catalogue-fields" class="space-y-4">
-
-                    <div class="relative">
-                        <label for="col-editor-format" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Format</label>
-                        <input type="text" id="col-editor-format" placeholder="LP, 7&quot;, CD single…" autocomplete="off"
-                               class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
-                        <ul id="col-editor-format-list"
-                            class="hidden absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-2xl shadow-lg z-10 overflow-hidden max-h-48 overflow-y-auto"></ul>
+                    <!-- Type toggle -->
+                    <div class="flex gap-1 p-1 bg-slate-100 rounded-2xl">
+                        <button type="button" id="col-type-btn-artefact" onclick="window.colEditorSetType('artefact')"
+                                class="flex-1 py-2.5 text-[11px] font-black uppercase tracking-widest rounded-xl transition-all"
+                                style="background:#c8a050;color:#111008">Artefact</button>
+                        <button type="button" id="col-type-btn-memory" onclick="window.colEditorSetType('memory')"
+                                class="flex-1 py-2.5 text-[11px] font-black uppercase tracking-widest rounded-xl transition-all text-slate-400">Memory</button>
                     </div>
 
+                    <!-- Subtype grid -->
+                    <div>
+                        <p id="col-editor-subtype-label" class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Item type</p>
+                        <div id="col-editor-subtype-grid" class="grid grid-cols-3 gap-2"></div>
+                    </div>
+
+                    <!-- Photo upload -->
+                    <div>
+                        <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Photos</p>
+                        <div id="col-editor-photo-previews"></div>
+                        <div class="mt-3"></div>
+
+                        <label class="flex flex-col items-center justify-center gap-2 py-6 rounded-2xl border-2 border-dashed cursor-pointer transition-all hover:border-amber-400 hover:bg-amber-50"
+                               style="border-color:rgba(200,160,80,0.4);background:rgba(200,160,80,0.03)">
+                            <i data-lucide="camera" class="w-6 h-6" style="color:#c8a050" aria-hidden="true"></i>
+                            <span class="text-[12px] font-black" style="color:#c8a050">Take a Photo</span>
+                            <span class="text-[10px] text-slate-400">You can add anything to your collection!</span>
+
+                            <input type="file"
+                                   accept="image/*"
+                                   capture="environment"
+                                   class="hidden"
+                                   onchange="window.colEditorPhotoChange(this)">
+                        </label>
+                    </div>
+
+                    <!-- Band — first field, above title -->
+                    <div>
+                        <label for="col-editor-band-input" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Band</label>
+                        <div class="relative">
+                            <input id="col-editor-band-input" type="text" placeholder="Weezer"
+                                   class="w-full px-4 py-3 bg-slate-50 rounded-2xl border border-slate-200 text-sm font-bold text-slate-700 focus:outline-none focus:border-amber-400 transition-colors" autocomplete="off">
+                            <ul id="col-editor-band-dropdown" class="hidden absolute z-20 w-full mt-1 bg-white border border-slate-200 rounded-2xl shadow-lg overflow-hidden max-h-48 overflow-y-auto"></ul>
+                        </div>
+                    </div>
+
+                    <!-- Title + Year -->
                     <div class="flex gap-3">
                         <div class="flex-1">
-                            <label for="col-editor-label" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Record label</label>
-                            <input type="text" id="col-editor-label" placeholder="DGC Records"
+                            <label for="col-editor-title" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Title</label>
+                            <input type="text" id="col-editor-title" placeholder="Blue Album CD"
                                    class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
                         </div>
-                        <div style="width:110px">
-                            <label for="col-editor-cat-no" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Cat. no.</label>
-                            <input type="text" id="col-editor-cat-no" placeholder="GED24766"
-                                   class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
-                        </div>
-                    </div>
-
-                    <div class="flex gap-3">
-                        <div class="flex-1">
-                            <label for="col-editor-condition" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Condition</label>
-                            <select id="col-editor-condition"
-                                    class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors appearance-none">
-                                <option value="">— Select —</option>
-                                <option>Mint</option>
-                                <option>Near Mint</option>
-                                <option>Very Good</option>
-                                <option>Good</option>
-                                <option>Fair</option>
-                            </select>
-                        </div>
-                        <div class="flex-1">
-                            <label for="col-editor-signed-by" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Signed by</label>
-                            <input type="text" id="col-editor-signed-by" placeholder="Rivers Cuomo"
+                        <div style="width:90px">
+                            <label for="col-editor-date" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Year</label>
+                            <input type="text" id="col-editor-date" placeholder="1994" maxlength="7"
                                    class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
                         </div>
                     </div>
 
+                    <!-- Story -->
                     <div>
-                        <label for="col-editor-provenance" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Where I got it</label>
-                        <input type="text" id="col-editor-provenance" placeholder="HMV Oxford Street · 1996"
-                               class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
+                        <label for="col-editor-body" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Story / notes</label>
+                        <textarea id="col-editor-body" rows="3"
+                                  placeholder="Any notes or the story behind this item…"
+                                  class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors resize-none leading-relaxed"></textarea>
                     </div>
 
+                    <!-- Catalogue fields (hidden for memories) -->
+                    <div id="col-editor-catalogue-fields" class="space-y-4">
+
+                        <div class="relative">
+                            <label for="col-editor-format" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Format</label>
+                            <input type="text" id="col-editor-format" placeholder="LP, 7&quot;, CD single…" autocomplete="off"
+                                   class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
+                            <ul id="col-editor-format-list"
+                                class="hidden absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-2xl shadow-lg z-10 overflow-hidden max-h-48 overflow-y-auto"></ul>
+                        </div>
+
+                        <div class="flex gap-3">
+                            <div class="flex-1">
+                                <label for="col-editor-label" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Record label</label>
+                                <input type="text" id="col-editor-label" placeholder="DGC Records"
+                                       class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
+                            </div>
+                            <div style="width:110px">
+                                <label for="col-editor-cat-no" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Cat. no.</label>
+                                <input type="text" id="col-editor-cat-no" placeholder="GED24766"
+                                       class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
+                            </div>
+                        </div>
+
+                        <div class="flex gap-3">
+                            <div class="flex-1">
+                                <label for="col-editor-condition" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Condition</label>
+                                <div class="relative">
+                                    <input type="text" id="col-editor-condition" placeholder="Mint, Good…" autocomplete="off"
+                                           class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
+                                    <ul id="col-editor-condition-list"
+                                        class="hidden absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-2xl shadow-lg z-10 overflow-hidden max-h-48 overflow-y-auto"></ul>
+                                </div>
+                            </div>
+                            <div class="flex-1">
+                                <label for="col-editor-signed-by" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Signed by</label>
+                                <input type="text" id="col-editor-signed-by" placeholder="Rivers Cuomo"
+                                       class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
+                            </div>
+                        </div>
+
+                        <div>
+                            <label for="col-editor-provenance" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Where I got it</label>
+                            <input type="text" id="col-editor-provenance" placeholder="HMV Oxford Street · 1996"
+                                   class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
+                        </div>
+
+                        <div>
+                            <label for="col-editor-artist-ctx" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Artist context</label>
+                            <input type="text" id="col-editor-artist-ctx" placeholder="Rivers Cuomo solo, side project…"
+                                   class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
+                        </div>
+
+                    </div><!-- /catalogue fields -->
+
+                    <!-- Labels -->
                     <div>
-                        <label for="col-editor-artist-ctx" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Artist context</label>
-                        <input type="text" id="col-editor-artist-ctx" placeholder="Rivers Cuomo solo, side project…"
-                               class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
+                        <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Labels</p>
+                        <div id="col-editor-labels" class="flex flex-wrap gap-2 mb-2"></div>
+                        <div class="relative">
+                            <input type="text" id="col-editor-label-input" placeholder="Beanos find, Karl sent this…" autocomplete="off"
+                                   class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
+                            <ul id="col-editor-label-dropdown"
+                                class="hidden absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-2xl shadow-lg z-10 overflow-hidden max-h-48 overflow-y-auto"></ul>
+                        </div>
                     </div>
 
-                </div><!-- /catalogue fields -->
+                    <!-- Error -->
+                    <p id="col-editor-error" class="hidden text-sm font-bold text-red-500 rounded-xl bg-red-50 px-4 py-3"></p>
 
-                <!-- Labels -->
-                <div>
-                    <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Labels</p>
-                    <div id="col-editor-labels" class="flex flex-wrap gap-2 mb-2"></div>
-                    <div class="relative">
-                        <input type="text" id="col-editor-label-input" placeholder="Beanos find, Karl sent this…" autocomplete="off"
-                               class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
-                        <ul id="col-editor-label-dropdown"
-                            class="hidden absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-2xl shadow-lg z-10 overflow-hidden max-h-48 overflow-y-auto"></ul>
-                    </div>
+                    <!-- Save -->
+                    <button id="col-editor-save-btn" type="button" onclick="window.saveCollectionItem()"
+                            class="w-full py-4 rounded-2xl text-[12px] font-black uppercase tracking-widest transition-all active:scale-95 disabled:opacity-50"
+                            style="background:#c8a050;color:#111008">
+                        Add to collection
+                    </button>
+
+                    <!-- Delete (edit mode only) -->
+                    <button id="col-editor-delete-btn" type="button" onclick="window.deleteCollectionItem()"
+                            class="hidden w-full py-3 rounded-2xl text-[11px] font-black uppercase tracking-widest text-red-500 border border-red-200 hover:bg-red-50 transition-all">
+                        Remove item
+                    </button>
+
                 </div>
-
-                <!-- Error -->
-                <p id="col-editor-error" class="hidden text-sm font-bold text-red-500 rounded-xl bg-red-50 px-4 py-3"></p>
-
-                <!-- Save -->
-                <button id="col-editor-save-btn" type="button" onclick="window.saveCollectionItem()"
-                        class="w-full py-4 rounded-2xl text-[12px] font-black uppercase tracking-widest transition-all active:scale-95 disabled:opacity-50"
-                        style="background:#c8a050;color:#111008">
-                    Add to collection
-                </button>
-
-                <!-- Delete (edit mode only) -->
-                <button id="col-editor-delete-btn" type="button" onclick="window.deleteCollectionItem()"
-                        class="hidden w-full py-3 rounded-2xl text-[11px] font-black uppercase tracking-widest text-red-500 border border-red-200 hover:bg-red-50 transition-all">
-                    Remove item
-                </button>
-
-            </div>
+            </div><!-- /scrollable body -->
         </div>
     </div>
 
-    <section id="view-buddies" class="view-section hidden space-y-4 pb-4" role="region" aria-label="Buddies" aria-hidden="true">
-        <!-- Buddy tiles — rendered by buddies.js -->
-        <div id="buddies-tile-view">
-            <div class="flex items-end justify-between mb-4">
-                <div>
-                    <h2 class="text-4xl font-black italic tracking-tighter text-slate-900">Buddies</h2>
-                    <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-0.5">Your gig crew</p>
-                </div>
-            </div>
-
-            <!-- Find Buddies search — moved from Settings modal, relabelled -->
-            <div class="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-5 space-y-4 mb-4">
-                <p class="text-[10px] font-black uppercase text-indigo-500 tracking-widest">Find Buddies</p>
-                <div class="relative">
-                    <input type="text" id="friend-search-input"
-                           placeholder="Search by username…"
-                           aria-label="Search for a buddy by username"
-                           autocomplete="off"
-                           class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all">
-                    <button onclick="window.searchFriends()"
-                            aria-label="Search"
-                            class="absolute right-2 top-1/2 -translate-y-1/2 bg-indigo-600 text-white p-2 rounded-xl hover:bg-indigo-700 transition-colors">
-                        <i data-lucide="search" class="w-4 h-4" aria-hidden="true"></i>
-                    </button>
-                </div>
-                <div id="friend-search-results" class="hidden space-y-2"></div>
-            </div>
-
-            <div id="buddy-tiles-container" class="space-y-3">
-                <!-- Tiles injected by buddies.js -->
-            </div>
-        </div>
+    <!-- view-buddies: shell retained for buddy-drill-in panel (fixed overlay).
+         Visible content (search + tiles) has moved to view-profile. -->
+    <section id="view-buddies" class="view-section hidden" role="region" aria-label="Buddies" aria-hidden="true">
 
         <!-- Buddy drill-in panel — slides in over the tile view -->
         <div id="buddy-drill-in"
@@ -822,6 +803,34 @@
             <div id="profile-achievements-container" class="space-y-2">
                 <!-- Injected by profile.js / achievements.js -->
                 <p class="text-xs text-slate-400 italic">Loading achievements…</p>
+            </div>
+        </div>
+
+        <!-- ── Buddies — inline in profile ── -->
+        <div id="profile-buddies-section" class="space-y-3">
+            <p class="text-[10px] font-black uppercase text-slate-400 tracking-widest px-1">Buddies</p>
+
+            <!-- Find Buddies search -->
+            <div class="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-5 space-y-4">
+                <p class="text-[10px] font-black uppercase text-indigo-500 tracking-widest">Find Buddies</p>
+                <div class="relative">
+                    <input type="text" id="friend-search-input"
+                           placeholder="Search by username…"
+                           aria-label="Search for a buddy by username"
+                           autocomplete="off"
+                           class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all">
+                    <button onclick="window.searchFriends()"
+                            aria-label="Search"
+                            class="absolute right-2 top-1/2 -translate-y-1/2 bg-indigo-600 text-white p-2 rounded-xl hover:bg-indigo-700 transition-colors">
+                        <i data-lucide="search" class="w-4 h-4" aria-hidden="true"></i>
+                    </button>
+                </div>
+                <div id="friend-search-results" class="hidden space-y-2"></div>
+            </div>
+
+            <!-- Buddy tiles -->
+            <div id="buddy-tiles-container" class="space-y-3">
+                <!-- Tiles injected by buddies.js -->
             </div>
         </div>
 

@@ -809,9 +809,11 @@ const allPhotoUrls = (item.photos || []).map(p => _signedUrlCache.get(p)).filter
             <!-- Header: artwork + title + edit pencil -->
             <div class="flex gap-4 px-5 mb-4 items-start">
                 ${heroUrl ? `
-                    <div class="w-16 h-16 rounded-xl overflow-hidden flex-shrink-0">
+                    <button onclick="window._colOpenLightbox('${heroUrl.replace(/'/g,"\'")}', ${allPhotoUrls.length})"
+                            class="w-16 h-16 rounded-xl overflow-hidden flex-shrink-0 active:scale-95 transition-transform focus:outline-none"
+                            aria-label="View photo">
                         <img src="${heroUrl}" alt="${_esc(item.title)}" class="w-full h-full object-cover">
-                    </div>
+                    </button>
                 ` : `
                     <div class="w-16 h-16 rounded-xl flex items-center justify-center text-2xl flex-shrink-0"
                          style="background:${bg}">${icon}</div>
@@ -852,14 +854,16 @@ const allPhotoUrls = (item.photos || []).map(p => _signedUrlCache.get(p)).filter
             <!-- Labels -->
             ${labelsHtml ? `<div class="px-5 mb-5">${labelsHtml}</div>` : ''}
 
-${allPhotoUrls.length > 1 ? `
+${allPhotoUrls.length > 0 ? `
 <div class="px-5 mb-4">
-    <p class="text-[9px] font-black uppercase tracking-widest mb-2 text-slate-400">Photos</p>
+    ${allPhotoUrls.length > 1 ? `<p class="text-[9px] font-black uppercase tracking-widest mb-2 text-slate-400">Photos</p>` : ''}
     <div class="flex gap-2 overflow-x-auto pb-1" style="scrollbar-width:none">
         ${allPhotoUrls.map((url, i) => `
-            <div class="flex-shrink-0 w-20 h-20 rounded-xl overflow-hidden border border-slate-100">
+            <button onclick="window._colOpenLightbox('${url.replace(/'/g,"\\'")}', ${allPhotoUrls.length})"
+                    class="flex-shrink-0 w-24 h-24 rounded-xl overflow-hidden border border-slate-100 active:scale-95 transition-transform focus:outline-none focus:ring-2 focus:ring-amber-400"
+                    aria-label="View photo ${i + 1}">
                 <img src="${url}" alt="Photo ${i + 1}" class="w-full h-full object-cover">
-            </div>`).join('')}
+            </button>`).join('')}
     </div>
 </div>` : ''}
 
@@ -873,6 +877,50 @@ ${allPhotoUrls.length > 1 ? `
 
     if (window.lucide) lucide.createIcons();
 }
+
+// ─── LIGHTBOX ────────────────────────────────────────────────────────────────
+
+/**
+ * Opens a full-screen lightbox to view a photo at full size.
+ * Tapping anywhere or the X button closes it.
+ */
+window._colOpenLightbox = (url, _total) => {
+    const existing = document.getElementById('col-lightbox');
+    if (existing) existing.remove();
+
+    const lb = document.createElement('div');
+    lb.id = 'col-lightbox';
+    lb.setAttribute('role', 'dialog');
+    lb.setAttribute('aria-label', 'Photo viewer');
+    lb.className = [
+        'fixed inset-0 z-[600]',
+        'bg-black/90 backdrop-blur-sm',
+        'flex items-center justify-center',
+        'p-4',
+    ].join(' ');
+
+    lb.innerHTML = `
+        <!-- X button -->
+        <button onclick="document.getElementById('col-lightbox').remove()"
+                aria-label="Close photo"
+                class="absolute top-5 right-5 w-10 h-10 rounded-full bg-white/20 hover:bg-white/30 text-white flex items-center justify-center transition-all active:scale-95 z-10">
+            <i data-lucide="x" class="w-5 h-5" aria-hidden="true"></i>
+        </button>
+        <!-- Photo -->
+        <img src="${url}"
+             alt="Full size photo"
+             class="max-w-full max-h-full rounded-2xl object-contain shadow-2xl select-none"
+             draggable="false">
+    `;
+
+    // Tap outside image closes
+    lb.addEventListener('click', (e) => {
+        if (e.target === lb) lb.remove();
+    });
+
+    document.body.appendChild(lb);
+    if (window.lucide) lucide.createIcons();
+};
 
 // ─── WINDOW HELPERS ──────────────────────────────────────────────────────────
 

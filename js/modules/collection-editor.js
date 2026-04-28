@@ -71,7 +71,7 @@ const FORMAT_SUGGESTIONS = {
     laminate: ['AAA laminate', 'Guest pass', 'Crew laminate'],
 };
 
-const CONDITION_OPTIONS = ['Mint', 'Near Mint', 'Very Good', 'Good', 'Fair'];
+// CONDITION_OPTIONS defined below alongside _wireConditionSuggestions
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 
@@ -215,13 +215,70 @@ function _wireFormatSuggestions(subtype) {
     });
 }
 
+// ─── CONDITION SUGGESTIONS ───────────────────────────────────────────────────
+
+const CONDITION_OPTIONS = [
+    'Mint', 'Near Mint', 'Very Good Plus', 'Very Good', 'Good Plus', 'Good', 'Fair', 'Poor',
+];
+
+function _wireConditionSuggestions() {
+    const input    = document.getElementById('col-editor-condition');
+    const dropdown = document.getElementById('col-editor-condition-list');
+    if (!input || !dropdown || input._condWired) return;
+    input._condWired = true;
+
+    const _show = (opts) => {
+        dropdown.innerHTML = opts.map(m =>
+            `<li class="px-4 py-2.5 text-sm font-bold text-slate-700 cursor-pointer hover:bg-slate-50 transition-colors"
+                 onmousedown="event.preventDefault();document.getElementById('col-editor-condition').value='${_esc(m)}';document.getElementById('col-editor-condition-list').classList.add('hidden')">${m}</li>`
+        ).join('');
+        dropdown.classList.toggle('hidden', !opts.length);
+    };
+
+    input.addEventListener('focus', () => {
+        const q = input.value.trim().toLowerCase();
+        _show(q ? CONDITION_OPTIONS.filter(o => o.toLowerCase().includes(q)) : CONDITION_OPTIONS);
+    });
+    input.addEventListener('input', () => {
+        const q = input.value.trim().toLowerCase();
+        _show(q ? CONDITION_OPTIONS.filter(o => o.toLowerCase().includes(q)) : CONDITION_OPTIONS);
+    });
+    document.addEventListener('click', (e) => {
+        if (!input.contains(e.target) && !dropdown.contains(e.target)) dropdown.classList.add('hidden');
+    });
+}
+
 // ─── PHOTO HANDLING ───────────────────────────────────────────────────────────
+// Add this helper to your global script scope once
+window.togglePhotoMenu = (e) => {
+    if (e) e.stopPropagation();
+    const menu = document.getElementById('photoMenu');
+    if (!menu) return;
+
+    const isHidden = menu.classList.contains('hidden');
+
+    // Close any other open menus first
+    document.querySelectorAll('.photo-menu').forEach(m => m.classList.add('hidden'));
+
+    if (isHidden) {
+        menu.classList.remove('hidden');
+        const closeMenu = (event) => {
+            if (!menu.contains(event.target)) {
+                menu.classList.add('hidden');
+                document.removeEventListener('click', closeMenu);
+            }
+        };
+        document.addEventListener('click', closeMenu);
+        if (window.lucide) lucide.createIcons();
+    }
+};
 
 function _renderPhotoPreviews() {
     const container = document.getElementById('col-editor-photo-previews');
     if (!container) return;
 
-    const existingHtml = _existingPhotos.map((url, i) => `
+    // 1. Generate HTML for photos already saved in the database
+    const existingHtml = (_existingPhotos || []).map((url, i) => `
         <div class="relative w-16 h-16 rounded-xl overflow-hidden border border-slate-200 flex-shrink-0">
             <img src="${url}" alt="Photo ${i + 1}" class="w-full h-full object-cover">
             ${i === 0 ? `<span class="absolute bottom-0 left-0 right-0 text-center text-[8px] font-black uppercase bg-black/50 text-white py-0.5">Hero</span>` : ''}
@@ -231,7 +288,8 @@ function _renderPhotoPreviews() {
                     class="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/60 text-white text-[10px] flex items-center justify-center hover:bg-red-500 transition-colors">×</button>
         </div>`).join('');
 
-    const pendingHtml = _pendingPhotos.map((p, i) => `
+    // 2. Generate HTML for photos currently being uploaded (pending)
+    const pendingHtml = (_pendingPhotos || []).map((p, i) => `
         <div class="relative w-16 h-16 rounded-xl overflow-hidden border border-amber-200 flex-shrink-0">
             <img src="${p.previewUrl}" alt="New photo ${i + 1}" class="w-full h-full object-cover">
             <span class="absolute bottom-0 left-0 right-0 text-center text-[8px] font-black uppercase bg-amber-500/80 text-white py-0.5">New</span>
@@ -241,25 +299,47 @@ function _renderPhotoPreviews() {
                     class="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/60 text-white text-[10px] flex items-center justify-center hover:bg-red-500 transition-colors">×</button>
         </div>`).join('');
 
-    const totalPhotos = _existingPhotos.length + _pendingPhotos.length;
+    const totalPhotos = (_existingPhotos?.length || 0) + (_pendingPhotos?.length || 0);
+
+    // 3. Small "+" Button: Specialized for Photo Library/Bulk Upload
+    // Added 'ml-1' for that requested white space between existing photos and the add button
     const addMore = totalPhotos < 8 ? `
-        <label class="w-16 h-16 rounded-xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center cursor-pointer hover:border-amber-400 transition-colors flex-shrink-0 text-slate-400 hover:text-amber-500">
+        <label class="ml-1 w-16 h-16 rounded-xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center cursor-pointer hover:border-amber-400 transition-colors flex-shrink-0 text-slate-400 hover:text-amber-500">
             <span class="text-lg">+</span>
-            <span class="text-[8px] font-black uppercase">Photo</span>
-            <input type="file" accept="image/*" capture="environment" multiple class="hidden" onchange="window.colEditorPhotoChange(this)">
+            <span class="text-[8px] font-black uppercase">Library</span>
+            <input type="file"
+                   accept="image/*"
+                   multiple
+                   class="hidden"
+                   onchange="window.colEditorPhotoChange(this)">
         </label>` : '';
 
-    container.innerHTML = `<div class="flex gap-2 flex-wrap">${existingHtml}${pendingHtml}${addMore}</div>`;
+    // 4. Update the container
+    container.innerHTML = `<div class="flex gap-2 flex-wrap items-center">${existingHtml}${pendingHtml}${addMore}</div>`;
+
+    // Re-initialize icons if necessary
+    if (window.lucide) {
+        window.lucide.createIcons();
+    }
 }
 
 async function _uploadPhotos(userId, itemId) {
     const uploadedUrls = [];
     for (const p of _pendingPhotos) {
         const ext  = p.file.name.split('.').pop() || 'jpg';
-        const path = `${userId}/${itemId}-${Date.now()}.${ext}`;
+        // Using a more collision-resistant path for multiple uploads
+        const timestamp = Date.now();
+        const randomString = Math.random().toString(36).substring(2, 7);
+        const path = `${userId}/${itemId}-${timestamp}-${randomString}.${ext}`;
+
         const { error } = await supabase.storage
             .from('collection-photos')
-            .upload(path, p.file, { upsert: true, contentType: p.file.type });
+            .upload(path, p.file, {
+                upsert: true,
+                contentType: p.file.type,
+                cacheControl: '3600'
+            });
+
         if (error) {
             console.error('[ColEditor] photo upload failed:', error.message);
         } else {
@@ -371,6 +451,7 @@ async function _populateForm(item) {
     _renderTypeToggle();
     _renderSubtypeSelector();
     _wireFormatSuggestions(_selectedSubtype);
+    _wireConditionSuggestions();
 
     // Resolve signed URLs for existing photos
     for (const path of (item.photos || [])) {
@@ -785,6 +866,7 @@ window.colEditorRemoveLabel = (i) => {
 
 export const initCollectionEditor = () => {
     _wireLabelInput();
+    _wireConditionSuggestions();
     // Close modal on backdrop click
     const modal = document.getElementById('col-editor-modal');
     if (modal) {
