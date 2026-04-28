@@ -129,21 +129,16 @@ async function _fetchCurations(userId) {
 }
 
 /**
- * Fetch distinct band names from the user's gig journals.
- * This is the authoritative source — band_name on collection_items may be
- * absent for older items saved before the field was introduced.
- * Also merges any band_name values already present on items for free-text entries.
+ * Derive band names from collection items only — so chips reflect what the
+ * user actually has in their collection, not all their gig history.
+ * Uses band_name where set; falls back to artist_context for older items.
+ * No network call needed since _items is already loaded.
  */
-async function _fetchBandNames(userId) {
-    const { data } = await supabase
-        .from('journals')
-        .select('band')
-        .eq('user_id', userId);
-
-    const fromJournals = (data || []).map(r => r.band).filter(Boolean);
-    // Merge with any free-text band_name values on collection items
-    const fromItems = _items.map(i => i.band_name).filter(Boolean);
-    return [...new Set([...fromJournals, ...fromItems])].sort();
+async function _fetchBandNames(_userId) {
+    const names = _items
+        .map(i => i.band_name || null)
+        .filter(Boolean);
+    return [...new Set(names)].sort();
 }
 
 async function _fetchSignedUrl(storagePath) {
@@ -792,13 +787,14 @@ const heroUrl   = heroPath ? _signedUrlCache.get(heroPath) : null;
 const allPhotoUrls = (item.photos || []).map(p => _signedUrlCache.get(p)).filter(Boolean);
 
     sheet.innerHTML = `
-        <!-- Full-screen dismiss area — covers the space above the card on all screen sizes -->
-        <div class="flex-1 min-h-0 w-full cursor-pointer" onclick="window._colCloseItem()" aria-label="Close" role="button"></div>
-        <div class="col-item-sheet-inner flex flex-col bg-white rounded-t-[2rem] w-full max-w-md mx-auto max-h-[85vh]">
+        <div class="col-item-sheet-inner flex flex-col bg-white rounded-t-[2rem] w-full max-w-md mx-auto max-h-[85vh] overflow-hidden"
+             onclick="event.stopPropagation()">
 
             <!-- Sticky handle + close bar — never scrolls -->
-            <div class="flex-shrink-0 flex items-center justify-between px-5 pt-4 pb-3 rounded-t-[2rem]">
-                <div class="w-9 h-1 bg-slate-200 rounded-full"></div>
+            <div class="flex-shrink-0 flex items-center justify-between px-5 pt-4 pb-3">
+                <span class="text-[11px] font-black uppercase tracking-widest text-slate-400">
+                    ${item.band_name || item.artist_context || typeLabel}
+                </span>
                 <button onclick="window._colCloseItem()"
                         aria-label="Close"
                         class="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center transition-all active:scale-95">
@@ -806,7 +802,8 @@ const allPhotoUrls = (item.photos || []).map(p => _signedUrlCache.get(p)).filter
                 </button>
             </div>
 
-            <!-- Scrollable body — scrollbar only appears here -->
+            <!-- Scrollable body — overflow-y-auto on a plain non-rounded div so
+                 the scrollbar track stays well within the card, never over the curves -->
             <div class="overflow-y-auto flex-1 pb-8">
 
             <!-- Header: artwork + title + edit pencil -->
@@ -908,12 +905,17 @@ window._colOpenItem = (id) => {
     if (!item) return;
     _renderItemDetail(item);
 
-    // Ensure sheet is a flex column so the dismiss overlay fills space above the card
+    // Wire the sheet element itself as the dismiss backdrop.
+    // The inner card stops propagation so only taps outside it trigger close.
     const sheet = document.getElementById('col-item-sheet');
     if (sheet) {
         sheet.style.display = 'flex';
         sheet.style.flexDirection = 'column';
         sheet.style.justifyContent = 'flex-end';
+        if (!sheet._dismissWired) {
+            sheet._dismissWired = true;
+            sheet.addEventListener('click', () => window._colCloseItem());
+        }
     }
 };
 

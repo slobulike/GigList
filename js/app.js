@@ -1,8 +1,8 @@
 /**
  * GigList Core Engine
- * v5.0.1 — 2026-04-28
+ * v5.0.2 — 2026-04-28
  * -------------------------------------------------------------------
- * ✅ Collection bug fixes: add x to close modal, show band filter, load camera on mobile device
+ * ✅ Collection bug fixes: migration script to store band_name in supabase for search
  */
 
 import * as Data from './modules/data.js';

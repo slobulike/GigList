@@ -642,7 +642,9 @@ window.saveCollectionItem = async () => {
             type:             _selectedType,
             subtype:          _selectedSubtype,
             title,
-            band_name:        bandName,
+            // band_name requires the column to exist in collection_items.
+            // Run: ALTER TABLE collection_items ADD COLUMN IF NOT EXISTS band_name text;
+            ...(bandName !== null && { band_name: bandName }),
             item_date:        _get('col-editor-date')       || null,
             artist_context:   _get('col-editor-artist-ctx') || null,
             body:             _get('col-editor-body')       || null,
