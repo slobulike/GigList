@@ -557,7 +557,7 @@
 
                     <!-- Labels -->
                     <div>
-                        <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Labels</p>
+                        <label for="col-editor-label-input" class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block">Labels</label>
                         <div id="col-editor-labels" class="flex flex-wrap gap-2 mb-2"></div>
                         <div class="relative">
                             <input type="text" id="col-editor-label-input" placeholder="Beanos find, Karl sent this…" autocomplete="off"
@@ -591,71 +591,6 @@
     <!-- view-buddies: shell retained for buddy-drill-in panel (fixed overlay).
          Visible content (search + tiles) has moved to view-profile. -->
     <section id="view-buddies" class="view-section hidden" role="region" aria-label="Buddies" aria-hidden="true">
-
-        <!-- Buddy drill-in panel — slides in over the tile view -->
-        <div id="buddy-drill-in"
-             class="fixed inset-0 z-[200] bg-[#f8fafc] translate-x-full transition-transform duration-300 ease-in-out overflow-y-auto"
-             aria-hidden="true">
-
-            <!-- Drill-in header -->
-            <div class="sticky top-0 bg-white/90 backdrop-blur-xl border-b border-slate-100 z-10 px-4 py-3 flex items-center gap-3">
-                <button id="buddy-back-btn"
-                        onclick="window.closeBuddyDrillIn()"
-                        aria-label="Back to Buddies"
-                        class="flex items-center justify-center w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 transition-all active:scale-95 flex-shrink-0">
-                    <i data-lucide="chevron-left" class="w-5 h-5" aria-hidden="true"></i>
-                </button>
-                <div class="min-w-0">
-                    <p id="buddy-drill-name" class="text-base font-black text-slate-900 leading-none truncate">--</p>
-                    <p id="buddy-drill-meta" class="text-[10px] font-bold text-slate-400 mt-0.5">-- shows</p>
-                </div>
-            </div>
-
-            <!-- Drill-in body — injected by buddies.js -->
-            <div id="buddy-drill-body" class="px-4 pt-4 pb-32 max-w-md mx-auto space-y-6">
-                <!-- Stats headlines -->
-                <div id="buddy-drill-stats" class="grid grid-cols-3 gap-3"></div>
-
-                <!-- Year chart -->
-                <div id="buddy-drill-year-chart-wrap" class="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm h-56">
-                    <p class="text-[10px] font-black uppercase text-slate-400 mb-2">Yearly History</p>
-                    <div class="h-40">
-                        <canvas id="buddy-year-chart"></canvas>
-                    </div>
-                </div>
-
-                <!-- Top bands chart -->
-                <div id="buddy-drill-bands-chart-wrap" class="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm">
-                    <p class="text-[10px] font-black uppercase text-slate-400 mb-4">Top Bands</p>
-                    <div class="h-[280px] relative">
-                        <canvas id="buddy-bands-chart"></canvas>
-                    </div>
-                </div>
-
-                <!-- Shared only toggle -->
-                <div class="flex items-center justify-between bg-white rounded-2xl px-4 py-3 border border-slate-100 shadow-sm">
-                    <span class="text-sm font-black text-slate-700">Shared shows only</span>
-                    <label class="relative inline-flex items-center cursor-pointer">
-                        <input type="checkbox" id="buddy-drill-shared-toggle" class="hidden peer"
-                               onchange="window.handleBuddyDrillSharedToggle()">
-                        <span class="w-10 h-5 bg-slate-200 rounded-full peer peer-checked:bg-indigo-600 transition-colors after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-5"></span>
-                    </label>
-                </div>
-
-                <!-- Search within buddy's data -->
-                <div class="relative w-full">
-                    <i data-lucide="search" class="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"></i>
-                    <input type="text"
-                           id="buddy-drill-search"
-                           placeholder="Search this list…"
-                           aria-label="Search buddy's shows"
-                           class="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all shadow-sm">
-                </div>
-
-                <!-- Table/list renders here -->
-                <div id="buddy-drill-table"></div>
-            </div>
-        </div>
     </section>
     <!-- ── PROFILE VIEW ──────────────────────────────────────────────────────── -->
     <section id="view-profile"
@@ -735,6 +670,15 @@
                     </div>
                 </div>
                 <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 bg-rose-50 rounded-xl flex items-center justify-center flex-shrink-0">
+                        <i data-lucide="mic-2" class="w-4 h-4 text-rose-500" aria-hidden="true"></i>
+                    </div>
+                    <div class="min-w-0">
+                        <p class="text-[9px] font-black uppercase tracking-widest text-slate-400">Favourite Live Song</p>
+                        <p id="profile-fav-song" class="text-sm font-black text-slate-800 truncate">--</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-3">
                     <div class="w-8 h-8 bg-amber-50 rounded-xl flex items-center justify-center flex-shrink-0">
                         <i data-lucide="star" class="w-4 h-4 text-amber-500" aria-hidden="true"></i>
                     </div>
@@ -757,6 +701,12 @@
                     <label for="profile-edit-venue" class="block text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1.5">Favourite Venue</label>
                     <input type="text" id="profile-edit-venue"
                            placeholder="The one you keep coming back to…"
+                           class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all">
+                </div>
+                <div>
+                    <label for="profile-edit-song" class="block text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1.5">Favourite Live Song</label>
+                    <input type="text" id="profile-edit-song"
+                           placeholder="That song that always destroys you live…"
                            class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all">
                 </div>
                 <div>
@@ -800,7 +750,7 @@
         <!-- TODO (step 6): migrate achievements.js rendering into this section -->
         <div id="profile-achievements-section" class="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-6">
             <p class="text-[10px] font-black uppercase text-indigo-500 tracking-widest mb-4">Achievements</p>
-            <div id="profile-achievements-container" class="space-y-2">
+            <div id="profile-achievements-container" class="grid grid-cols-2 gap-3">
                 <!-- Injected by profile.js / achievements.js -->
                 <p class="text-xs text-slate-400 italic">Loading achievements…</p>
             </div>
@@ -1150,7 +1100,7 @@
         </div>
 
         <div class="flex-grow p-6 md:p-10 relative bg-slate-50/50">
-            <canvas id="modalChartCanvas" role="img" aria-label="Enlarged interactive chart view"></canvas>
+            <canvas id="modalChartCanvas" role="img" aria-labelledby="modalChartTitle"></canvas>
         </div>
     </div>
 </div>
@@ -1162,6 +1112,7 @@
         <div id="modal-content"></div>
     </div>
 </div>
+
 
 <div id="mapModal"
      class="fixed inset-0 z-[100] hidden bg-slate-900/40 backdrop-blur-md flex items-center justify-center p-4 md:p-12"
@@ -1377,6 +1328,71 @@ window.openCollectionEditor  = openCollectionEditor;
         initApp();
     }
 </script>
+
+<!-- Buddy drill-in panel — slides in over the tile view -->
+<div id="buddy-drill-in"
+     class="fixed inset-0 z-[200] bg-[#f8fafc] translate-x-full transition-transform duration-300 ease-in-out overflow-y-auto"
+     aria-hidden="true">
+
+    <!-- Drill-in header -->
+    <div class="sticky top-0 bg-white/90 backdrop-blur-xl border-b border-slate-100 z-10 px-4 py-3 flex items-center gap-3">
+        <button id="buddy-back-btn"
+                onclick="window.closeBuddyDrillIn()"
+                aria-label="Back to Buddies"
+                class="flex items-center justify-center w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 transition-all active:scale-95 flex-shrink-0">
+            <i data-lucide="chevron-left" class="w-5 h-5" aria-hidden="true"></i>
+        </button>
+        <div class="min-w-0">
+            <p id="buddy-drill-name" class="text-base font-black text-slate-900 leading-none truncate">--</p>
+            <p id="buddy-drill-meta" class="text-[10px] font-bold text-slate-400 mt-0.5">-- shows</p>
+        </div>
+    </div>
+
+    <!-- Drill-in body — injected by buddies.js -->
+    <div id="buddy-drill-body" class="px-4 pt-4 pb-32 max-w-md mx-auto space-y-6">
+        <!-- Stats headlines -->
+        <div id="buddy-drill-stats" class="grid grid-cols-3 gap-3"></div>
+
+        <!-- Year chart -->
+        <div id="buddy-drill-year-chart-wrap" class="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm h-56">
+            <p class="text-[10px] font-black uppercase text-slate-400 mb-2">Yearly History</p>
+            <div class="h-40">
+                <canvas id="buddy-year-chart"></canvas>
+            </div>
+        </div>
+
+        <!-- Top bands chart -->
+        <div id="buddy-drill-bands-chart-wrap" class="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm">
+            <p class="text-[10px] font-black uppercase text-slate-400 mb-4">Top Bands</p>
+            <div class="h-[280px] relative">
+                <canvas id="buddy-bands-chart"></canvas>
+            </div>
+        </div>
+
+        <!-- Shared only toggle -->
+        <div class="flex items-center justify-between bg-white rounded-2xl px-4 py-3 border border-slate-100 shadow-sm">
+            <span class="text-sm font-black text-slate-700">Shared shows only</span>
+            <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="buddy-drill-shared-toggle" class="hidden peer"
+                       onchange="window.handleBuddyDrillSharedToggle()">
+                <span class="w-10 h-5 bg-slate-200 rounded-full peer peer-checked:bg-indigo-600 transition-colors after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-5"></span>
+            </label>
+        </div>
+
+        <!-- Search within buddy's data -->
+        <div class="relative w-full">
+            <i data-lucide="search" class="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"></i>
+            <input type="text"
+                   id="buddy-drill-search"
+                   placeholder="Search this list…"
+                   aria-label="Search buddy's shows"
+                   class="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all shadow-sm">
+        </div>
+
+        <!-- Table/list renders here -->
+        <div id="buddy-drill-table"></div>
+    </div>
+</div>
 
 <!-- Toast notification container -->
 <div id="toast-container" class="fixed bottom-24 left-1/2 -translate-x-1/2 z-[500] flex flex-col items-center gap-2 pointer-events-none" aria-live="polite" aria-atomic="false"></div>

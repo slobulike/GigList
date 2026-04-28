@@ -141,11 +141,10 @@ window.openProfile = async function(userId) {
 };
 
 window.closeProfileView = function() {
-    // Return to Buddies tab (most common origin for buddy profiles)
-    if (typeof window.switchView === 'function') {
-        window.switchView(_profileUserId ? 'buddies' : 'home');
-    }
+    // Return to own profile (Buddies content now lives inside view-profile,
+    // so switching to 'buddies' would show an empty shell)
     _profileUserId = null;
+    window.openProfile(null);
 };
 
 // ─── OWN PROFILE ─────────────────────────────────────────────────────────────
@@ -162,6 +161,9 @@ async function _renderOwnProfile() {
 
     // Settings section — visible for own profile
     document.getElementById('profile-settings-section')?.classList.remove('hidden');
+
+    // Buddies section — visible for own profile
+    document.getElementById('profile-buddies-section')?.classList.remove('hidden');
 
     // Shared callout — hidden for own profile
     const callout = document.getElementById('profile-shared-callout');
@@ -192,6 +194,8 @@ async function _renderOwnProfile() {
     const editVenue = document.getElementById('profile-edit-venue');
     if (editBand)  editBand.value  = user.favourite_band  || '';
     if (editVenue) editVenue.value = user.favourite_venue || '';
+    const editSong = document.getElementById('profile-edit-song');
+    if (editSong)  editSong.value  = user.favourite_song  || '';
 
     // Favourite show — look up the journal key to get a human-readable label
     const editShow = document.getElementById('profile-edit-show');
@@ -229,6 +233,9 @@ async function _renderBuddyProfile(userId) {
     // Settings section — hidden for buddy profile
     document.getElementById('profile-settings-section')?.classList.add('hidden');
 
+    // Buddies section (Find Buddies search + own tile list) — hidden for buddy profile
+    document.getElementById('profile-buddies-section')?.classList.add('hidden');
+
     // Music identity edit button — hidden for buddy profile
     document.getElementById('profile-identity-edit-btn')?.classList.add('hidden');
     // Ensure edit mode is closed
@@ -238,7 +245,7 @@ async function _renderBuddyProfile(userId) {
     // ── Fetch buddy's profile ──
     const { data: profile, error } = await supabase
         .from('profiles')
-        .select('id, username, display_name, avatar_url, is_public, favourite_band, favourite_venue, favourite_show_key')
+        .select('id, username, display_name, avatar_url, is_public, favourite_band, favourite_venue, favourite_song, favourite_show_key')
         .eq('id', userId)
         .single();
 
@@ -312,9 +319,11 @@ function _renderIdentityDisplay(profile) {
 
     const band  = profile.favourite_band  || defaultBand  || '—';
     const venue = profile.favourite_venue || defaultVenue || '—';
+    const song  = profile.favourite_song  || '—';
 
     _setText('profile-fav-band',  band);
     _setText('profile-fav-venue', venue);
+    _setText('profile-fav-song',  song);
 
     if (profile.favourite_show_key) {
         const match = (window.journalData || []).find(g => g['Journal Key'] === profile.favourite_show_key);
@@ -351,6 +360,7 @@ window.saveIdentity = async function() {
 
     const band     = document.getElementById('profile-edit-band')?.value.trim() || null;
     const venue    = document.getElementById('profile-edit-venue')?.value.trim() || null;
+    const song     = document.getElementById('profile-edit-song')?.value.trim() || null;
     const showKey  = document.getElementById('profile-edit-show')?._selectedKey || null;
 
     const { error } = await supabase
@@ -358,6 +368,7 @@ window.saveIdentity = async function() {
         .update({
             favourite_band:       band,
             favourite_venue:      venue,
+            favourite_song:       song,
             favourite_show_key:   showKey,
         })
         .eq('id', _currentUser.id);
@@ -370,10 +381,12 @@ window.saveIdentity = async function() {
     // Update local user object
     _currentUser.favourite_band      = band;
     _currentUser.favourite_venue     = venue;
+    _currentUser.favourite_song      = song;
     _currentUser.favourite_show_key  = showKey;
     if (window.currentUser) {
         window.currentUser.favourite_band     = band;
         window.currentUser.favourite_venue    = venue;
+        window.currentUser.favourite_song     = song;
         window.currentUser.favourite_show_key = showKey;
     }
 

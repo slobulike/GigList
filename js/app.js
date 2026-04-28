@@ -1,9 +1,9 @@
 /**
  * GigList Core Engine
- * v5.0.3 — 2026-04-28
+ * v5.0.4 — 2026-04-28
  * -------------------------------------------------------------------
- * ✅ Collection bug fixes: fixed camera vs photo album picker
- * ✅ Various UI/UX tweaks
+ * ✅ Added Buddies to Profile with all previous functionality restored (view Buddy stats and Buddy Profile)
+ * ✅ Amended layout of Achievements to streamline profile page
  */
 
 import * as Data from './modules/data.js';
@@ -122,7 +122,7 @@ let currentUser = null;
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "5.0.1";
+const APP_VERSION = "5.0.4";
 
 window.toggleListView = UI.toggleListView;
 window.activeView = window.activeView || 'list';
