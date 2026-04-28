@@ -246,7 +246,7 @@ function _renderPhotoPreviews() {
         <label class="w-16 h-16 rounded-xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center cursor-pointer hover:border-amber-400 transition-colors flex-shrink-0 text-slate-400 hover:text-amber-500">
             <span class="text-lg">+</span>
             <span class="text-[8px] font-black uppercase">Photo</span>
-            <input type="file" accept="image/*" multiple class="hidden" onchange="window.colEditorPhotoChange(this)">
+            <input type="file" accept="image/*" capture="environment" multiple class="hidden" onchange="window.colEditorPhotoChange(this)">
         </label>` : '';
 
     container.innerHTML = `<div class="flex gap-2 flex-wrap">${existingHtml}${pendingHtml}${addMore}</div>`;
@@ -393,9 +393,9 @@ async function _populateForm(item) {
     const condEl = document.getElementById('col-editor-condition');
     if (condEl) condEl.value = item.condition || '';
 
-    // Band selector
-    const bandEl = document.getElementById('col-editor-band');
-    if (bandEl && item.band_id) bandEl.value = item.band_id;
+    // Band combobox — pre-fill with stored band_name
+    const bandInput = document.getElementById('col-editor-band-input');
+    if (bandInput) bandInput.value = item.band_name || '';
 
     _renderLabels();
     _renderPhotoPreviews();
@@ -426,11 +426,15 @@ function _updateFieldVisibility() {
     }
 }
 
-// ─── BAND SELECTOR ────────────────────────────────────────────────────────────
+// ─── BAND COMBOBOX ────────────────────────────────────────────────────────────
+
+let _bandOptions = []; // Cached band name list for this editor session
 
 async function _populateBandSelector() {
-    const el = document.getElementById('col-editor-band');
-    if (!el) return;
+    const input    = document.getElementById('col-editor-band-input');
+    const dropdown = document.getElementById('col-editor-band-dropdown');
+    if (!input || !dropdown) return;
+
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
 
@@ -441,14 +445,71 @@ async function _populateBandSelector() {
         .eq('user_id', session.user.id)
         .order('band');
 
-    const bands = [...new Set((data || []).map(r => r.band).filter(Boolean))].sort();
-    el.innerHTML = `<option value="">— No band —</option>` +
-        bands.map(b => `<option value="${_esc(b)}">${b}</option>`).join('');
+    _bandOptions = [...new Set((data || []).map(r => r.band).filter(Boolean))].sort();
 
-    // If in band mode, pre-select
+    // If in band mode, pre-fill
     if (window.isBandMode && window.currentArtist) {
-        el.value = window.currentArtist;
+        input.value = window.currentArtist;
     }
+
+    _wireBandCombobox();
+}
+
+function _wireBandCombobox() {
+    const input    = document.getElementById('col-editor-band-input');
+    const dropdown = document.getElementById('col-editor-band-dropdown');
+    if (!input || !dropdown || input._bandWired) return;
+    input._bandWired = true;
+
+    const _showDropdown = (matches) => {
+        dropdown.innerHTML = [
+            `<li class="px-4 py-2.5 text-sm font-bold text-slate-400 cursor-pointer hover:bg-slate-50 transition-colors italic"
+                 onmousedown="event.preventDefault();document.getElementById('col-editor-band-input').value='';document.getElementById('col-editor-band-dropdown').classList.add('hidden')">
+                 — No band —</li>`,
+            ...matches.map(m =>
+                `<li class="px-4 py-2.5 text-sm font-bold text-slate-700 cursor-pointer hover:bg-amber-50 transition-colors"
+                     onmousedown="event.preventDefault();document.getElementById('col-editor-band-input').value='${_esc(m)}';document.getElementById('col-editor-band-dropdown').classList.add('hidden')">${m}</li>`
+            ),
+        ].join('');
+        if (matches.length > 0 || !input.value.trim()) {
+            dropdown.classList.remove('hidden');
+        } else {
+            dropdown.classList.add('hidden');
+        }
+    };
+
+    input.addEventListener('focus', () => {
+        const q = input.value.trim().toLowerCase();
+        const matches = q
+            ? _bandOptions.filter(b => b.toLowerCase().includes(q))
+            : _bandOptions;
+        _showDropdown(matches);
+    });
+
+    input.addEventListener('input', () => {
+        const q = input.value.trim().toLowerCase();
+        const matches = _bandOptions.filter(b => b.toLowerCase().includes(q));
+        _showDropdown(matches);
+    });
+
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') dropdown.classList.add('hidden');
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            const first = dropdown.querySelector('li:not(.italic)');
+            if (first && !dropdown.classList.contains('hidden')) {
+                first.dispatchEvent(new MouseEvent('mousedown'));
+            } else {
+                dropdown.classList.add('hidden');
+            }
+        }
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!input.contains(e.target) && !dropdown.contains(e.target)) {
+            dropdown.classList.add('hidden');
+        }
+    });
 }
 
 // ─── OPEN / CLOSE ─────────────────────────────────────────────────────────────
@@ -571,10 +632,9 @@ window.saveCollectionItem = async () => {
             heroColor = await _sampleHeroColor(_pendingPhotos[0].file);
         }
 
-        // Resolve band_id from band name selection
-        // We store band name in a separate lookup — for now we use the text value
-        const bandEl = document.getElementById('col-editor-band');
-        const bandName = bandEl?.options[bandEl.selectedIndex]?.text || null;
+        // Read band name directly from combobox input (free-text or lookup selection)
+        const bandInput = document.getElementById('col-editor-band-input');
+        const bandName = bandInput?.value.trim() || null;
 
         const row = {
             id:               itemId,
@@ -582,6 +642,7 @@ window.saveCollectionItem = async () => {
             type:             _selectedType,
             subtype:          _selectedSubtype,
             title,
+            band_name:        bandName,
             item_date:        _get('col-editor-date')       || null,
             artist_context:   _get('col-editor-artist-ctx') || null,
             body:             _get('col-editor-body')       || null,

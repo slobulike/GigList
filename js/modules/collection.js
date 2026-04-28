@@ -27,6 +27,7 @@ import { supabase } from './supabase.js';
 let _user          = null;
 let _items         = [];          // All loaded collection_items
 let _curations     = [];          // Saved user curations
+let _bandNames     = [];          // Distinct band names for filter chips (from journals)
 let _activeCuration = 'all';      // Current curation key
 let _activeBandId  = null;        // null = all bands
 let _drillType     = null;        // Currently open drill-down type
@@ -127,6 +128,24 @@ async function _fetchCurations(userId) {
     return data || [];
 }
 
+/**
+ * Fetch distinct band names from the user's gig journals.
+ * This is the authoritative source — band_name on collection_items may be
+ * absent for older items saved before the field was introduced.
+ * Also merges any band_name values already present on items for free-text entries.
+ */
+async function _fetchBandNames(userId) {
+    const { data } = await supabase
+        .from('journals')
+        .select('band')
+        .eq('user_id', userId);
+
+    const fromJournals = (data || []).map(r => r.band).filter(Boolean);
+    // Merge with any free-text band_name values on collection items
+    const fromItems = _items.map(i => i.band_name).filter(Boolean);
+    return [...new Set([...fromJournals, ...fromItems])].sort();
+}
+
 async function _fetchSignedUrl(storagePath) {
     const { data, error } = await supabase.storage
         .from('collection-photos')
@@ -183,6 +202,17 @@ function _applySubtypeFilter(items, subtype) {
 function _applyCuration(items, curationKey) {
     if (!curationKey || curationKey === 'all') return items;
 
+    // Band filter — key format: "band_<bandname>"
+    // Matches band_name (set by the editor) or artist_context as a fallback
+    // for items saved before band_name was introduced.
+    if (curationKey.startsWith('band_')) {
+        const name = curationKey.slice(5).toLowerCase();
+        return items.filter(i =>
+            (i.band_name || '').toLowerCase() === name ||
+            (i.artist_context || '').toLowerCase().includes(name)
+        );
+    }
+
     // System curations
     if (curationKey === 'has_story')  return items.filter(i => i.body);
     if (curationKey === 'signed')     return items.filter(i => i.signed_by);
@@ -238,6 +268,15 @@ function _applySavedCuration(items, filterJson) {
 
 function _buildCurationChips(items) {
     const chips = [{ key: 'all', label: 'All' }];
+
+    // Band chips — one per unique band name, sourced from _bandNames
+    // (fetched from journals + free-text band_name on items at init time).
+    // These come first so they're the primary quick-filter.
+    // TODO: if band count grows large (10+), consider a collapsible "By band"
+    //       section or grouped curation strip rather than an ever-longer scroll.
+    _bandNames.forEach(name => {
+        chips.push({ key: `band_${name}`, label: name });
+    });
 
     // System curations — only show if there's data
     if (items.some(i => i.body))       chips.push({ key: 'has_story',  label: 'Has a story' });
@@ -474,13 +513,14 @@ function _renderCollectionTab() {
     const bandFiltered  = _applyBandFilter(_items);
     const curated       = _applyCuration(bandFiltered, _activeCuration);
     const searched      = _searchQuery ? curated.filter(i =>
-        (i.title       || '').toLowerCase().includes(_searchQuery) ||
-        (i.body        || '').toLowerCase().includes(_searchQuery) ||
-        (i.label       || '').toLowerCase().includes(_searchQuery) ||
-        (i.provenance  || '').toLowerCase().includes(_searchQuery) ||
-        (i.signed_by   || '').toLowerCase().includes(_searchQuery) ||
-        (i.labels      || []).some(l => l.toLowerCase().includes(_searchQuery)) ||
-        (i.band_name   || '').toLowerCase().includes(_searchQuery)
+        (i.title          || '').toLowerCase().includes(_searchQuery) ||
+        (i.body           || '').toLowerCase().includes(_searchQuery) ||
+        (i.label          || '').toLowerCase().includes(_searchQuery) ||
+        (i.artist_context || '').toLowerCase().includes(_searchQuery) ||
+        (i.provenance     || '').toLowerCase().includes(_searchQuery) ||
+        (i.signed_by      || '').toLowerCase().includes(_searchQuery) ||
+        (i.labels         || []).some(l => l.toLowerCase().includes(_searchQuery)) ||
+        (i.band_name      || '').toLowerCase().includes(_searchQuery)
     ) : curated;
     const artefacts     = searched.filter(i => i.type === 'artefact');
     const memories      = searched.filter(i => i.type === 'memory');
@@ -752,12 +792,25 @@ const heroUrl   = heroPath ? _signedUrlCache.get(heroPath) : null;
 const allPhotoUrls = (item.photos || []).map(p => _signedUrlCache.get(p)).filter(Boolean);
 
     sheet.innerHTML = `
-        <div class="col-item-sheet-inner bg-white rounded-t-[2rem] w-full max-w-md mx-auto max-h-[85vh] overflow-y-auto">
-            <!-- Handle -->
-            <div class="w-9 h-1 bg-slate-200 rounded-full mx-auto mt-4 mb-4"></div>
+        <!-- Full-screen dismiss area — covers the space above the card on all screen sizes -->
+        <div class="flex-1 min-h-0 w-full cursor-pointer" onclick="window._colCloseItem()" aria-label="Close" role="button"></div>
+        <div class="col-item-sheet-inner flex flex-col bg-white rounded-t-[2rem] w-full max-w-md mx-auto max-h-[85vh]">
 
-            <!-- Header -->
-            <div class="flex gap-4 px-5 mb-4">
+            <!-- Sticky handle + close bar — never scrolls -->
+            <div class="flex-shrink-0 flex items-center justify-between px-5 pt-4 pb-3 rounded-t-[2rem]">
+                <div class="w-9 h-1 bg-slate-200 rounded-full"></div>
+                <button onclick="window._colCloseItem()"
+                        aria-label="Close"
+                        class="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center transition-all active:scale-95">
+                    <i data-lucide="x" class="w-4 h-4" aria-hidden="true"></i>
+                </button>
+            </div>
+
+            <!-- Scrollable body — scrollbar only appears here -->
+            <div class="overflow-y-auto flex-1 pb-8">
+
+            <!-- Header: artwork + title + edit pencil -->
+            <div class="flex gap-4 px-5 mb-4 items-start">
                 ${heroUrl ? `
                     <div class="w-16 h-16 rounded-xl overflow-hidden flex-shrink-0">
                         <img src="${heroUrl}" alt="${_esc(item.title)}" class="w-full h-full object-cover">
@@ -776,7 +829,7 @@ const allPhotoUrls = (item.photos || []).map(p => _signedUrlCache.get(p)).filter
                 ${window.currentUser?.id === item.user_id ? `
                 <button onclick="window.openCollectionEditor(null, '${_esc(item.id)}')"
                         aria-label="Edit item"
-                        class="flex-shrink-0 w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center transition-all">
+                        class="flex-shrink-0 mt-1 w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center transition-all">
                     <i data-lucide="pencil" class="w-4 h-4" aria-hidden="true"></i>
                 </button>` : ''}
             </div>
@@ -813,7 +866,8 @@ ${allPhotoUrls.length > 1 ? `
     </div>
 </div>` : ''}
 
-            <div class="h-8"></div>
+            <!-- end scrollable body -->
+            </div>
         </div>
     `;
 
@@ -853,6 +907,14 @@ window._colOpenItem = (id) => {
     const item = _items.find(i => i.id === id);
     if (!item) return;
     _renderItemDetail(item);
+
+    // Ensure sheet is a flex column so the dismiss overlay fills space above the card
+    const sheet = document.getElementById('col-item-sheet');
+    if (sheet) {
+        sheet.style.display = 'flex';
+        sheet.style.flexDirection = 'column';
+        sheet.style.justifyContent = 'flex-end';
+    }
 };
 
 window._colCloseItem = () => {
@@ -885,7 +947,12 @@ window._colSearch = (query) => {
  * re-fetching on every tab switch.
  */
 export async function init(currentUser) {
-    _user = currentUser;
+    _user        = currentUser;
+    _searchQuery = ''; // Reset search on each tab init — stale query would hide all results
+
+    // Also clear the search input visually if present
+    const searchEl = document.getElementById('col-search-input');
+    if (searchEl) searchEl.value = '';
 
     const container = document.getElementById('col-main-container');
     if (!container) return;
@@ -903,6 +970,9 @@ export async function init(currentUser) {
         _fetchCurations(currentUser.id),
     ]);
 
+    // Fetch band names after items so _fetchBandNames can merge item band_names too
+    _bandNames = await _fetchBandNames(currentUser.id);
+
     _renderCollectionTab();
 }
 
@@ -915,6 +985,7 @@ export async function refresh() {
         _fetchItems(_user.id),
         _fetchCurations(_user.id),
     ]);
+    _bandNames = await _fetchBandNames(_user.id);
     _renderCollectionTab();
     if (_drillType) _renderDrillDown(_drillType);
 }

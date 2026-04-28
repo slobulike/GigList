@@ -474,12 +474,10 @@
                 </div>
 
                 <!-- Band -->
-                <div>
-                    <label for="col-editor-band" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Band</label>
-                    <select id="col-editor-band"
-                            class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors appearance-none">
-                        <option value="">— No band —</option>
-                    </select>
+                <div class="relative">
+                    <input id="col-editor-band-input" type="text" placeholder="Band name (optional)"
+                           class="w-full px-4 py-3 rounded-2xl border border-slate-200 text-sm font-bold text-slate-700 focus:outline-none focus:border-amber-400 transition-colors" autocomplete="off">
+                    <ul id="col-editor-band-dropdown" class="hidden absolute z-20 w-full mt-1 bg-white border border-slate-200 rounded-2xl shadow-lg overflow-hidden max-h-48 overflow-y-auto"></ul>
                 </div>
 
                 <!-- Story -->

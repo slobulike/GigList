@@ -1,9 +1,8 @@
 /**
  * GigList Core Engine
- * v5.0.0 — 2026-04-27
+ * v5.0.1 — 2026-04-28
  * -------------------------------------------------------------------
- * ✅ Collections are live!
- * ✅ Users can catalogue items, add photos, memories
+ * ✅ Collection bug fixes: add x to close modal, show band filter, load camera on mobile device
  */
 
 import * as Data from './modules/data.js';
@@ -122,7 +121,7 @@ let currentUser = null;
 let homeCarousel = [];
 let currentCarouselIndex = 0;
 
-const APP_VERSION = "5.0.0";
+const APP_VERSION = "5.0.1";
 
 window.toggleListView = UI.toggleListView;
 window.activeView = window.activeView || 'list';
