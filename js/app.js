@@ -2,8 +2,8 @@
  * GigList Core Engine
  * v5.0.6 — 2026-04-29
  * -------------------------------------------------------------------
- * ✅ Improved filter logic to include pick lists for exact matches
- * ✅ Renamed Gigs header from Data Centre to Live Music with strap line
+ * ✅ Tweaked gigs tab header
+ * ✅ Addressed IDE warnings for missing labels
  */
 
 import * as Data from './modules/data.js';
