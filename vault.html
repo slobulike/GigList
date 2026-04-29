@@ -481,7 +481,7 @@
                         </div>
                     </div>
 
-                    <!-- Title + Year -->
+                    <!-- Title + Release Date -->
                     <div class="flex gap-3">
                         <div class="flex-1">
                             <label for="col-editor-title" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Title</label>
@@ -489,9 +489,39 @@
                                    class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
                         </div>
                         <div style="width:90px">
-                            <label for="col-editor-date" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Year</label>
+                            <label for="col-editor-date" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Released</label>
                             <input type="text" id="col-editor-date" placeholder="1994" maxlength="7"
                                    class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
+                        </div>
+                    </div>
+
+                    <!-- Date added to collection -->
+                    <div>
+                        <label for="col-editor-acquired-month" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Date added to collection</label>
+                        <div class="flex gap-2">
+                            <div class="flex-1">
+                                <select id="col-editor-acquired-month"
+                                        aria-label="Month added to collection"
+                                        class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors appearance-none">
+                                    <option value="">Month (optional)</option>
+                                    <option value="01">January</option>
+                                    <option value="02">February</option>
+                                    <option value="03">March</option>
+                                    <option value="04">April</option>
+                                    <option value="05">May</option>
+                                    <option value="06">June</option>
+                                    <option value="07">July</option>
+                                    <option value="08">August</option>
+                                    <option value="09">September</option>
+                                    <option value="10">October</option>
+                                    <option value="11">November</option>
+                                    <option value="12">December</option>
+                                </select>
+                            </div>
+                            <div style="width:90px">
+                                <input type="text" id="col-editor-acquired-year" aria-label="Year added to collection" placeholder="2005" maxlength="4"
+                                       class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
+                            </div>
                         </div>
                     </div>
 
@@ -1346,55 +1376,80 @@ window.openCollectionEditor  = openCollectionEditor;
                 class="flex items-center justify-center w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 transition-all active:scale-95 flex-shrink-0">
             <i data-lucide="chevron-left" class="w-5 h-5" aria-hidden="true"></i>
         </button>
-        <div class="min-w-0">
+        <div class="min-w-0 flex-1">
             <p id="buddy-drill-name" class="text-base font-black text-slate-900 leading-none truncate">--</p>
             <p id="buddy-drill-meta" class="text-[10px] font-bold text-slate-400 mt-0.5">-- shows</p>
         </div>
     </div>
 
-    <!-- Drill-in body — injected by buddies.js -->
-    <div id="buddy-drill-body" class="px-4 pt-4 pb-32 max-w-md mx-auto space-y-6">
-        <!-- Stats headlines -->
-        <div id="buddy-drill-stats" class="grid grid-cols-3 gap-3"></div>
+    <!-- Tab strip -->
+    <div class="flex border-b border-slate-100 bg-white px-4" role="tablist">
+        <button id="buddy-tab-gigs"
+                onclick="window._buddySwitchTab('gigs')"
+                role="tab" aria-selected="true" aria-controls="buddy-panel-gigs"
+                class="flex-1 py-3 text-[11px] font-black uppercase tracking-widest text-indigo-600 border-b-2 border-indigo-600 transition-all">
+            Gig History
+        </button>
+        <button id="buddy-tab-collection"
+                onclick="window._buddySwitchTab('collection')"
+                role="tab" aria-selected="false" aria-controls="buddy-panel-collection"
+                class="flex-1 py-3 text-[11px] font-black uppercase tracking-widest text-slate-400 border-b-2 border-transparent transition-all">
+            Collection
+        </button>
+    </div>
 
-        <!-- Year chart -->
-        <div id="buddy-drill-year-chart-wrap" class="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm h-56">
-            <p class="text-[10px] font-black uppercase text-slate-400 mb-2">Yearly History</p>
-            <div class="h-40">
-                <canvas id="buddy-year-chart"></canvas>
+    <!-- Gigs tab panel — injected by buddies.js -->
+    <div id="buddy-panel-gigs" role="tabpanel" aria-labelledby="buddy-tab-gigs">
+        <div id="buddy-drill-body" class="px-4 pt-4 pb-32 max-w-md mx-auto space-y-6">
+            <!-- Stats headlines -->
+            <div id="buddy-drill-stats" class="grid grid-cols-3 gap-3"></div>
+
+            <!-- Year chart -->
+            <div id="buddy-drill-year-chart-wrap" class="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm h-56">
+                <p class="text-[10px] font-black uppercase text-slate-400 mb-2">Yearly History</p>
+                <div class="h-40">
+                    <canvas id="buddy-year-chart"></canvas>
+                </div>
             </div>
-        </div>
 
-        <!-- Top bands chart -->
-        <div id="buddy-drill-bands-chart-wrap" class="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm">
-            <p class="text-[10px] font-black uppercase text-slate-400 mb-4">Top Bands</p>
-            <div class="h-[280px] relative">
-                <canvas id="buddy-bands-chart"></canvas>
+            <!-- Top bands chart -->
+            <div id="buddy-drill-bands-chart-wrap" class="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm">
+                <p class="text-[10px] font-black uppercase text-slate-400 mb-4">Top Bands</p>
+                <div class="h-[280px] relative">
+                    <canvas id="buddy-bands-chart"></canvas>
+                </div>
             </div>
-        </div>
 
-        <!-- Shared only toggle -->
-        <div class="flex items-center justify-between bg-white rounded-2xl px-4 py-3 border border-slate-100 shadow-sm">
-            <span class="text-sm font-black text-slate-700">Shared shows only</span>
-            <label class="relative inline-flex items-center cursor-pointer">
-                <input type="checkbox" id="buddy-drill-shared-toggle" class="hidden peer"
-                       onchange="window.handleBuddyDrillSharedToggle()">
-                <span class="w-10 h-5 bg-slate-200 rounded-full peer peer-checked:bg-indigo-600 transition-colors after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-5"></span>
-            </label>
-        </div>
+            <!-- Shared only toggle -->
+            <div class="flex items-center justify-between bg-white rounded-2xl px-4 py-3 border border-slate-100 shadow-sm">
+                <span class="text-sm font-black text-slate-700">Shared shows only</span>
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" id="buddy-drill-shared-toggle" class="hidden peer"
+                           onchange="window.handleBuddyDrillSharedToggle()">
+                    <span class="w-10 h-5 bg-slate-200 rounded-full peer peer-checked:bg-indigo-600 transition-colors after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-5"></span>
+                </label>
+            </div>
 
-        <!-- Search within buddy's data -->
-        <div class="relative w-full">
-            <i data-lucide="search" class="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"></i>
-            <input type="text"
-                   id="buddy-drill-search"
-                   placeholder="Search this list…"
-                   aria-label="Search buddy's shows"
-                   class="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all shadow-sm">
-        </div>
+            <!-- Search within buddy's data -->
+            <div class="relative w-full">
+                <i data-lucide="search" class="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"></i>
+                <input type="text"
+                       id="buddy-drill-search"
+                       placeholder="Search this list…"
+                       aria-label="Search buddy's shows"
+                       class="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all shadow-sm">
+            </div>
 
-        <!-- Table/list renders here -->
-        <div id="buddy-drill-table"></div>
+            <!-- Table/list renders here -->
+            <div id="buddy-drill-table"></div>
+        </div>
+    </div>
+
+    <!-- Collection tab panel — populated by window._buddyRenderCollection() -->
+    <div id="buddy-panel-collection" role="tabpanel" aria-labelledby="buddy-tab-collection" class="hidden">
+        <div id="buddy-collection-body" class="px-4 pt-4 pb-32 max-w-md mx-auto">
+            <!-- Injected when tab is first opened -->
+        </div>
     </div>
 </div>
 

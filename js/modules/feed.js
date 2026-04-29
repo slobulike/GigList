@@ -186,6 +186,110 @@ function buildCards(journalData, performanceData) {
     return cards.sort((a, b) => b.score - a.score).slice(0, CARD_LIMIT);
 }
 
+// ─── COLLECTION CARD BUILDERS ─────────────────────────────────────────────────
+
+/**
+ * Builds feed cards from collection items.
+ *   - collection_band_story: items tied to a band the user has also seen live
+ *   - collection_this_month: items acquired in this calendar month in past years
+ */
+function buildCollectionCards(collectionItems, journalData) {
+    if (!collectionItems?.length) return [];
+
+    const today      = new Date();
+    today.setHours(0, 0, 0, 0);
+    const thisMonth  = today.getMonth() + 1; // 1-indexed
+    const thisYear   = today.getFullYear();
+    const monthName  = today.toLocaleString('default', { month: 'long' });
+
+    const cards = [];
+
+    // ── COLLECTION: THIS MONTH OVER THE YEARS ────────────────────────────────
+    // Items where acquired_date month matches today's month, in a past year.
+    const thisMonthItems = collectionItems.filter(item => {
+        if (!item.acquired_date) return false;
+        const parts = item.acquired_date.split('-');
+        const year  = parseInt(parts[0], 10);
+        const month = parseInt(parts[1] || '0', 10);
+        return month === thisMonth && year < thisYear;
+    }).sort((a, b) => {
+        // Most recent acquisition first
+        return (b.acquired_date || '').localeCompare(a.acquired_date || '');
+    });
+
+    if (thisMonthItems.length > 0) {
+        const featured = thisMonthItems[0];
+        const year = parseInt(featured.acquired_date.split('-')[0], 10);
+        const yearsAgo = thisYear - year;
+
+        cards.push({
+            type:          'collection_this_month',
+            score:         85, // High — date-anchored is always relevant
+            collectionItem: featured,
+            allItems:       thisMonthItems,
+            headline:       featured.title,
+            subline:        `${featured.band_name ? featured.band_name + ' · ' : ''}Added ${_formatAcquiredDateFeed(featured.acquired_date)}`,
+            eyebrow:        `In your collection ${yearsAgo} year${yearsAgo !== 1 ? 's' : ''} ago this month`,
+            badge:          `${thisMonthItems.length} ${monthName} Pick${thisMonthItems.length !== 1 ? 's' : ''}`,
+            badgeColor:     'bg-amber-500',
+            journalKey:     `col_month_${featured.id}`,
+        });
+    }
+
+    // ── COLLECTION: BAND CROSSOVER ────────────────────────────────────────────
+    // Items where band_name matches a band the user has seen live — creates a
+    // "your full relationship with X" moment. One card per most-collected band.
+    const bandCounts = {};
+    collectionItems.forEach(item => {
+        if (!item.band_name) return;
+        bandCounts[item.band_name] = (bandCounts[item.band_name] || 0) + 1;
+    });
+
+    // Which of these bands has the user also seen live?
+    const gigBands = new Set(journalData.map(g => (g.Band || '').toLowerCase()));
+
+    const crossoverBands = Object.entries(bandCounts)
+        .filter(([name]) => gigBands.has(name.toLowerCase()))
+        .sort((a, b) => b[1] - a[1]); // Most items first
+
+    if (crossoverBands.length > 0) {
+        const [bandName, itemCount] = crossoverBands[0];
+        const bandItems = collectionItems.filter(i =>
+            (i.band_name || '').toLowerCase() === bandName.toLowerCase()
+        );
+        const gigCount  = journalData.filter(g =>
+            (g.Band || '').toLowerCase() === bandName.toLowerCase()
+        ).length;
+
+        cards.push({
+            type:           'collection_band_story',
+            score:          75,
+            collectionItem: bandItems[0],
+            allItems:        bandItems,
+            headline:        bandName,
+            subline:         `${gigCount} show${gigCount !== 1 ? 's' : ''} · ${itemCount} item${itemCount !== 1 ? 's' : ''} in your collection`,
+            eyebrow:         'Band deep cut',
+            badge:           `${itemCount} Item${itemCount !== 1 ? 's' : ''}`,
+            badgeColor:      'bg-indigo-500',
+            journalKey:      `col_band_${bandName.replace(/[^a-z0-9]/gi, '_')}`,
+        });
+    }
+
+    return cards;
+}
+
+function _formatAcquiredDateFeed(raw) {
+    if (!raw) return '';
+    const parts = raw.split('-');
+    if (parts.length === 2 && parts[1]) {
+        const months = ['Jan','Feb','Mar','Apr','May','Jun',
+                        'Jul','Aug','Sep','Oct','Nov','Dec'];
+        const m = parseInt(parts[1], 10);
+        return `${months[m - 1] || parts[1]} ${parts[0]}`;
+    }
+    return parts[0];
+}
+
 // ─── IMAGE RESOLUTION ────────────────────────────────────────────────────────
 
 /**
@@ -241,6 +345,40 @@ async function resolveHeroImage(gig, imgEl, cardIndex) {
     }
 
     tryLocal();
+}
+
+/**
+ * Resolves a hero image for a collection-based feed card.
+ * Uses the item's first photo (signed URL from Supabase) if available,
+ * else falls back to artist stock photo or default concert image.
+ */
+async function resolveCollectionHeroImage(item, imgEl, cardIndex) {
+    const fallback = DEFAULT_IMAGES[cardIndex % DEFAULT_IMAGES.length];
+
+    // Try the item's first photo
+    if (item?.photos?.length > 0) {
+        try {
+            const { data, error } = await supabase.storage
+                .from('collection-photos')
+                .createSignedUrl(item.photos[0], 3600);
+            if (!error && data?.signedUrl) {
+                imgEl.src = data.signedUrl;
+                return;
+            }
+        } catch (e) { /* fall through */ }
+    }
+
+    // Try artist stock photo
+    if (item?.band_name) {
+        const artistPath = `assets/artists/${item.band_name.toLowerCase().replace(/ /g, '_')}_stock_photo.jpg`;
+        const probe = new Image();
+        probe.onload = () => { imgEl.src = artistPath; };
+        probe.onerror = () => { imgEl.src = fallback; };
+        probe.src = artistPath;
+        return;
+    }
+
+    imgEl.src = fallback;
 }
 
 // ─── RENDERING ────────────────────────────────────────────────────────────────
@@ -328,7 +466,8 @@ function renderSeasonList(card) {
 
 function renderCard(card, index) {
     const safeKey = (card.journalKey || `card-${index}`).replace(/[^a-z0-9]/gi, '_');
-    const hasDetail = card.type === 'artist_story' || card.type === 'season_flashback';
+    const hasDetail = card.type === 'artist_story' || card.type === 'season_flashback'
+        || card.type === 'collection_band_story' || card.type === 'collection_this_month';
 
     const detailToggle = hasDetail
         ? `window._feedToggleDetail('${safeKey}', '${card.type}')`
@@ -338,6 +477,10 @@ function renderCard(card, index) {
         ? 'See all shows'
         : card.type === 'season_flashback'
         ? `See all ${card.allGigs?.length} shows`
+        : card.type === 'collection_band_story'
+        ? `See ${card.allItems?.length} item${card.allItems?.length !== 1 ? 's' : ''}`
+        : card.type === 'collection_this_month'
+        ? (card.allItems?.length > 1 ? `See ${card.allItems.length} items` : '')
         : '';
 
     return `
@@ -395,15 +538,36 @@ function renderCard(card, index) {
 
 /**
  * Called when the Feed tab is activated.
+ * Fetches collection items directly so feed cards work regardless of whether
+ * the Collection tab has ever been opened in this session.
  * Checks sessionStorage cache first — only recomputes if the date has changed
  * or data has been updated.
  */
-export function init(journalData, performanceData) {
+export async function init(journalData, performanceData, _ignored = []) {
     const container = document.getElementById('feed-cards-container');
     if (!container) return;
 
-    // Check cache — keyed by date + journal size
-    const cacheKey      = `giglist_feed_${new Date().toDateString()}_${journalData.length}`;
+    // Fetch collection items fresh — don't rely on window._collectionItems
+    // since the Collection tab may not have been visited yet this session.
+    let collectionItems = [];
+    try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user?.id) {
+            const { data } = await supabase
+                .from('collection_items')
+                .select('id, type, subtype, title, band_name, band_id, item_date, acquired_date, photos, hero_color, body')
+                .eq('user_id', session.user.id);
+            collectionItems = data || [];
+        }
+    } catch (e) {
+        console.warn('[Feed] Could not fetch collection items:', e.message);
+    }
+
+    // Keep window._collectionItems in sync for _feedToggleDetail
+    window._collectionItems = collectionItems;
+
+    // Check cache — keyed by date + journal size + collection size
+    const cacheKey      = `giglist_feed_${new Date().toDateString()}_${journalData.length}_${collectionItems.length}`;
     const cachedHtml    = sessionStorage.getItem(cacheKey);
     const cachedCardsJson = sessionStorage.getItem(`${cacheKey}_cards`);
 
@@ -415,12 +579,22 @@ export function init(journalData, performanceData) {
         cachedCards.forEach((card, i) => {
             const safeKey = (card.journalKey || `card-${i}`).replace(/[^a-z0-9]/gi, '_');
             const imgEl   = document.getElementById(`feed-img-${safeKey}`);
-            if (imgEl) resolveHeroImage(card.gig, imgEl, i);
+            if (!imgEl) return;
+            if (card.collectionItem) {
+                resolveCollectionHeroImage(card.collectionItem, imgEl, i);
+            } else if (card.gig) {
+                resolveHeroImage(card.gig, imgEl, i);
+            }
         });
         return;
     }
 
-    const cards = buildCards(journalData, performanceData);
+    const gigCards        = buildCards(journalData, performanceData);
+    const colCards        = buildCollectionCards(collectionItems, journalData);
+    // Merge and re-sort — collection cards have scores that interleave naturally
+    const cards = [...gigCards, ...colCards]
+        .sort((a, b) => b.score - a.score)
+        .slice(0, CARD_LIMIT);
 
     if (cards.length === 0) {
         renderEmptyState(container);
@@ -433,14 +607,19 @@ export function init(journalData, performanceData) {
     // Cache HTML skeleton + card metadata (gig details needed to re-resolve images)
     sessionStorage.setItem(cacheKey, html);
     sessionStorage.setItem(`${cacheKey}_cards`, JSON.stringify(
-        cards.map(c => ({ journalKey: c.journalKey, gig: c.gig }))
+        cards.map(c => ({ journalKey: c.journalKey, gig: c.gig || null, collectionItem: c.collectionItem || null }))
     ));
 
     // Resolve images async
     cards.forEach((card, i) => {
         const safeKey = (card.journalKey || `card-${i}`).replace(/[^a-z0-9]/gi, '_');
         const imgEl   = document.getElementById(`feed-img-${safeKey}`);
-        if (imgEl) resolveHeroImage(card.gig, imgEl, i);
+        if (!imgEl) return;
+        if (card.collectionItem) {
+            resolveCollectionHeroImage(card.collectionItem, imgEl, i);
+        } else if (card.gig) {
+            resolveHeroImage(card.gig, imgEl, i);
+        }
     });
 
     if (window.lucide) lucide.createIcons();
@@ -536,6 +715,64 @@ window._feedToggleDetail = (safeKey, cardType) => {
                         </div>`;
                     }).join('')}
                     ${seasonGigs.length > 8 ? `<p class="text-[10px] text-white/40 text-center pt-1">+${seasonGigs.length - 8} more</p>` : ''}
+                </div>`;
+            if (window.lucide) lucide.createIcons();
+        }
+
+        detailEl.classList.toggle('hidden');
+        if (chevronEl) {
+            chevronEl.style.transform = isHidden ? 'rotate(180deg)' : '';
+        }
+    } else if (cardType === 'collection_band_story' || cardType === 'collection_this_month') {
+        const detailEl  = document.getElementById(`feed-detail-${safeKey}`);
+        const chevronEl = document.getElementById(`feed-chevron-${safeKey}`);
+        if (!detailEl) return;
+
+        const isHidden = detailEl.classList.contains('hidden');
+
+        if (isHidden) {
+            const allItems = window._collectionItems || [];
+            let items;
+
+            if (cardType === 'collection_band_story') {
+                const cardEl   = detailEl.closest('[role="article"]');
+                const bandName = cardEl?.querySelector('h3')?.textContent?.trim() || '';
+                items = allItems.filter(i =>
+                    (i.band_name || '').toLowerCase() === bandName.toLowerCase()
+                );
+            } else {
+                const today     = new Date();
+                const thisMonth = today.getMonth() + 1;
+                const thisYear  = today.getFullYear();
+                items = allItems.filter(item => {
+                    if (!item.acquired_date) return false;
+                    const parts = item.acquired_date.split('-');
+                    const year  = parseInt(parts[0], 10);
+                    const month = parseInt(parts[1] || '0', 10);
+                    return month === thisMonth && year < thisYear;
+                }).sort((a, b) => (b.acquired_date || '').localeCompare(a.acquired_date || ''));
+            }
+
+            const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            const _fmtAcq = (raw) => {
+                if (!raw) return '';
+                const p = raw.split('-');
+                if (p.length === 2) return `${months[parseInt(p[1],10)-1]||p[1]} ${p[0]}`;
+                return p[0];
+            };
+
+            detailEl.innerHTML = `
+                <div class="mt-4 pt-4 border-t border-white/20 space-y-2">
+                    ${items.slice(0, 8).map(item => `
+                    <div class="flex items-center gap-3 px-2 py-1.5">
+                        <div class="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0"></div>
+                        <div class="flex-1 min-w-0">
+                            <p class="text-xs font-bold text-white truncate">${item.title}</p>
+                            ${item.acquired_date ? `<p class="text-[10px] text-white/50">${_fmtAcq(item.acquired_date)}</p>` : ''}
+                        </div>
+                        <span class="text-[9px] text-white/40 font-bold uppercase">${item.subtype || ''}</span>
+                    </div>`).join('')}
+                    ${items.length > 8 ? `<p class="text-[10px] text-white/40 text-center pt-1">+${items.length - 8} more</p>` : ''}
                 </div>`;
             if (window.lucide) lucide.createIcons();
         }

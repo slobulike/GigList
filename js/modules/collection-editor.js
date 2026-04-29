@@ -372,10 +372,50 @@ async function _sampleHeroColor(file) {
                     r = Math.round(r / count);
                     g = Math.round(g / count);
                     b = Math.round(b / count);
-                    // Darken slightly so spine text is always legible
-                    r = Math.round(r * 0.6);
-                    g = Math.round(g * 0.6);
-                    b = Math.round(b * 0.6);
+
+                    // Convert to HSL to boost saturation and control lightness
+                    const rn = r / 255, gn = g / 255, bn = b / 255;
+                    const max = Math.max(rn, gn, bn), min = Math.min(rn, gn, bn);
+                    let h, s, l = (max + min) / 2;
+
+                    if (max === min) {
+                        h = s = 0;
+                    } else {
+                        const d = max - min;
+                        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+                        switch (max) {
+                            case rn: h = ((gn - bn) / d + (gn < bn ? 6 : 0)) / 6; break;
+                            case gn: h = ((bn - rn) / d + 2) / 6; break;
+                            default: h = ((rn - gn) / d + 4) / 6; break;
+                        }
+                    }
+
+                    // Boost saturation, clamp lightness to a usable dark-mid range for spine
+                    s = Math.min(1, s * 2.2);          // Boost saturation significantly
+                    l = Math.min(0.45, Math.max(0.18, l * 0.75)); // Keep it mid-dark
+
+                    // Convert back to RGB
+                    const hue2rgb = (p, q, t) => {
+                        if (t < 0) t += 1;
+                        if (t > 1) t -= 1;
+                        if (t < 1/6) return p + (q - p) * 6 * t;
+                        if (t < 1/2) return q;
+                        if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+                        return p;
+                    };
+                    let fr, fg, fb;
+                    if (s === 0) {
+                        fr = fg = fb = l;
+                    } else {
+                        const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+                        const p = 2 * l - q;
+                        fr = hue2rgb(p, q, h + 1/3);
+                        fg = hue2rgb(p, q, h);
+                        fb = hue2rgb(p, q, h - 1/3);
+                    }
+                    r = Math.round(fr * 255);
+                    g = Math.round(fg * 255);
+                    b = Math.round(fb * 255);
                     resolve(`#${r.toString(16).padStart(2,'0')}${g.toString(16).padStart(2,'0')}${b.toString(16).padStart(2,'0')}`);
                 } catch { resolve(null); }
                 finally { URL.revokeObjectURL(url); }
@@ -464,6 +504,18 @@ async function _populateForm(item) {
     _val('col-editor-title',      item.title            || '');
     _val('col-editor-date',       item.item_date         || '');
     _val('col-editor-artist-ctx', item.artist_context    || '');
+
+    // Populate acquired_date — stored as "YYYY-MM" or "YYYY"
+    const acqYear  = document.getElementById('col-editor-acquired-year');
+    const acqMonth = document.getElementById('col-editor-acquired-month');
+    if (item.acquired_date) {
+        const parts = item.acquired_date.split('-');
+        if (acqYear)  acqYear.value  = parts[0] || '';
+        if (acqMonth) acqMonth.value = parts[1] || '';
+    } else {
+        if (acqYear)  acqYear.value  = '';
+        if (acqMonth) acqMonth.value = '';
+    }
     _val('col-editor-body',       item.body              || '');
     _val('col-editor-label',      item.label             || '');
     _val('col-editor-cat-no',     item.catalogue_number  || '');
@@ -644,15 +696,20 @@ export const openCollectionEditor = async (type = null, itemId = null) => {
 
         ['col-editor-title','col-editor-date','col-editor-artist-ctx',
          'col-editor-body','col-editor-label','col-editor-cat-no',
-         'col-editor-format','col-editor-signed-by','col-editor-provenance'].forEach(id => _val(id, ''));
+         'col-editor-format','col-editor-signed-by','col-editor-provenance',
+         'col-editor-acquired-year'].forEach(id => _val(id, ''));
         const condEl = document.getElementById('col-editor-condition');
         if (condEl) condEl.value = '';
+        const acqMonthEl = document.getElementById('col-editor-acquired-month');
+        if (acqMonthEl) acqMonthEl.value = '';
     }
 
     modal.classList.remove('hidden');
     modal.setAttribute('aria-hidden', 'false');
     document.body.style.overflow = 'hidden';
-    document.getElementById('col-editor-title')?.focus();
+    // Do NOT auto-focus the title field — on mobile this opens the keyboard immediately,
+    // which is jarring. The photo tile is naturally the first tap on add.
+    // document.getElementById('col-editor-title')?.focus();
 
     if (window.lucide) lucide.createIcons();
 };
@@ -713,6 +770,13 @@ window.saveCollectionItem = async () => {
             heroColor = await _sampleHeroColor(_pendingPhotos[0].file);
         }
 
+        // Build acquired_date from month + year selects (format: "YYYY-MM" or "YYYY")
+        const acquiredYear  = document.getElementById('col-editor-acquired-year')?.value?.trim() || '';
+        const acquiredMonth = document.getElementById('col-editor-acquired-month')?.value || '';
+        const acquiredDate  = acquiredYear
+            ? (acquiredMonth ? `${acquiredYear}-${acquiredMonth}` : acquiredYear)
+            : null;
+
         // Read band name directly from combobox input (free-text or lookup selection)
         const bandInput = document.getElementById('col-editor-band-input');
         const bandName = bandInput?.value.trim() || null;
@@ -727,6 +791,7 @@ window.saveCollectionItem = async () => {
             // Run: ALTER TABLE collection_items ADD COLUMN IF NOT EXISTS band_name text;
             ...(bandName !== null && { band_name: bandName }),
             item_date:        _get('col-editor-date')       || null,
+            acquired_date:    acquiredDate,
             artist_context:   _get('col-editor-artist-ctx') || null,
             body:             _get('col-editor-body')       || null,
             label:            _get('col-editor-label')      || null,

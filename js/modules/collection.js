@@ -96,6 +96,23 @@ function _yearsSpan(items) {
     return Math.max(...years) - Math.min(...years);
 }
 
+/**
+ * Formats stored acquired_date ("YYYY-MM" or "YYYY") into a readable string.
+ * e.g. "1996-04" → "April 1996", "1996" → "1996"
+ */
+function _formatAcquiredDate(raw) {
+    if (!raw) return '';
+    const parts = raw.split('-');
+    if (parts.length === 2 && parts[1]) {
+        const months = ['January','February','March','April','May','June',
+                        'July','August','September','October','November','December'];
+        const m = parseInt(parts[1], 10);
+        const monthName = months[m - 1] || parts[1];
+        return `${monthName} ${parts[0]}`;
+    }
+    return parts[0];
+}
+
 // ─── DATA FETCHING ────────────────────────────────────────────────────────────
 
 async function _fetchItems(userId) {
@@ -443,7 +460,7 @@ function _renderMemoryCard(item) {
 function _renderStatsBar(items) {
     const artefacts = items.filter(i => i.type === 'artefact').length;
     const memories  = items.filter(i => i.type === 'memory').length;
-    const bands     = new Set(items.map(i => i.band_id).filter(Boolean)).size;
+    const bands     = new Set(items.map(i => i.band_id || i.band_name).filter(Boolean)).size;
     const years     = items.map(i => parseInt(i.item_date)).filter(y => !isNaN(y));
     const span      = years.length ? Math.max(...years) - Math.min(...years) : 0;
 
@@ -768,14 +785,15 @@ function _renderItemDetail(item) {
         : (SUBTYPE_LABELS[item.subtype] || item.subtype || 'Item');
 
     const detailRows = [
-        item.item_date  && { label: 'Year',       value: item.item_date },
-        item.format     && { label: 'Format',      value: item.format },
-        item.label      && { label: 'Label',       value: item.label },
-        item.catalogue_number && { label: 'Cat. no.', value: item.catalogue_number },
-        item.condition  && { label: 'Condition',   value: item.condition },
-        item.signed_by  && { label: 'Signed by',   value: item.signed_by },
-        item.provenance && { label: 'Acquired',    value: item.provenance },
-        item.artist_context && { label: 'Context', value: item.artist_context },
+        item.item_date     && { label: 'Released',        value: item.item_date },
+        item.acquired_date && { label: 'Added to collection', value: _formatAcquiredDate(item.acquired_date) },
+        item.format        && { label: 'Format',           value: item.format },
+        item.label         && { label: 'Label',            value: item.label },
+        item.catalogue_number && { label: 'Cat. no.',      value: item.catalogue_number },
+        item.condition     && { label: 'Condition',        value: item.condition },
+        item.signed_by     && { label: 'Signed by',        value: item.signed_by },
+        item.provenance    && { label: 'Acquired',         value: item.provenance },
+        item.artist_context && { label: 'Context',         value: item.artist_context },
     ].filter(Boolean);
 
     const labelsHtml = (item.labels || []).map(l =>
@@ -989,6 +1007,177 @@ window._colSearch = (query) => {
     _renderCollectionTab();
 };
 
+// ─── BUDDY TAB SWITCHING ──────────────────────────────────────────────────────
+
+/**
+ * Called by buddies.js when the drill-in panel opens.
+ * Resets the tab state to Gigs and clears the cached collection body
+ * so it reloads fresh for the new buddy.
+ */
+window._buddyResetTabs = () => {
+    const colBody = document.getElementById('buddy-collection-body');
+    if (colBody) colBody.innerHTML = '';
+    window._buddySwitchTab('gigs');
+};
+
+window._buddySwitchTab = (tab) => {
+    const gigsPanel  = document.getElementById('buddy-panel-gigs');
+    const colPanel   = document.getElementById('buddy-panel-collection');
+    const gigsBtn    = document.getElementById('buddy-tab-gigs');
+    const colBtn     = document.getElementById('buddy-tab-collection');
+
+    const showGigs = tab === 'gigs';
+    gigsPanel?.classList.toggle('hidden', !showGigs);
+    colPanel?.classList.toggle('hidden', showGigs);
+
+    if (gigsBtn) {
+        gigsBtn.setAttribute('aria-selected', showGigs ? 'true' : 'false');
+        gigsBtn.className = `flex-1 py-3 text-[11px] font-black uppercase tracking-widest border-b-2 transition-all
+            ${showGigs ? 'text-indigo-600 border-indigo-600' : 'text-slate-400 border-transparent'}`;
+    }
+    if (colBtn) {
+        colBtn.setAttribute('aria-selected', showGigs ? 'false' : 'true');
+        colBtn.className = `flex-1 py-3 text-[11px] font-black uppercase tracking-widest border-b-2 transition-all
+            ${!showGigs ? 'text-indigo-600 border-indigo-600' : 'text-slate-400 border-transparent'}`;
+    }
+
+    // Lazy-load collection on first open
+    if (!showGigs) {
+        const container = document.getElementById('buddy-collection-body');
+        if (container && container.children.length === 0) {
+            container.innerHTML = '<p class="text-sm text-slate-400 text-center py-16">Loading collection…</p>';
+        }
+        // buddies.js sets data-buddy-id on the drill-in panel when it opens
+        const panel   = document.getElementById('buddy-drill-in');
+        const buddyId = window._currentBuddyId || panel?.dataset?.buddyId;
+        if (buddyId && container) _renderBuddyCollection(buddyId, container);
+        else if (container) {
+            container.innerHTML = '<p class="text-sm text-slate-400 text-center py-16">Collection unavailable.</p>';
+        }
+    }
+};
+
+/**
+ * Renders a condensed read-only view of a buddy's collection.
+ * Shows headline stats + photo grids grouped by item type.
+ * No drill-down — browse only.
+ */
+async function _renderBuddyCollection(userId, container) {
+    container.innerHTML = `<div class="animate-pulse space-y-4"><div class="h-20 bg-slate-200 rounded-2xl"></div><div class="h-48 bg-slate-200 rounded-2xl"></div></div>`;
+
+    const { data, error } = await supabase
+        .from('collection_items')
+        .select('id, type, subtype, title, band_name, item_date, acquired_date, photos, hero_color, body, signed_by')
+        .eq('user_id', userId)
+        .order('item_date', { ascending: true });
+
+    if (error || !data?.length) {
+        container.innerHTML = `
+            <div class="text-center py-16 space-y-2">
+                <div class="text-4xl">📦</div>
+                <p class="text-sm font-black text-slate-600">No collection yet</p>
+                <p class="text-[11px] text-slate-400">This buddy hasn't added anything to their collection.</p>
+            </div>`;
+        return;
+    }
+
+    // Pre-load signed URLs for photos
+    await _preloadSignedUrls(data);
+
+    const artefacts = data.filter(i => i.type === 'artefact');
+    const memories  = data.filter(i => i.type === 'memory');
+
+    // Headline stats
+    const bands = new Set(data.map(i => i.band_id || i.band_name).filter(Boolean)).size;
+    const hasPhotos = data.filter(i => i.photos?.length > 0).length;
+    const years = data.map(i => parseInt(i.item_date)).filter(y => !isNaN(y));
+    const span  = years.length ? Math.max(...years) - Math.min(...years) : 0;
+
+    const statsHtml = `
+        <div class="grid grid-cols-4 gap-2 mb-5">
+            <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-3 text-center">
+                <p class="text-[8px] font-black uppercase text-slate-400">Items</p>
+                <p class="text-lg font-black text-[#c8a050]">${artefacts.length}</p>
+            </div>
+            <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-3 text-center">
+                <p class="text-[8px] font-black uppercase text-slate-400">Memories</p>
+                <p class="text-lg font-black text-slate-800">${memories.length}</p>
+            </div>
+            <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-3 text-center">
+                <p class="text-[8px] font-black uppercase text-slate-400">Bands</p>
+                <p class="text-lg font-black text-slate-800">${bands || '—'}</p>
+            </div>
+            <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-3 text-center">
+                <p class="text-[8px] font-black uppercase text-slate-400">Span</p>
+                <p class="text-lg font-black text-slate-800">${span ? span + 'y' : '—'}</p>
+            </div>
+        </div>`;
+
+    // Photo grids by subtype — only subtypes that have items
+    const SUBTYPE_ORDER = ['vinyl','cd','tape','minidisc','apparel','poster','magazine','book','tab_book','ticket','laminate','other'];
+    const presentSubtypes = SUBTYPE_ORDER.filter(s => artefacts.some(i => i.subtype === s));
+
+    const shelvesHtml = presentSubtypes.map(subtype => {
+        const items = artefacts.filter(i => i.subtype === subtype);
+        const label = SUBTYPE_LABELS[subtype] || subtype;
+        const icon  = SUBTYPE_ICONS[subtype] || '✦';
+
+        const photoGridHtml = items.map(item => {
+            const [bg] = item.hero_color ? [item.hero_color] : _hashColor(item.title);
+            const heroPath = item.photos?.[0];
+            const heroUrl  = heroPath ? _signedUrlCache.get(heroPath) : null;
+            const isRound  = item.subtype === 'vinyl';
+
+            return `
+                <div class="flex-shrink-0 text-center" style="width:72px">
+                    <div class="w-[72px] h-[72px] flex items-center justify-center overflow-hidden text-xl"
+                         style="background:${bg};border-radius:${isRound ? '50%' : '8px'}">
+                        ${heroUrl
+                            ? `<img src="${heroUrl}" alt="${_esc(item.title)}" class="w-full h-full object-cover" style="border-radius:${isRound ? '50%' : '8px'}">`
+                            : icon}
+                    </div>
+                    <p class="text-[9px] font-bold text-slate-600 mt-1 leading-tight truncate">${item.title}</p>
+                </div>`;
+        }).join('');
+
+        return `
+            <div class="mb-5">
+                <div class="flex items-baseline justify-between mb-2">
+                    <p class="text-[10px] font-black uppercase tracking-widest text-slate-500">${label}</p>
+                    <span class="text-[9px] text-slate-400">${items.length}</span>
+                </div>
+                <div class="flex gap-3 overflow-x-auto pb-2" style="scrollbar-width:none">
+                    ${photoGridHtml}
+                </div>
+                <div class="h-0.5 rounded-full mt-1" style="background:linear-gradient(90deg,rgba(200,160,80,0.2),rgba(200,160,80,0.04))"></div>
+            </div>`;
+    }).join('');
+
+    // Memories summary (no drill-in)
+    const memoriesHtml = memories.length > 0 ? `
+        <div class="mt-2">
+            <div class="flex items-baseline justify-between mb-3">
+                <p class="text-[10px] font-black uppercase tracking-widest text-slate-500">Memories</p>
+                <span class="text-[9px] text-slate-400">${memories.length}</span>
+            </div>
+            <div class="space-y-2">
+                ${memories.slice(0, 5).map(item => {
+                    const year = item.item_date ? item.item_date.slice(0,4) : '';
+                    return `
+                    <div class="bg-white rounded-[1.5rem] border border-slate-100 shadow-sm p-4 border-l-4"
+                         style="border-left-color:rgba(200,160,80,0.5)">
+                        ${year ? `<p class="text-[9px] font-black uppercase tracking-widest mb-0.5" style="color:#c8a050">${year}</p>` : ''}
+                        <p class="text-sm font-black text-slate-800">${item.title}</p>
+                    </div>`;
+                }).join('')}
+                ${memories.length > 5 ? `<p class="text-[10px] text-slate-400 text-center">+${memories.length - 5} more memories</p>` : ''}
+            </div>
+        </div>` : '';
+
+    container.innerHTML = statsHtml + shelvesHtml + memoriesHtml;
+    if (window.lucide) lucide.createIcons();
+}
+
 // ─── PUBLIC API ───────────────────────────────────────────────────────────────
 
 /**
@@ -1023,6 +1212,9 @@ export async function init(currentUser) {
     // Fetch band names after items so _fetchBandNames can merge item band_names too
     _bandNames = await _fetchBandNames(currentUser.id);
 
+    // Expose items globally so feed.js can build collection cards
+    window._collectionItems = _items;
+
     _renderCollectionTab();
 }
 
@@ -1036,6 +1228,8 @@ export async function refresh() {
         _fetchCurations(_user.id),
     ]);
     _bandNames = await _fetchBandNames(_user.id);
+    // Keep window._collectionItems in sync so feed.js can read it
+    window._collectionItems = _items;
     _renderCollectionTab();
     if (_drillType) _renderDrillDown(_drillType);
 }
