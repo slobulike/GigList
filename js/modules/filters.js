@@ -39,26 +39,30 @@ export function applyFilters(data) {
     });
   }
 
-  // Artist — case-insensitive substring
+  // Artist — exact match against select value
   if (_state.artist.trim()) {
     const q = _state.artist.trim().toLowerCase();
-    results = results.filter(g => (g.band || '').toLowerCase().includes(q));
+    results = results.filter(g => (g.band || '').toLowerCase() === q);
   }
 
-  // Venue — matches official_venue or venue
+  // Venue — exact match against official_venue or venue
   if (_state.venue.trim()) {
     const q = _state.venue.trim().toLowerCase();
     results = results.filter(g =>
-      (g.official_venue || '').toLowerCase().includes(q) ||
-      (g.venue || '').toLowerCase().includes(q)
+      (g.official_venue || '').toLowerCase() === q ||
+      (g.venue || '').toLowerCase() === q
     );
   }
 
-// Companion — matches legacy went_with text (gig_companions not in memory)
-if (_state.companion.trim()) {
-  const q = _state.companion.trim().toLowerCase();
-  results = results.filter(g => (g.went_with || '').toLowerCase().includes(q));
-}
+  // Companion — exact match against individual entries in went_with
+  if (_state.companion.trim()) {
+    const q = _state.companion.trim().toLowerCase();
+    results = results.filter(g => {
+      const raw = (g.went_with || '').toLowerCase();
+      // Split on common delimiters so "Ash" doesn't match "Dashboard Confessional"
+      return raw.split(/[,;&]+/).map(s => s.trim()).includes(q);
+    });
+  }
 
   // Festival toggle
   if (_state.festival !== 'all') {
@@ -142,6 +146,7 @@ export function buildSummaryLine(resultCount, totalCount) {
 export function openFilterDrawer() {
   _state.open = true;
   _populateYearList();
+  _populateLookupSelects();
   const drawer = document.getElementById('filter-drawer');
   const overlay = document.getElementById('filter-overlay');
   drawer?.classList.remove('translate-x-full');
@@ -224,34 +229,31 @@ function _injectDrawerHTML() {
         <!-- Artist -->
         <div>
           <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Artist</p>
-          <input id="filter-artist-input"
-                 type="text"
-                 placeholder="e.g. Weezer"
-                 autocomplete="off"
-                 class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white
-                        placeholder-gray-500 focus:outline-none focus:border-indigo-500 transition-colors" />
+          <select id="filter-artist-input"
+                  class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white
+                         focus:outline-none focus:border-indigo-500 transition-colors">
+            <option value="">All artists</option>
+          </select>
         </div>
 
         <!-- Venue -->
         <div>
           <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Venue</p>
-          <input id="filter-venue-input"
-                 type="text"
-                 placeholder="e.g. Brixton Academy"
-                 autocomplete="off"
-                 class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white
-                        placeholder-gray-500 focus:outline-none focus:border-indigo-500 transition-colors" />
+          <select id="filter-venue-input"
+                  class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white
+                         focus:outline-none focus:border-indigo-500 transition-colors">
+            <option value="">All venues</option>
+          </select>
         </div>
 
         <!-- Companion -->
         <div>
           <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Went With</p>
-          <input id="filter-companion-input"
-                 type="text"
-                 placeholder="e.g. Sally"
-                 autocomplete="off"
-                 class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white
-                        placeholder-gray-500 focus:outline-none focus:border-indigo-500 transition-colors" />
+          <select id="filter-companion-input"
+                  class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white
+                         focus:outline-none focus:border-indigo-500 transition-colors">
+            <option value="">All companions</option>
+          </select>
         </div>
 
         <!-- Festival toggle -->
@@ -329,24 +331,20 @@ function _bindEvents() {
     _handleToggle,
   };
 
-  // Debounced text input handlers — wired after DOM injection
+  // Debounced select input handlers — wired after DOM injection
   setTimeout(() => {
-    _bindTextInput('filter-artist-input', 'artist');
-    _bindTextInput('filter-venue-input', 'venue');
-    _bindTextInput('filter-companion-input', 'companion');
+    _bindSelectInput('filter-artist-input', 'artist');
+    _bindSelectInput('filter-venue-input', 'venue');
+    _bindSelectInput('filter-companion-input', 'companion');
   }, 0);
 }
 
-function _bindTextInput(id, stateKey) {
+function _bindSelectInput(id, stateKey) {
   const el = document.getElementById(id);
   if (!el) return;
-  let timer;
-  el.addEventListener('input', () => {
-    clearTimeout(timer);
-    timer = setTimeout(() => {
-      _state[stateKey] = el.value;
-      _dispatchChange();
-    }, 250);
+  el.addEventListener('change', () => {
+    _state[stateKey] = el.value;
+    _dispatchChange();
   });
 }
 
@@ -379,6 +377,38 @@ function _handleToggle(group, value, btn) {
 // ---------------------------------------------------------------------------
 // Year list
 // ---------------------------------------------------------------------------
+
+function _populateLookupSelects() {
+  const data = window.journalData;
+  if (!data?.length) return;
+
+  // Artists — unique sorted list from the band field
+  const artists = [...new Set(data.map(g => g.band || g.Band).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  _fillSelect('filter-artist-input', artists, 'All artists', _state.artist);
+
+  // Venues — unique sorted list from official_venue/venue
+  const venues = [...new Set(data.map(g => g.official_venue || g.venue || g.OfficialVenue || g.Venue).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  _fillSelect('filter-venue-input', venues, 'All venues', _state.venue);
+
+  // Companions — explode went_with on common delimiters, deduplicate, sort
+  const companions = [...new Set(
+    data.flatMap(g => (g.went_with || '').split(/[,;&]+/).map(s => s.trim()).filter(Boolean))
+  )].sort((a, b) => a.localeCompare(b));
+  _fillSelect('filter-companion-input', companions, 'All companions', _state.companion);
+
+  // Re-bind change listeners (selects may have been re-rendered)
+  _bindSelectInput('filter-artist-input', 'artist');
+  _bindSelectInput('filter-venue-input', 'venue');
+  _bindSelectInput('filter-companion-input', 'companion');
+}
+
+function _fillSelect(id, options, placeholder, currentValue) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.innerHTML = `<option value="">${placeholder}</option>` +
+    options.map(o => `<option value="${o.replace(/"/g, '&quot;')}"${o === currentValue ? ' selected' : ''}>${o}</option>`).join('');
+}
+
 
 function _populateYearList() {
   const container = document.getElementById('filter-year-list');
@@ -423,7 +453,7 @@ function _handleYearChip(year, btn) {
 // ---------------------------------------------------------------------------
 
 function _syncDrawerUI() {
-  // Text inputs
+  // Select inputs
   ['filter-artist-input', 'filter-venue-input', 'filter-companion-input'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.value = '';

@@ -585,7 +585,7 @@ export const renderTable = (data) => {
                             <td class="p-4 text-xs font-medium text-slate-500 font-mono tracking-tighter">${gig.Date}</td>
                             <td class="p-4 leading-tight">
                                 <div class="flex flex-col gap-1">
-                                    <div class="flex items-start gap-2 w-full">
+                                    <div class="flex items-center gap-2 w-full">
                                         <div class="flex-1 min-w-0">${mainContent}</div>
                                         ${cameraIcon}
                                     </div>

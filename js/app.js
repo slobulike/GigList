@@ -1,9 +1,9 @@
 /**
  * GigList Core Engine
- * v5.0.4 — 2026-04-28
+ * v5.0.5 — 2026-04-29
  * -------------------------------------------------------------------
- * ✅ Added Buddies to Profile with all previous functionality restored (view Buddy stats and Buddy Profile)
- * ✅ Amended layout of Achievements to streamline profile page
+ * ✅ Improved filter logic to include pick lists for exact matches
+ * ✅ Renamed Gigs header from Data Centre to Live Music with strap line
  */
 
 import * as Data from './modules/data.js';
@@ -28,6 +28,8 @@ import { initBuddies } from './modules/buddies.js';
 import { initProfile } from './modules/profile.js';
 import { initBandMode } from './modules/band.js';
 import { applyFilters, buildSummaryLine, hasActiveFilters } from './modules/filters.js';
+
+const APP_VERSION = "5.0.5";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
@@ -121,8 +123,6 @@ window.ensureChartJs = () => {
 let currentUser = null;
 let homeCarousel = [];
 let currentCarouselIndex = 0;
-
-const APP_VERSION = "5.0.4";
 
 window.toggleListView = UI.toggleListView;
 window.activeView = window.activeView || 'list';
