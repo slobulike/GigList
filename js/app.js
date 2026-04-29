@@ -1,6 +1,6 @@
 /**
  * GigList Core Engine
- * v5.0.5 — 2026-04-29
+ * v5.0.6 — 2026-04-29
  * -------------------------------------------------------------------
  * ✅ Improved filter logic to include pick lists for exact matches
  * ✅ Renamed Gigs header from Data Centre to Live Music with strap line
@@ -29,7 +29,7 @@ import { initProfile } from './modules/profile.js';
 import { initBandMode } from './modules/band.js';
 import { applyFilters, buildSummaryLine, hasActiveFilters } from './modules/filters.js';
 
-const APP_VERSION = "5.0.5";
+const APP_VERSION = "5.0.6";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
