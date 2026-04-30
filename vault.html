@@ -339,7 +339,7 @@
         <div class="flex justify-between items-end mb-2">
             <div>
                 <h2 class="text-4xl font-black italic tracking-tighter text-slate-900">Feed</h2>
-                <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-0.5">Your gig history, today</p>
+                <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-0.5">Your music history, today</p>
             </div>
         </div>
 
@@ -361,7 +361,10 @@
 
         <!-- Title row — matches Data Centre layout -->
         <div class="flex items-center justify-between">
-            <h2 class="text-4xl font-black italic tracking-tighter text-slate-900">Collection</h2>
+            <div>
+                <h2 class="text-4xl font-black italic tracking-tighter text-slate-900">Collection</h2>
+                <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-0.5">Your music in the physical world</p>
+            </div>
             <button onclick="window.openCollectionEditor()"
                     aria-label="Add item to collection"
                     class="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest px-4 py-2.5 rounded-full transition-all active:scale-95"
@@ -369,11 +372,6 @@
                 <i data-lucide="plus" class="w-3.5 h-3.5" aria-hidden="true"></i>
                 Add Item
             </button>
-        </div>
-
-        <!-- Gold accent subtitle strip -->
-        <div class="-mx-4 px-4 py-2.5" style="background:#111008;">
-            <p class="text-[10px] font-black uppercase tracking-widest" style="color:#7a6840">Your music in the physical world</p>
         </div>
 
         <!-- Search bar -->
@@ -503,7 +501,7 @@
                                 <select id="col-editor-acquired-month"
                                         aria-label="Month added to collection"
                                         class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors appearance-none">
-                                    <option value="">Month (optional)</option>
+                                    <option value="">Month</option>
                                     <option value="01">January</option>
                                     <option value="02">February</option>
                                     <option value="03">March</option>
@@ -531,6 +529,22 @@
                         <textarea id="col-editor-body" rows="3"
                                   placeholder="Any notes or the story behind this item…"
                                   class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors resize-none leading-relaxed"></textarea>
+                    </div>
+
+                    <!-- Tag a buddy (memories only) -->
+                    <div id="col-editor-buddy-tag-field" class="hidden">
+                        <label class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Tag a buddy</label>
+                        <div class="relative">
+                            <div id="col-editor-buddy-tags" class="flex flex-wrap gap-2 mb-2 empty:hidden"></div>
+                            <input id="col-editor-buddy-input"
+                                   type="text"
+                                   placeholder="Search your buddies…"
+                                   autocomplete="off"
+                                   aria-label="Tag a buddy in this memory"
+                                   class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
+                            <ul id="col-editor-buddy-dropdown"
+                                class="hidden absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-2xl shadow-lg z-20 overflow-hidden max-h-48 overflow-y-auto"></ul>
+                        </div>
                     </div>
 
                     <!-- Catalogue fields (hidden for memories) -->

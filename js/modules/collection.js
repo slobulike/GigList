@@ -439,14 +439,16 @@ function _renderShelf(items, subtype) {
 // ─── MEMORIES RENDERING ──────────────────────────────────────────────────────
 
 function _renderMemoryCard(item) {
-    const year = item.item_date ? item.item_date.slice(0, 4) : '';
+    const dateLabel = item.acquired_date
+        ? _formatAcquiredDate(item.acquired_date)
+        : (item.item_date ? item.item_date.slice(0, 4) : '');
     const preview = (item.body || '').slice(0, 120) + (item.body?.length > 120 ? '…' : '');
     return `
         <div onclick="window._colOpenItem('${_esc(item.id)}')"
              class="bg-white rounded-[1.5rem] border border-slate-100 shadow-sm p-4 cursor-pointer
                     border-l-4 hover:border-l-[#c8a050] transition-all active:scale-[0.99]"
              style="border-left-color:rgba(200,160,80,0.5)">
-            ${year ? `<p class="text-[9px] font-black uppercase tracking-widest mb-1" style="color:#c8a050">${year}</p>` : ''}
+            ${dateLabel ? `<p class="text-[9px] font-black uppercase tracking-widest mb-1" style="color:#c8a050">${dateLabel}</p>` : ''}
             <h3 class="text-sm font-black text-slate-800 leading-snug mb-1">${item.title}</h3>
             ${preview ? `<p class="text-[11px] text-slate-500 leading-relaxed italic">${preview}</p>` : ''}
             ${(item.labels || []).map(l =>
@@ -800,6 +802,19 @@ function _renderItemDetail(item) {
         `<span class="inline-block text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 mr-1">${l}</span>`
     ).join('');
 
+    // Tagged buddies — resolve names from _buddyOptions cache or show IDs
+    const taggedIds = item.tagged_user_ids || [];
+    const taggedHtml = taggedIds.length
+        ? taggedIds.map(uid => {
+            // Try to find a display name from the signed-in user's follows list
+            const known = (window._buddyNamesCache || {})[uid];
+            return `<span class="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700">
+                <span aria-hidden="true">👤</span>
+                <span data-buddy-id="${uid}">${known || '…'}</span>
+            </span>`;
+        }).join('')
+        : '';
+
 const heroPath  = item.photos?.[0];
 const heroUrl   = heroPath ? _signedUrlCache.get(heroPath) : null;
 const allPhotoUrls = (item.photos || []).map(p => _signedUrlCache.get(p)).filter(Boolean);
@@ -872,6 +887,13 @@ const allPhotoUrls = (item.photos || []).map(p => _signedUrlCache.get(p)).filter
             <!-- Labels -->
             ${labelsHtml ? `<div class="px-5 mb-5">${labelsHtml}</div>` : ''}
 
+            <!-- Tagged buddies (memories) -->
+            ${taggedHtml ? `
+            <div class="px-5 mb-5">
+                <p class="text-[9px] font-black uppercase tracking-widest mb-2 text-indigo-400">In this memory</p>
+                <div class="flex flex-wrap gap-2">${taggedHtml}</div>
+            </div>` : ''}
+
 ${allPhotoUrls.length > 0 ? `
 <div class="px-5 mb-4">
     ${allPhotoUrls.length > 1 ? `<p class="text-[9px] font-black uppercase tracking-widest mb-2 text-slate-400">Photos</p>` : ''}
@@ -894,6 +916,40 @@ ${allPhotoUrls.length > 0 ? `
     sheet.setAttribute('aria-hidden', 'false');
 
     if (window.lucide) lucide.createIcons();
+
+    // Async-resolve tagged buddy names (they may not be in cache yet)
+    if (taggedIds.length) {
+        _resolveBuddyNames(taggedIds, sheet);
+    }
+}
+
+/**
+ * Resolves display names for tagged buddy IDs and updates the rendered sheet.
+ * Caches results in window._buddyNamesCache for subsequent opens.
+ */
+async function _resolveBuddyNames(ids, sheet) {
+    if (!window._buddyNamesCache) window._buddyNamesCache = {};
+
+    const unresolved = ids.filter(id => !window._buddyNamesCache[id]);
+    if (unresolved.length) {
+        const { data: profiles } = await supabase
+            .from('profiles')
+            .select('id, display_name, username')
+            .in('id', unresolved);
+
+        (profiles || []).forEach(p => {
+            window._buddyNamesCache[p.id] = p.display_name || p.username || p.id;
+        });
+    }
+
+    // Update any [data-buddy-id] spans still showing '…'
+    ids.forEach(id => {
+        const name = window._buddyNamesCache[id];
+        if (!name) return;
+        sheet.querySelectorAll(`[data-buddy-id="${id}"]`).forEach(el => {
+            el.textContent = name;
+        });
+    });
 }
 
 // ─── LIGHTBOX ────────────────────────────────────────────────────────────────
@@ -1017,8 +1073,56 @@ window._colSearch = (query) => {
 window._buddyResetTabs = () => {
     const colBody = document.getElementById('buddy-collection-body');
     if (colBody) colBody.innerHTML = '';
+    window._currentBuddyId = null;
     window._buddySwitchTab('gigs');
 };
+
+// ─── BUDDY ID RESOLVER ────────────────────────────────────────────────────────
+// buddies.js sets #buddy-drill-name text content when it opens the panel, but
+// doesn't expose the user_id. We watch for that text change and look up the
+// profile by username so the Collection tab has the ID ready before it opens.
+(function _watchBuddyPanel() {
+    const nameEl = document.getElementById('buddy-drill-name');
+    if (!nameEl) return;
+
+    let _lastResolvedName = null;
+
+    const observer = new MutationObserver(() => {
+        const username = nameEl.textContent?.trim();
+        if (!username || username === '--' || username === _lastResolvedName) return;
+        _lastResolvedName = username;
+        window._currentBuddyId = null; // clear while resolving
+
+        // Try username first, fall back to display_name
+        supabase
+            .from('profiles')
+            .select('id')
+            .eq('username', username)
+            .maybeSingle()
+            .then(({ data, error }) => {
+                if (!error && data?.id) return data;
+                // Fallback: display_name match
+                return supabase
+                    .from('profiles')
+                    .select('id')
+                    .eq('display_name', username)
+                    .maybeSingle()
+                    .then(r => r.data);
+            })
+            .then(data => {
+                if (data?.id) {
+                    window._currentBuddyId = data.id;
+                    const panel = document.getElementById('buddy-drill-in');
+                    if (panel) panel.dataset.buddyId = data.id;
+                } else {
+                    console.warn('[Collection] Could not resolve buddy user_id for:', username);
+                }
+            })
+            .catch(e => console.warn('[Collection] Buddy ID lookup error:', e.message));
+    });
+
+    observer.observe(nameEl, { childList: true, characterData: true, subtree: true });
+})();
 
 window._buddySwitchTab = (tab) => {
     const gigsPanel  = document.getElementById('buddy-panel-gigs');
@@ -1047,13 +1151,25 @@ window._buddySwitchTab = (tab) => {
         if (container && container.children.length === 0) {
             container.innerHTML = '<p class="text-sm text-slate-400 text-center py-16">Loading collection…</p>';
         }
-        // buddies.js sets data-buddy-id on the drill-in panel when it opens
-        const panel   = document.getElementById('buddy-drill-in');
-        const buddyId = window._currentBuddyId || panel?.dataset?.buddyId;
-        if (buddyId && container) _renderBuddyCollection(buddyId, container);
-        else if (container) {
-            container.innerHTML = '<p class="text-sm text-slate-400 text-center py-16">Collection unavailable.</p>';
-        }
+        // The MutationObserver above resolves the buddy's user_id asynchronously
+        // from the name set by buddies.js. Poll briefly to let it land.
+        const panel = document.getElementById('buddy-drill-in');
+        const _tryRender = (attemptsLeft) => {
+            const buddyId = window._currentBuddyId || panel?.dataset?.buddyId;
+            if (buddyId) {
+                _renderBuddyCollection(buddyId, container);
+            } else if (attemptsLeft > 0) {
+                setTimeout(() => _tryRender(attemptsLeft - 1), 150);
+            } else {
+                container.innerHTML = `
+                    <div class="text-center py-16 space-y-2">
+                        <div class="text-4xl">🔍</div>
+                        <p class="text-sm font-black text-slate-600">Couldn't load collection</p>
+                        <p class="text-[11px] text-slate-400">Try closing and reopening this buddy's profile.</p>
+                    </div>`;
+            }
+        };
+        _tryRender(6); // up to ~900ms of retries
     }
 };
 

@@ -30,6 +30,7 @@ let _selectedSubtype = 'cd';
 let _pendingPhotos   = [];  // Array of { file, previewUrl } — not yet uploaded
 let _existingPhotos  = [];  // Array of storage URL strings — already in DB
 let _labels          = [];  // Current label array
+let _taggedBuddies   = [];  // Array of { id, name } — buddies tagged in this memory
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
@@ -530,10 +531,158 @@ async function _populateForm(item) {
     const bandInput = document.getElementById('col-editor-band-input');
     if (bandInput) bandInput.value = item.band_name || '';
 
+    // Tagged buddies — resolve user IDs back to names from _buddyOptions
+    _taggedBuddies = [];
+    if (item.tagged_user_ids?.length) {
+        for (const uid of item.tagged_user_ids) {
+            const match = _buddyOptions.find(b => b.id === uid);
+            if (match) {
+                _taggedBuddies.push(match);
+            } else {
+                // Fallback: fetch profile name if not in buddy list
+                const { data: profile } = await supabase
+                    .from('profiles')
+                    .select('username, display_name')
+                    .eq('id', uid)
+                    .maybeSingle();
+                if (profile) {
+                    _taggedBuddies.push({
+                        id:   uid,
+                        name: profile.display_name || profile.username || uid,
+                    });
+                }
+            }
+        }
+    }
+
     _renderLabels();
+    _renderBuddyTags();
     _renderPhotoPreviews();
     _updateFieldVisibility();
 }
+
+// ─── BUDDY TAGGING ───────────────────────────────────────────────────────────
+
+let _buddyOptions = []; // { id, name } — fetched once per editor open
+
+async function _populateBuddySelector() {
+    const input    = document.getElementById('col-editor-buddy-input');
+    const dropdown = document.getElementById('col-editor-buddy-dropdown');
+    if (!input || !dropdown) return;
+
+    // window._following is populated by app.js from the buddies table
+    // (same source buddies.js uses — { id, display_name, username })
+    const following = window._following || [];
+
+    if (following.length) {
+        _buddyOptions = following.map(b => ({
+            id:   b.id,
+            name: b.display_name || b.username || b.id,
+        })).sort((a, b) => a.name.localeCompare(b.name));
+        _wireBuddyCombobox();
+        return;
+    }
+
+    // Fallback: _following not yet populated — query buddies table directly
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+
+    const { data: rows } = await supabase
+        .from('buddies')
+        .select(`
+            requester_id,
+            addressee_id,
+            requester:profiles!buddies_requester_id_fkey(id, username, display_name),
+            addressee:profiles!buddies_addressee_id_fkey(id, username, display_name)
+        `)
+        .or(`requester_id.eq.${session.user.id},addressee_id.eq.${session.user.id}`)
+        .eq('status', 'accepted');
+
+    _buddyOptions = (rows || []).map(row => {
+        // The buddy is whichever side isn't the current user
+        const isBuddy = row.requester_id === session.user.id ? row.addressee : row.requester;
+        return {
+            id:   isBuddy.id,
+            name: isBuddy.display_name || isBuddy.username || isBuddy.id,
+        };
+    }).sort((a, b) => a.name.localeCompare(b.name));
+
+    _wireBuddyCombobox();
+}
+
+function _renderBuddyTags() {
+    const container = document.getElementById('col-editor-buddy-tags');
+    if (!container) return;
+    container.innerHTML = _taggedBuddies.map((b, i) => `
+        <span class="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700">
+            <span>👤</span>${b.name}
+            <button type="button"
+                    onclick="window._colEditorRemoveBuddy(${i})"
+                    aria-label="Remove ${b.name}"
+                    class="hover:text-red-500 transition-colors leading-none ml-0.5">×</button>
+        </span>`).join('');
+}
+
+function _wireBuddyCombobox() {
+    const input    = document.getElementById('col-editor-buddy-input');
+    const dropdown = document.getElementById('col-editor-buddy-dropdown');
+    if (!input || !dropdown || input._buddyWired) return;
+    input._buddyWired = true;
+
+    const _show = (matches) => {
+        // Filter out already-tagged buddies
+        const available = matches.filter(b => !_taggedBuddies.find(t => t.id === b.id));
+        if (!available.length) { dropdown.classList.add('hidden'); return; }
+        dropdown.innerHTML = available.map(b => `
+            <li class="px-4 py-2.5 text-sm font-bold text-slate-700 cursor-pointer hover:bg-indigo-50 transition-colors flex items-center gap-2"
+                onmousedown="event.preventDefault();window._colEditorTagBuddy('${b.id}','${b.name.replace(/'/g,"\\'")}')">
+                <span class="text-base">👤</span>${b.name}
+            </li>`).join('');
+        dropdown.classList.remove('hidden');
+    };
+
+    input.addEventListener('focus', () => {
+        const q = input.value.trim().toLowerCase();
+        _show(q ? _buddyOptions.filter(b => b.name.toLowerCase().includes(q)) : _buddyOptions);
+    });
+
+    input.addEventListener('input', () => {
+        const q = input.value.trim().toLowerCase();
+        _show(q ? _buddyOptions.filter(b => b.name.toLowerCase().includes(q)) : _buddyOptions);
+    });
+
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') dropdown.classList.add('hidden');
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            const first = dropdown.querySelector('li');
+            if (first && !dropdown.classList.contains('hidden')) {
+                first.dispatchEvent(new MouseEvent('mousedown'));
+            }
+        }
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!input.contains(e.target) && !dropdown.contains(e.target)) {
+            dropdown.classList.add('hidden');
+        }
+    });
+}
+
+window._colEditorTagBuddy = (id, name) => {
+    if (_taggedBuddies.find(b => b.id === id)) return;
+    _taggedBuddies.push({ id, name });
+    const input = document.getElementById('col-editor-buddy-input');
+    if (input) input.value = '';
+    const dropdown = document.getElementById('col-editor-buddy-dropdown');
+    if (dropdown) dropdown.classList.add('hidden');
+    _renderBuddyTags();
+};
+
+window._colEditorRemoveBuddy = (i) => {
+    _taggedBuddies.splice(i, 1);
+    _renderBuddyTags();
+};
 
 // ─── FIELD VISIBILITY ─────────────────────────────────────────────────────────
 
@@ -545,6 +694,11 @@ function _updateFieldVisibility() {
     const catalogueFields = document.getElementById('col-editor-catalogue-fields');
     if (catalogueFields) {
         catalogueFields.classList.toggle('hidden', _selectedType === 'memory');
+    }
+    // Buddy tag field is only meaningful on memories
+    const buddyField = document.getElementById('col-editor-buddy-tag-field');
+    if (buddyField) {
+        buddyField.classList.toggle('hidden', _selectedType !== 'memory');
     }
     const subtypeLabel = document.getElementById('col-editor-subtype-label');
     if (subtypeLabel) {
@@ -652,6 +806,7 @@ export const openCollectionEditor = async (type = null, itemId = null) => {
     _pendingPhotos   = [];
     _existingPhotos  = [];
     _labels          = [];
+    _taggedBuddies   = [];
     _labelCache      = null; // refresh label suggestions on each open
     _selectedType    = type || 'artefact';
     _selectedSubtype = 'cd';
@@ -669,8 +824,8 @@ export const openCollectionEditor = async (type = null, itemId = null) => {
     const saveBtn = document.getElementById('col-editor-save-btn');
     if (saveBtn) saveBtn.textContent = itemId ? 'Save changes' : 'Add to collection';
 
-    // Populate band selector
-    await _populateBandSelector();
+    // Populate band selector + buddy selector
+    await Promise.all([_populateBandSelector(), _populateBuddySelector()]);
 
     if (itemId) {
         // Edit mode — fetch existing item
@@ -702,6 +857,10 @@ export const openCollectionEditor = async (type = null, itemId = null) => {
         if (condEl) condEl.value = '';
         const acqMonthEl = document.getElementById('col-editor-acquired-month');
         if (acqMonthEl) acqMonthEl.value = '';
+        _taggedBuddies = [];
+        _renderBuddyTags();
+        const buddyInput = document.getElementById('col-editor-buddy-input');
+        if (buddyInput) buddyInput.value = '';
     }
 
     modal.classList.remove('hidden');
@@ -781,6 +940,8 @@ window.saveCollectionItem = async () => {
         const bandInput = document.getElementById('col-editor-band-input');
         const bandName = bandInput?.value.trim() || null;
 
+        const taggedUserIds = _taggedBuddies.map(b => b.id);
+
         const row = {
             id:               itemId,
             user_id:          session.user.id,
@@ -802,6 +963,7 @@ window.saveCollectionItem = async () => {
             provenance:       _get('col-editor-provenance') || null,
             photos:           allPhotoPaths,
             labels:           _labels,
+            tagged_user_ids:  taggedUserIds.length ? taggedUserIds : null,
             ...(heroColor && { hero_color: heroColor }),
         };
 
@@ -810,6 +972,11 @@ window.saveCollectionItem = async () => {
             .upsert(row, { onConflict: 'id' });
 
         if (error) throw error;
+
+        // Fire push notifications to each tagged buddy (non-blocking)
+        if (taggedUserIds.length && _selectedType === 'memory') {
+            _notifyTaggedBuddies(session.user.id, itemId, title, taggedUserIds);
+        }
 
         closeCollectionEditor();
         if (window.showToast) window.showToast(
@@ -826,6 +993,60 @@ window.saveCollectionItem = async () => {
         _setBusy(false);
     }
 };
+
+// ─── PUSH NOTIFICATIONS ──────────────────────────────────────────────────────
+
+/**
+ * Sends a push notification to each tagged buddy after saving a memory.
+ * Looks up each buddy's push subscription from push_subscriptions table,
+ * then calls the Cloudflare Worker to deliver the notification.
+ * Runs non-blocking — failures are logged but don't surface to the user.
+ */
+async function _notifyTaggedBuddies(taggerUserId, itemId, memoryTitle, buddyIds) {
+    try {
+        // Get the tagger's display name for the notification message
+        const { data: taggerProfile } = await supabase
+            .from('profiles')
+            .select('display_name, username')
+            .eq('id', taggerUserId)
+            .maybeSingle();
+
+        const taggerName = taggerProfile?.display_name || taggerProfile?.username || 'Someone';
+
+        // Fetch push subscriptions for all tagged buddies in one query
+        const { data: subscriptions } = await supabase
+            .from('push_subscriptions')
+            .select('user_id, subscription')
+            .in('user_id', buddyIds);
+
+        if (!subscriptions?.length) return;
+
+        // Send a notification for each subscription
+        const notifyPromises = subscriptions.map(async ({ subscription }) => {
+            if (!subscription) return;
+            try {
+                await fetch('/api/send-push', {
+                    method:  'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        subscription,
+                        title:   '📼 You were tagged in a memory',
+                        body:    `${taggerName} added a memory and tagged you in it`,
+                        data:    { url: '/vault.html', itemId },
+                    }),
+                });
+            } catch (e) {
+                console.warn('[ColEditor] push send failed:', e.message);
+            }
+        });
+
+        await Promise.allSettled(notifyPromises);
+
+    } catch (e) {
+        // Non-blocking — don't surface push failures to user
+        console.warn('[ColEditor] _notifyTaggedBuddies error:', e.message);
+    }
+}
 
 // ─── DELETE ───────────────────────────────────────────────────────────────────
 

@@ -1,13 +1,9 @@
 /**
  * GigList Core Engine
- * v5.1.0 — 2026-04-29
+ * v5.1.1 — 2026-04-30
  * -------------------------------------------------------------------
- * ✅ Added Collection items into Feed
- * ✅ Added "aquired date" to Collection items
- * ✅ Improved colour picker for new collection items
- * ✅ Fixed band count on Collection tab
- * ✅ Stopped cursor auto focusing on text field when adding an item to avoid keyboard popping up
- * ✅ Added Collection viewer to buddies
+ * ✅ Added tagging for buddies in collection memories
+ * ✅ Minor bug fixes and UX/UI improvements
  */
 
 import * as Data from './modules/data.js';
@@ -33,7 +29,7 @@ import { initProfile } from './modules/profile.js';
 import { initBandMode } from './modules/band.js';
 import { applyFilters, buildSummaryLine, hasActiveFilters } from './modules/filters.js';
 
-const APP_VERSION = "5.1.0";
+const APP_VERSION = "5.1.1";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
