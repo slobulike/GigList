@@ -59,12 +59,16 @@ export const sortGigs = (data, column, ascending = true) => {
  * user's journal rather than fetching entire tables.
  *
  * Load order:
- *   1. Journals (must come first — we need bands + venue names to scope steps 2 & 3)
+ *   1. Journals (must come first — we need journal_keys + venue names to scope steps 2 & 3)
  *   2. Performances + Venues in parallel (both scoped to journal content)
  *
  * This recovers the parallel fetch benefit while keeping payloads minimal:
- *   - performances: filtered by .in('artist', journalBands)  [index: performances_artist_idx]
+ *   - performances: filtered by .in('journal_key', journalKeys)  [index: performances_journal_key_idx]
  *   - venues:       filtered by .in('official_name', journalVenues) [index: venues_official_name_idx]
+ *
+ * Performances are scoped by journal_key (not artist) so that festival shows
+ * return all acts on the lineup regardless of whether those artists appear
+ * elsewhere in the user's personal journal.
  *
  * A user with no shows gets 0 bytes for both. A heavy user gets only their
  * relevant slice rather than the entire global dataset.
@@ -111,19 +115,38 @@ export const loadAppData = async (user) => {
     let journalData = journalRes.data || [];
 
     // Derive scoping sets from the raw journal rows (pre-normalisation, snake_case keys)
-    const journalBands  = [...new Set(journalData.map(r => r.band).filter(Boolean))];
+    // journal_key is used to scope performances so that festival shows return all acts
+    // on the lineup, not just acts that happen to appear elsewhere in the user's journal.
+    const journalKeys   = [...new Set(journalData.map(r => r.journal_key).filter(Boolean))];
     const journalVenues = [...new Set(journalData.map(r => r.official_venue).filter(Boolean))];
 
     // ── Step 2: Performances + Venues in parallel ─────────────────────────────
-    // Both are now scoped to the user's journal content.
-    // Falls back to empty for users with no shows (new signups etc.).
-    // Batch venues into chunks of 100 to avoid URL length limits on large datasets
-    const VENUE_CHUNK_SIZE = 100;
+    // Both are scoped to the user's journal content to keep payloads minimal.
+    // Performances are scoped by journal_key (not artist) so festival shows
+    // return all acts on the lineup regardless of whether those artists appear
+    // elsewhere in the user's personal journal.
+    // Both fetches are batched in chunks of 100 to avoid URL length limits.
+    const CHUNK_SIZE = 100;
+
+    async function fetchPerformancesInBatches(keys) {
+        if (!keys.length) return [];
+        const chunks = [];
+        for (let i = 0; i < keys.length; i += CHUNK_SIZE) {
+            chunks.push(keys.slice(i, i + CHUNK_SIZE));
+        }
+        const results = await Promise.all(
+            chunks.map(chunk => supabase.from('performances').select('*').in('journal_key', chunk))
+        );
+        const errors = results.filter(r => r.error);
+        if (errors.length) throw new Error(`Failed to load performances: ${errors[0].error.message}`);
+        return results.flatMap(r => r.data || []);
+    }
+
     async function fetchVenuesInBatches(venueNames) {
         if (!venueNames.length) return [];
         const chunks = [];
-        for (let i = 0; i < venueNames.length; i += VENUE_CHUNK_SIZE) {
-            chunks.push(venueNames.slice(i, i + VENUE_CHUNK_SIZE));
+        for (let i = 0; i < venueNames.length; i += CHUNK_SIZE) {
+            chunks.push(venueNames.slice(i, i + CHUNK_SIZE));
         }
         const results = await Promise.all(
             chunks.map(chunk => supabase.from('venues').select('*').in('official_name', chunk))
@@ -133,14 +156,11 @@ export const loadAppData = async (user) => {
         return results.flatMap(r => r.data || []);
     }
 
-    const [perfRes, venueRows] = await Promise.all([
-        journalBands.length > 0
-            ? supabase.from('performances').select('*').in('artist', journalBands)
-            : Promise.resolve({ data: [], error: null }),
+    const [perfRows, venueRows] = await Promise.all([
+        fetchPerformancesInBatches(journalKeys),
         fetchVenuesInBatches(journalVenues),
     ]);
 
-    if (perfRes.error) throw new Error(`Failed to load performances: ${perfRes.error.message}`);
     const venueRes = { data: venueRows };
 
     // Build venue lookup from scoped results and stash on window for map/editor use
@@ -158,7 +178,7 @@ export const loadAppData = async (user) => {
     });
     window.allVenues = venueLookup;
 
-    let performanceData = perfRes.data    || [];
+    let performanceData = perfRows;
 
     // Normalise column names from Supabase snake_case to the app's expected format
     // Supabase returns lowercase column names; the app expects the original CSV casing

@@ -938,7 +938,9 @@ export const openGigModal = (key, journalData, performanceData) => {
     const modalContent = document.getElementById('modal-content');
 
     // --- DATA PREP ---
-    const sets = performanceData.filter(p => p['Journal Key'] === key);
+    const sets = pData.filter(p =>
+        (p['Journal Key'] || '').toString().trim() === key.toString().trim()
+    );
     const isFestival = entry['Festival?'] && entry['Festival?'].trim().toUpperCase().startsWith('Y');
     const [d, m, y] = entry.Date.split('/');
     const formattedDate = `${y}-${m}-${d}`;
@@ -974,8 +976,9 @@ export const openGigModal = (key, journalData, performanceData) => {
     const style = getTicketStyle(key);
     const isLandscape = style.type === 'landscape';
     const supportActs = sets
-        .filter(s => s.Artist.toLowerCase() !== entry.Band.toLowerCase())
+        .filter(s => (s.Artist || '').toLowerCase() !== entry.Band.toLowerCase())
         .map(s => s.Artist)
+        .filter(Boolean)
         .join(' + ');
     // PRICE LOGIC: Prioritize journal data, fallback to random if missing
         let displayPrice;

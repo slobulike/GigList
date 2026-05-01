@@ -1,9 +1,8 @@
 /**
  * GigList Core Engine
- * v5.1.1 — 2026-04-30
+ * v5.1.2 — 2026-05-01
  * -------------------------------------------------------------------
- * ✅ Added tagging for buddies in collection memories
- * ✅ Minor bug fixes and UX/UI improvements
+ * ✅ Bug fix to gig modal not showing festival or notable support appearances
  */
 
 import * as Data from './modules/data.js';
