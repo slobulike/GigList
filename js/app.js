@@ -1,8 +1,10 @@
 /**
  * GigList Core Engine
- * v5.1.2 — 2026-05-01
+ * v5.1.3 — 2026-05-01
  * -------------------------------------------------------------------
- * ✅ Bug fix to gig modal not showing festival or notable support appearances
+ * ✅ First improvements to Band Mode including natural language stats summary
+ * ✅ Removed broken avatar link from band mode
+ * ✅ Swapped "Rank" on Home screen for Items.
  */
 
 import * as Data from './modules/data.js';
@@ -243,12 +245,8 @@ export async function initApp() {
             const avatarCircle = document.getElementById('userIdentity-avatar');
 
             if (currentUser.isAuthUser) {
-                // Avatar initials set after authDisplayName resolves — see block below
-                if (signinPill)   signinPill.classList.add('hidden');
-                if (avatarCircle) {
-                    avatarCircle.classList.remove('ring-white');
-                    avatarCircle.classList.add('ring-white/60');
-                }
+                // Avatar is hidden in band mode (see below) — just hide the sign-in pill
+                if (signinPill) signinPill.classList.add('hidden');
             } else {
                 // Unauthenticated — tint the sign-in pill for visibility on blue header
                 if (signinPill) {
@@ -298,15 +296,10 @@ export async function initApp() {
     }
     window.authDisplayName = authDisplayName;
 
-    // In band mode, profile.js is not called — wire avatar initials directly
-    if (window.isBandMode && currentUser.isAuthUser) {
-        const avatarCircle   = document.getElementById('userIdentity-avatar');
-        const avatarInitials = document.getElementById('userIdentity-avatar-initials');
-        if (avatarCircle && avatarInitials) {
-            avatarCircle.classList.remove('hidden');
-            avatarInitials.textContent = (authDisplayName || 'U').slice(0, 2).toUpperCase();
-            avatarCircle.onclick = () => window.openProfile?.(null);
-        }
+    // In band mode, hide the avatar — the profile data fetch breaks in band context
+    // and clicking it would open an empty profile screen. No meaningful action here.
+    if (window.isBandMode) {
+        document.getElementById('userIdentity-avatar')?.classList.add('hidden');
     }
 
     // Header avatar + onclick wiring handled by profile.js initProfile() in Personal mode
@@ -365,6 +358,23 @@ export async function initApp() {
             // they last dismissed the notification. Delayed so the page settles first.
             setTimeout(() => checkCompanionTags(currentUser), 2000);
         }
+    }
+
+    // ── Eager collection item count ───────────────────────────────────────────
+    // Fetch just the count so the Items stat tile is populated on first load,
+    // before the user visits the Collection tab. Fire-and-forget.
+    if (currentUser?.isAuthUser && currentUser?.Type === 'Personal') {
+        supabase
+            .from('collection_items')
+            .select('id', { count: 'exact', head: true })
+            .eq('user_id', currentUser.id)
+            .then(({ count }) => {
+                if (count !== null) {
+                    // Stub array of correct length — updateRank reads .length
+                    window._collectionItems = Array(count);
+                    UI.updateRank();
+                }
+            });
     }
 
     // ── Lazy Chart.js load ────────────────────────────────────────────────────

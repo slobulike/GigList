@@ -115,7 +115,6 @@ export const updateStats = (data) => {
 };
 
 export const updateRank = (data) => {
-    const user    = window.currentUser;
     const rankEl  = document.getElementById('stat-rank');
     const labelEl = document.getElementById('stat-fourth-label');
 
@@ -124,9 +123,9 @@ export const updateRank = (data) => {
         // Fan count is loaded async by band.js — start with --
         if (rankEl) rankEl.textContent = '--';
     } else {
-        if (labelEl) labelEl.textContent = 'Rank';
-        const rank = user?.rank || user?.Rank;
-        if (rankEl) rankEl.textContent = rank ?? '--';
+        if (labelEl) labelEl.textContent = 'Items';
+        const itemCount = (window._collectionItems || []).length;
+        if (rankEl) rankEl.textContent = itemCount > 0 ? itemCount : '--';
     }
 };
 

@@ -21,6 +21,7 @@
  */
 
 import { supabase } from './supabase.js';
+import { updateRank } from './ui.js';
 
 // ─── STATE ────────────────────────────────────────────────────────────────────
 
@@ -1330,6 +1331,7 @@ export async function init(currentUser) {
 
     // Expose items globally so feed.js can build collection cards
     window._collectionItems = _items;
+    updateRank();
 
     _renderCollectionTab();
 }
@@ -1346,6 +1348,7 @@ export async function refresh() {
     _bandNames = await _fetchBandNames(_user.id);
     // Keep window._collectionItems in sync so feed.js can read it
     window._collectionItems = _items;
+    updateRank();
     _renderCollectionTab();
     if (_drillType) _renderDrillDown(_drillType);
 }

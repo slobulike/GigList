@@ -42,6 +42,9 @@ export async function initBandMode(currentUser, journalData, performanceData) {
     // Load fan count for stat strip (non-blocking)
     _loadFanCount().catch(err => console.warn('band.js: fan count load failed', err));
 
+    // Render hero image on the shows landing tab (non-blocking)
+    _renderBandHero().catch(err => console.warn('band.js: hero render failed', err));
+
     // Show default tab
     switchBandView('shows');
 }
@@ -63,7 +66,7 @@ function switchBandView(tab) {
     }
 
     // Update band nav active state
-    ['shows', 'story', 'fans'].forEach(t => {
+    ['shows', 'summary', 'fans'].forEach(t => {
         const btn = document.getElementById(`band-nav-${t}`);
         if (!btn) return;
         if (t === tab) {
@@ -78,11 +81,66 @@ function switchBandView(tab) {
     });
 
     // Render the tab content
-    if (tab === 'shows') _renderBandShows();
-    if (tab === 'story') _renderBandStory();
-    if (tab === 'fans')  _renderBandFans();
+    if (tab === 'shows')   _renderBandShows();
+    if (tab === 'summary') _renderBandStory();
+    if (tab === 'fans')    _renderBandFans();
 
     window.scrollTo(0, 0);
+}
+
+// ─── HERO IMAGE ───────────────────────────────────────────────────────────────
+
+async function _renderBandHero() {
+    const container = document.getElementById('band-hero');
+    if (!container) return;
+
+    const bandName = window.currentArtist;
+    if (!bandName) return;
+
+    const slug    = bandName.toLowerCase().replace(/[^a-z0-9]/g, '-');
+    const initial = bandName.charAt(0).toUpperCase();
+
+    // Supabase public bucket URLs always resolve syntactically, even for missing objects
+    // (they return an error XML with 200 or redirect). The most reliable check is to
+    // attempt to load the image and watch for the onload/onerror event.
+    const tryLoad = (url) => new Promise(resolve => {
+        const img = new Image();
+        img.onload  = () => resolve(url);
+        img.onerror = () => resolve(null);
+        img.src = url;
+    });
+
+    let photoUrl = null;
+    for (const ext of ['jpg', 'png', 'webp']) {
+        const { data: urlData } = supabase.storage
+            .from('band-photos')
+            .getPublicUrl(`${slug}/hero.${ext}`);
+        if (urlData?.publicUrl) {
+            const result = await tryLoad(urlData.publicUrl);
+            if (result) { photoUrl = result; break; }
+        }
+    }
+
+    if (photoUrl) {
+        container.innerHTML = `
+            <div class="relative w-full h-52 overflow-hidden rounded-3xl shadow-sm -mx-0">
+                <img src="${photoUrl}" alt="${bandName}"
+                     class="absolute inset-0 w-full h-full object-cover">
+                <div class="absolute inset-0 bg-gradient-to-t from-black/65 via-black/15 to-transparent"></div>
+                <div class="absolute bottom-0 left-0 right-0 p-5">
+                    <p class="text-white font-black text-2xl leading-tight drop-shadow">${bandName}</p>
+                </div>
+            </div>`;
+    } else {
+        // Styled gradient placeholder with large translucent initial
+        container.innerHTML = `
+            <div class="relative w-full h-36 overflow-hidden rounded-3xl shadow-sm bg-gradient-to-br from-indigo-600 to-[#189BCC]">
+                <span class="absolute inset-0 flex items-center justify-center text-white/10 font-black text-[9rem] leading-none select-none pointer-events-none">${initial}</span>
+                <div class="absolute bottom-0 left-0 right-0 p-5">
+                    <p class="text-white font-black text-2xl leading-tight drop-shadow">${bandName}</p>
+                </div>
+            </div>`;
+    }
 }
 
 // ─── SHOWS TAB ────────────────────────────────────────────────────────────────
@@ -169,12 +227,57 @@ function _renderBandShows() {
     if (window.lucide) lucide.createIcons();
 }
 
-// ─── STORY TAB ────────────────────────────────────────────────────────────────
+// ─── SUMMARY TAB ──────────────────────────────────────────────────────────────
 
 function _renderBandStory() {
+    _renderSummaryNarrative();
     _renderStoryStats();
     _renderStoryYearChart();
     _renderStorySongsChart();
+}
+
+function _renderSummaryNarrative() {
+    const container = document.getElementById('band-summary-narrative');
+    if (!container) return;
+
+    const data     = _journalData;
+    const bandName = window.currentArtist || 'This band';
+
+    if (!data.length) {
+        container.innerHTML = '';
+        return;
+    }
+
+    const totalShows = data.length;
+
+    // Unique venues
+    const venues     = new Set(data.map(g => g.OfficialVenue || g.Venue).filter(Boolean));
+    const venueCount = venues.size;
+
+    // First and most recent logged show dates
+    const dates = data.map(g => parseDate(g.Date)).filter(Boolean).sort((a, b) => a - b);
+    const fmtDate = d => d
+        ? d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+        : null;
+    const firstDate  = fmtDate(dates[0]);
+    const latestDate = fmtDate(dates[dates.length - 1]);
+
+    // Fan count — read from the stat strip if already populated by _loadFanCount()
+    const fanEl    = document.getElementById('stat-rank');
+    const fanCount = (fanEl && fanEl.textContent && !isNaN(fanEl.textContent))
+        ? parseInt(fanEl.textContent, 10)
+        : null;
+
+    const plural       = totalShows !== 1;
+    const venuePhrase  = venueCount > 1 ? `, across ${venueCount} venues` : '';
+    const fanPhrase    = fanCount   ? ` by ${fanCount} fan${fanCount !== 1 ? 's' : ''}` : '';
+    const firstPhrase  = firstDate  ? ` First logged show was ${firstDate}.` : '';
+    const latestPhrase = latestDate && latestDate !== firstDate ? ` Most recent was ${latestDate}.` : '';
+
+    const sentence = `${bandName} ${plural ? 'have' : 'has'} been logged ${totalShows} time${plural ? 's' : ''}${fanPhrase}${venuePhrase}.${firstPhrase}${latestPhrase}`;
+
+    container.innerHTML = `
+        <p class="text-sm font-bold text-slate-600 leading-relaxed">${sentence}</p>`;
 }
 
 function _renderStoryStats() {
@@ -231,7 +334,23 @@ function _renderStoryStats() {
         }
     }
 
+    // Fan count — read from the stat strip (populated by _loadFanCount in initBandMode)
+    const fanEl    = document.getElementById('stat-rank');
+    const fanCount = (fanEl && fanEl.textContent && !isNaN(fanEl.textContent))
+        ? parseInt(fanEl.textContent, 10)
+        : null;
+
     const cards = [
+        {
+            label: 'Shows Logged',
+            value: data.length,
+            sub:   data.length === 1 ? 'by GigList fans' : 'by GigList fans',
+        },
+        {
+            label: 'GigList Fans',
+            value: fanCount ?? '--',
+            sub:   fanCount ? `fan${fanCount !== 1 ? 's' : ''} on GigList` : 'loading…',
+        },
         {
             label: 'Active Since',
             value: yearsLabel,
@@ -337,20 +456,41 @@ async function _renderBandFans() {
         if (rankEl)  rankEl.textContent  = userIds.length;
         if (labelEl) labelEl.textContent = 'Fans';
 
-        // Step 2: fetch profiles — RLS policy now allows public read of all rows
-        const { data: profiles, error: profileErr } = await supabase
+        // Step 2: fetch profiles.
+        // NOTE: RLS may restrict which profile rows come back — e.g. only the current user's
+        // own row plus accounts they follow/buddy. We handle missing rows gracefully below
+        // so fans whose profiles are RLS-filtered still appear as anonymous tiles.
+        const { data: profileRows } = await supabase
             .from('profiles')
             .select('id, display_name, username, avatar_url')
             .in('id', userIds);
 
-        if (profileErr) throw profileErr;
+        // Build a lookup of whatever profiles came back
+        const profileMap = {};
+        (profileRows || []).forEach(p => { profileMap[p.id] = p; });
 
-        // Build sorted fan list: most shows first, then earliest fan on tie
-        const fans = (profiles || []).map(p => ({
-            ...p,
-            showCount: countMap[p.id] || 0,
-            firstShow: firstShowMap[p.id] || null,
-        })).sort((a, b) => {
+        // Ensure buddy status is loaded before building CTAs
+        if (_currentUser?.isAuthUser) {
+            await _loadBuddyStatus();
+        }
+
+        // Build fan list — create stub entries for any userId not returned by profiles query
+        const fans = userIds.map(uid => {
+            const p = profileMap[uid] || { id: uid, display_name: null, username: null, avatar_url: null };
+            return {
+                ...p,
+                showCount: countMap[uid] || 0,
+                firstShow: firstShowMap[uid] || null,
+            };
+        });
+
+        // Sort: buddies first, then by show count desc, then earliest fan on tie
+        fans.sort((a, b) => {
+            const aStatus = _buddyStatus[a.id];
+            const bStatus = _buddyStatus[b.id];
+            const aIsBuddy = aStatus === 'accepted' ? 0 : 1;
+            const bIsBuddy = bStatus === 'accepted' ? 0 : 1;
+            if (aIsBuddy !== bIsBuddy) return aIsBuddy - bIsBuddy;
             if (b.showCount !== a.showCount) return b.showCount - a.showCount;
             if (a.firstShow && b.firstShow) return a.firstShow - b.firstShow;
             return 0;
@@ -359,12 +499,6 @@ async function _renderBandFans() {
         if (!fans.length) {
             _renderFansEmpty(container);
             return;
-        }
-
-        // Ensure buddy status is loaded before rendering CTAs.
-        // If it hasn't resolved yet (fire-and-forget from initBandMode), load it now.
-        if (_currentUser?.isAuthUser) {
-            await _loadBuddyStatus();
         }
 
         // Hide skeleton and render tiles
@@ -386,8 +520,10 @@ async function _renderBandFans() {
 function _fanTileHTML(fan) {
     const viewerId    = _currentUser?.id;
     const isViewer    = fan.id === viewerId;
-    const displayName = fan.display_name || fan.username || 'GigList User';
-    const initials    = displayName.slice(0, 2).toUpperCase();
+    // display_name/username may be null if the profile was RLS-filtered
+    const displayName = fan.display_name || fan.username || null;
+    const label       = displayName || 'GigList Fan';
+    const initials    = displayName ? displayName.slice(0, 2).toUpperCase() : '♪';
 
     // Avatar: use avatar_url if present, else initials circle
     const avatarHTML = fan.avatar_url
@@ -399,13 +535,13 @@ function _fanTileHTML(fan) {
     const firstShowLabel = firstShowYear ? `Fan since ${firstShowYear}` : '';
 
     // Buddy CTA
-    const ctaHTML = _buddyCTA(fan.id, isViewer, displayName);
+    const ctaHTML = _buddyCTA(fan.id, isViewer, label);
 
     return `
         <div class="bg-white rounded-[1.5rem] border border-slate-100 shadow-sm p-4 flex items-center gap-4">
             ${avatarHTML}
             <div class="flex-1 min-w-0">
-                <p class="text-sm font-black text-slate-900 truncate">${displayName}</p>
+                <p class="text-sm font-black text-slate-900 truncate">${label}</p>
                 <p class="text-[10px] font-bold text-slate-400 mt-0.5">
                     ${fan.showCount} show${fan.showCount !== 1 ? 's' : ''}
                     ${firstShowLabel ? ` · ${firstShowLabel}` : ''}
