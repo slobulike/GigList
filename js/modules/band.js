@@ -18,6 +18,7 @@
 import { supabase }             from './supabase.js';
 import { parseDate }            from './utils.js';
 import * as Charts              from './charts.js';
+import { loadPerformances }     from './data.js';
 
 // ─── Module-level state ───────────────────────────────────────────────────────
 
@@ -28,6 +29,7 @@ let _filteredShows   = [];
 let _buddyStatus     = {};   // userId -> 'accepted' | 'pending' | null
 let _fanCount          = null;  // unique fans (distinct user_ids), set by _loadBandStats
 let _fanAttendance     = null;  // total attended show-instances, set by _loadBandStats
+let _performancesLoaded = false; // guard so we only fetch once
 // ─── INIT ─────────────────────────────────────────────────────────────────────
 
 export async function initBandMode(currentUser, journalData, performanceData) {
@@ -88,7 +90,7 @@ function switchBandView(tab) {
 
     // Render the tab content
     if (tab === 'shows')   _renderBandShows();
-    if (tab === 'summary') _renderBandStory();
+    if (tab === 'summary') _loadPerformancesIfNeeded().then(() => _renderBandStory());
     if (tab === 'fans')    _renderBandFans();
 
     window.scrollTo(0, 0);
@@ -242,6 +244,28 @@ function _renderBandShows() {
         <p class="text-center text-[10px] text-slate-400 font-bold mt-3">${footerNote}</p>`;
 
     if (window.lucide) lucide.createIcons();
+}
+
+// ─── LAZY PERFORMANCE LOADER ──────────────────────────────────────────────────
+// Performances are NOT fetched on band page load — only when the user opens
+// the Summary tab (which is the sole consumer via the Songs chart).
+// One single IN query replaces the N+1 pattern that was firing previously.
+
+async function _loadPerformancesIfNeeded() {
+    if (_performancesLoaded) return;
+    _performancesLoaded = true;
+
+    const keys = _journalData.map(g => g['Journal Key']).filter(Boolean);
+    if (!keys.length) return;
+
+    try {
+        _performanceData = await loadPerformances(keys, window.allVenues || {});
+        // Also sync to window so the gig modal and search can read it
+        window.performanceData = _performanceData;
+    } catch (err) {
+        console.warn('band.js: performances load failed', err);
+        _performancesLoaded = false; // allow retry if user opens Summary again
+    }
 }
 
 // ─── SUMMARY TAB ──────────────────────────────────────────────────────────────

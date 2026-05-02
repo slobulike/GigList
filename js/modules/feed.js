@@ -18,6 +18,7 @@
 
 import { parseDate, slugify, slugifyArtist } from './utils.js';
 import { supabase } from './supabase.js';
+import { startNewPuzzle } from './games.js';
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
@@ -397,6 +398,169 @@ function renderEmptyState(container) {
     if (window.lucide) lucide.createIcons();
 }
 
+// ─── GAME CARD & MODAL ────────────────────────────────────────────────────────
+
+/**
+ * Appends a game invite tile after the main feed cards.
+ * Alternates between puzzle and quiz each feed load (sessionStorage flag).
+ * Falls back to puzzle-only if the user has fewer than 5 gigs.
+ */
+function renderGameCard(container, journalData) {
+    const canPlayQuiz = journalData.length >= 5;
+
+    // Alternate each load; if quiz isn't available always use puzzle
+    let gameType;
+    if (!canPlayQuiz) {
+        gameType = 'puzzle';
+    } else {
+        const last = sessionStorage.getItem('giglist_feed_last_game') || 'quiz';
+        gameType   = last === 'quiz' ? 'puzzle' : 'quiz';
+        sessionStorage.setItem('giglist_feed_last_game', gameType);
+    }
+
+    const isPuzzle = gameType === 'puzzle';
+    const eyebrow  = isPuzzle ? 'Fancy a break?' : 'Test your knowledge';
+    const headline = isPuzzle ? 'Slide Puzzle' : 'Gig Quiz';
+    const subline  = isPuzzle
+        ? 'Piece together a show from your history'
+        : 'How well do you know your own gig history?';
+    const badge    = isPuzzle ? '🧩 Puzzle' : '🎤 Quiz';
+    const badgeColor = isPuzzle ? 'bg-violet-500' : 'bg-rose-500';
+    const imgSrc   = DEFAULT_IMAGES[1]; // Concert crowd — always works
+
+    const tile = document.createElement('div');
+    tile.id = 'feed-game-card';
+    tile.innerHTML = `
+        <div class="relative overflow-hidden rounded-[2rem] bg-slate-900 shadow-xl min-h-[200px] flex flex-col"
+             role="article">
+            <img src="${imgSrc}"
+                 class="absolute inset-0 w-full h-full object-cover opacity-30"
+                 alt=""
+                 aria-hidden="true">
+            <div class="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-900/40 to-transparent"></div>
+            <div class="relative z-10 flex flex-col justify-end flex-1 p-6">
+                <span class="text-[9px] font-black uppercase tracking-widest text-white/60 mb-2">
+                    ${eyebrow}
+                </span>
+                <h3 class="text-3xl font-black italic uppercase tracking-tighter text-white leading-none mb-1">
+                    ${headline}
+                </h3>
+                <p class="text-sm font-bold text-white/60">${subline}</p>
+                <div class="flex items-center justify-between mt-4">
+                    <span class="${badgeColor} text-white text-[9px] font-black uppercase tracking-widest px-3 py-1 rounded-full">
+                        ${badge}
+                    </span>
+                    <button onclick="window._openFeedGame('${gameType}')"
+                            class="text-[10px] font-black text-white/50 hover:text-white uppercase tracking-widest transition-colors flex items-center gap-1">
+                        Let's play
+                        <i data-lucide="play" class="w-3.5 h-3.5" aria-hidden="true"></i>
+                    </button>
+                </div>
+            </div>
+        </div>`;
+    container.appendChild(tile);
+    if (window.lucide) lucide.createIcons();
+}
+
+/**
+ * Opens a full-screen modal containing the puzzle or quiz.
+ * Injects the necessary container markup, then calls the appropriate
+ * initialiser once the DOM is ready. Closes and fully removes itself on dismiss.
+ */
+window._openFeedGame = (gameType) => {
+    // Don't stack modals
+    if (document.getElementById('feed-game-modal')) return;
+
+    const isPuzzle = gameType === 'puzzle';
+
+    const gameInnerHtml = isPuzzle ? `
+        <div id="puzzle-section" class="flex flex-col gap-4 w-full">
+            <div class="flex items-center justify-between px-1">
+                <p class="text-[9px] font-black uppercase tracking-widest text-white/50">Slide the tiles to reveal the show</p>
+                <button id="feed-puzzle-new"
+                        class="text-[9px] font-black uppercase tracking-widest text-white/40 hover:text-white transition-colors">
+                    New puzzle
+                </button>
+            </div>
+            <div id="puzzle-grid"
+                 class="grid gap-1 w-full aspect-square rounded-2xl overflow-hidden bg-slate-800">
+            </div>
+        </div>` : `
+        <div id="quiz-container" class="flex flex-col gap-4 w-full">
+            <div class="flex items-center justify-between px-1">
+                <span id="quiz-score" class="text-[9px] font-black uppercase tracking-widest text-white/60">SCORE: 0</span>
+                <span id="quiz-timer" class="text-[9px] font-black uppercase tracking-widest text-white/60">00:30</span>
+            </div>
+            <div id="game-arena" class="rounded-2xl transition-colors duration-200 p-4 bg-slate-800/50">
+                <div id="quiz-body" class="flex flex-col items-center gap-4 min-h-[280px] justify-center">
+                    <p class="text-white/40 text-sm font-bold">Loading…</p>
+                </div>
+            </div>
+        </div>`;
+
+    const modal = document.createElement('div');
+    modal.id = 'feed-game-modal';
+    modal.className = 'fixed inset-0 z-[200] flex flex-col bg-slate-950/95 backdrop-blur-sm';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-label', isPuzzle ? 'Slide Puzzle' : 'Gig Quiz');
+
+    modal.innerHTML = `
+        <!-- Header -->
+        <div class="flex items-center justify-between px-5 pt-5 pb-3 flex-shrink-0">
+            <div>
+                <p class="text-[9px] font-black uppercase tracking-widest text-white/40">
+                    ${isPuzzle ? 'Fancy a break?' : 'Test your knowledge'}
+                </p>
+                <h2 class="text-xl font-black italic uppercase tracking-tighter text-white leading-none">
+                    ${isPuzzle ? 'Slide Puzzle' : 'Gig Quiz'}
+                </h2>
+            </div>
+            <button id="feed-game-modal-close"
+                    class="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors"
+                    aria-label="Close">
+                <i data-lucide="x" class="w-4 h-4 text-white" aria-hidden="true"></i>
+            </button>
+        </div>
+        <!-- Game area -->
+        <div class="flex-1 overflow-y-auto px-5 pb-8 flex flex-col">
+            ${gameInnerHtml}
+        </div>`;
+
+    document.body.appendChild(modal);
+    if (window.lucide) lucide.createIcons();
+
+    // Close handlers
+    const close = () => {
+        modal.remove();
+    };
+    document.getElementById('feed-game-modal-close').addEventListener('click', close);
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) close();
+    });
+
+    // Wire "New puzzle" button via module-scoped import (avoids window dependency)
+    if (isPuzzle) {
+        document.getElementById('feed-puzzle-new')?.addEventListener('click', () => startNewPuzzle());
+    }
+
+    // Keyboard: Escape closes
+    const onKeyDown = (e) => {
+        if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKeyDown); }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    modal.addEventListener('remove', () => document.removeEventListener('keydown', onKeyDown));
+
+    // Launch the game — next tick to ensure DOM is ready
+    requestAnimationFrame(() => {
+        if (isPuzzle) {
+            startNewPuzzle();
+        } else {
+            window.initQuiz?.();
+        }
+    });
+};
+
 /**
  * Renders the expanded detail panel inside an Artist Story card.
  * Shows a mini-timeline of all shows with that artist.
@@ -586,6 +750,8 @@ export async function init(journalData, performanceData, _ignored = []) {
                 resolveHeroImage(card.gig, imgEl, i);
             }
         });
+        // Game tile is not cached — always re-render it
+        renderGameCard(container, journalData);
         return;
     }
 
@@ -603,6 +769,9 @@ export async function init(journalData, performanceData, _ignored = []) {
 
     const html = cards.map((card, i) => renderCard(card, i)).join('');
     container.innerHTML = html;
+
+    // Always append the game invite tile after the main cards
+    renderGameCard(container, journalData);
 
     // Cache HTML skeleton + card metadata (gig details needed to re-resolve images)
     sessionStorage.setItem(cacheKey, html);

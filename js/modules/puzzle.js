@@ -71,42 +71,56 @@ export class GigPuzzle {
         const moves    = this.moves;
         const timeSecs = Math.round((Date.now() - this.startTime) / 1000);
 
-        // Track and save score
         window.track?.('puzzle_solved', { moves, time_seconds: timeSecs, grid: this.size });
-        this._savePuzzleScore(moves);
 
+        // Render immediately — record badge slot starts empty, filled once save resolves
         this.container.innerHTML = `
             <div class="col-span-4 flex flex-col items-center justify-center h-full text-center p-6 gap-4">
                 <p class="text-4xl">🎉</p>
                 <p class="text-white font-black italic uppercase tracking-tighter text-xl">Memory Restored!</p>
                 <p class="text-white/60 text-xs font-bold uppercase tracking-widest">Solved in ${moves} moves · ${timeSecs}s</p>
-                <button onclick="window.startNewPuzzle()"
+                <p id="puzzle-record-badge" class="text-xs font-black uppercase tracking-widest text-amber-400 min-h-[1em]"></p>
+                <button id="puzzle-new-btn"
                         class="mt-2 bg-indigo-500 hover:bg-indigo-600 text-white px-6 py-2 rounded-full font-black uppercase text-xs tracking-widest transition-all active:scale-95">
                     New Puzzle
                 </button>
             </div>
         `;
+
+        // Wire new puzzle button via the module-scoped startNewPuzzle if available,
+        // falling back to window for contexts where games.js owns the reference.
+        const newBtn = document.getElementById('puzzle-new-btn');
+        if (newBtn) {
+            newBtn.addEventListener('click', () => {
+                if (typeof startNewPuzzle === 'function') startNewPuzzle();
+                else window.startNewPuzzle?.();
+            });
+        }
+
+        // Save async — update the badge once we know if it's a new record
+        this._savePuzzleScore(moves).then(isNewBest => {
+            const badge = document.getElementById('puzzle-record-badge');
+            if (badge && isNewBest) badge.textContent = '⭐ New record!';
+        });
     }
 
+    // Returns true if this solve set a new best_moves record.
     async _savePuzzleScore(moves) {
         const userId = window.currentUser?.id;
-        if (!userId) return;
+        if (!userId) return false;
         try {
-            const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm');
-            // Use the already-initialised supabase from the module
             const { supabase } = await import('./supabase.js');
 
-            // Upsert: increment total_solved, update best_moves if better
             const { data: existing } = await supabase
                 .from('puzzle_scores')
                 .select('total_solved, best_moves')
                 .eq('user_id', userId)
                 .single();
 
-            const newTotal = (existing?.total_solved || 0) + 1;
-            const newBest  = existing?.best_moves
-                ? Math.min(existing.best_moves, moves)
-                : moves;
+            const newTotal  = (existing?.total_solved || 0) + 1;
+            const prevBest  = existing?.best_moves ?? null;
+            const newBest   = prevBest !== null ? Math.min(prevBest, moves) : moves;
+            const isNewBest = prevBest === null || moves < prevBest;
 
             await supabase.from('puzzle_scores').upsert({
                 user_id:      userId,
@@ -115,7 +129,7 @@ export class GigPuzzle {
                 updated_at:   new Date().toISOString()
             }, { onConflict: 'user_id' });
 
-            // Check for puzzle achievement milestones
+            // Milestone toasts (these fire in addition to the record badge)
             if ([1, 5, 10, 25, 50].includes(newTotal)) {
                 window.showToast?.(
                     newTotal === 1
@@ -124,8 +138,11 @@ export class GigPuzzle {
                     'success', 5000
                 );
             }
+
+            return isNewBest;
         } catch (e) {
             console.debug('puzzle score save:', e);
+            return false;
         }
     }
 

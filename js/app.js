@@ -2,8 +2,8 @@
  * GigList Core Engine
  * v5.2.1 — 2026-05-02
  * -------------------------------------------------------------------
- * ✅ Fixed bug with band summary showing 0 giglist attendees
- * ✅ Added % of all shows attended by giglist user stat
+ * ✅ Added slide puzzle and quiz to end of feed
+ * ✅ Added quiz scores to DB instead of just session memory
  */
 
 import * as Data from './modules/data.js';
@@ -29,7 +29,7 @@ import { initProfile } from './modules/profile.js';
 import { initBandMode } from './modules/band.js';
 import { applyFilters, buildSummaryLine, hasActiveFilters } from './modules/filters.js';
 
-const APP_VERSION = "5.2.0";
+const APP_VERSION = "5.2.1";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
@@ -201,10 +201,14 @@ export async function initApp() {
     document.addEventListener('filtersChanged', _applyFiltersAndRender);
 
     // 1. Load Data
-    const data = await Data.loadAppData(currentUser);
+    // Performances are skipped here and loaded lazily after first paint (see deferred
+    // section below) so the home screen becomes interactive as fast as possible.
+    // Band mode: performances are also skipped here and loaded on-demand in band.js
+    // when the Summary tab is opened (the only consumer of performance data there).
+    const data = await Data.loadAppData(currentUser, { skipPerformances: true });
     window.currentUser = currentUser;
     window.journalData = data.journalData;
-    window.performanceData = data.performanceData;
+    window.performanceData = [];          // populated below once page is interactive
     window.filteredResults = [...data.journalData];
 
     // Set Mode Flags
@@ -330,9 +334,10 @@ export async function initApp() {
 
     initModeSwitcher(currentUser);
 
-    // Band mode — initialise tabs and fan data
+    // Band mode — initialise tabs and fan data.
+    // Performances are fetched on-demand in band.js when the Summary tab is opened.
     if (currentUser?.Type === 'Band') {
-        await initBandMode(currentUser, data.journalData, data.performanceData);
+        await initBandMode(currentUser, data.journalData, []);
     }
 
     // Buddies tab — personal mode only
@@ -376,14 +381,40 @@ export async function initApp() {
             });
     }
 
-    // ── Lazy Chart.js load ────────────────────────────────────────────────────
-    // Chart.js is no longer in <head> — load it in the background after the
-    // page is interactive, then render the dashboard charts for the first time.
-    // All subsequent refreshUI calls will find window.Chart already present.
-    window.ensureChartJs().then(() => {
-        const results = window.filteredResults || window.journalData || [];
-        renderDashboardCharts(results, window.performanceData || []);
-    }).catch(err => console.warn('Chart.js failed to load:', err));
+    // ── Deferred performance load + chart render ──────────────────────────────
+    // Performances are not needed for first paint. In personal mode we load them
+    // after the page is interactive via Data.loadPerformances() — the same
+    // normalise+enrich pipeline used inside loadAppData, so window.performanceData
+    // always has the correct shape for the gig modal, search, and charts.
+    //
+    // Chart.js and performances load in parallel; charts render once both resolve.
+    // Band mode: performances are handled entirely in band.js (on Summary tab open).
+    if (!window.isBandMode) {
+        const journalKeys = (data.journalData || [])
+            .map(g => g['Journal Key'])
+            .filter(Boolean);
+
+        const perfPromise = journalKeys.length
+            ? Data.loadPerformances(journalKeys, window.allVenues || {})
+                .then(rows => { window.performanceData = rows; })
+                .catch(err => console.warn('app.js: deferred performances load failed', err))
+            : Promise.resolve();
+
+        Promise.all([window.ensureChartJs(), perfPromise])
+            .then(() => {
+                const results = window.filteredResults || window.journalData || [];
+                renderDashboardCharts(results, window.performanceData || []);
+            })
+            .catch(err => console.warn('app.js: chart/performance load failed:', err));
+    } else {
+        // Band mode: still lazy-load Chart.js for any charts on the Shows tab
+        window.ensureChartJs()
+            .then(() => {
+                const results = window.filteredResults || window.journalData || [];
+                renderDashboardCharts(results, []);
+            })
+            .catch(err => console.warn('Chart.js failed to load:', err));
+    }
 
     // ── Clashfinder prefill ───────────────────────────────────────────────────
     const prefillType = params.get('prefill');
@@ -512,7 +543,7 @@ window.refreshUI = refreshUI;
 
 const _carousel = {
     intervalId:  null,
-    INTERVAL_MS: 3000,
+    INTERVAL_MS: 4000,
 
     start() {
         this.stop();
@@ -880,11 +911,22 @@ window.syncSetlistFm = async function() {
 
             if (journalInserted > 0) {
                 setTimeout(async () => {
-                    const data = await Data.loadAppData(currentUser);
+                    const data = await Data.loadAppData(currentUser, { skipPerformances: true });
                     window.journalData     = data.journalData;
-                    window.performanceData = data.performanceData;
+                    window.performanceData = [];
                     window.filteredResults = [...data.journalData];
                     refreshUI();
+
+                    // Re-fetch performances for the updated journal (fire-and-forget)
+                    const newKeys = (data.journalData || [])
+                        .map(g => g['Journal Key'])
+                        .filter(Boolean);
+                    if (newKeys.length) {
+                        Data.loadPerformances(newKeys, window.allVenues || {})
+                            .then(rows => { window.performanceData = rows; })
+                            .catch(err => console.warn('app.js: post-sync performance reload failed', err));
+                    }
+
                     window.showToast(journalInserted + ' shows synced from setlist.fm!', 'success');
                 }, 800);
             }

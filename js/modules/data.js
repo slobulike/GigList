@@ -73,7 +73,7 @@ export const sortGigs = (data, column, ascending = true) => {
  * A user with no shows gets 0 bytes for both. A heavy user gets only their
  * relevant slice rather than the entire global dataset.
  */
-export const loadAppData = async (user) => {
+export const loadAppData = async (user, { skipPerformances = false } = {}) => {
     const escapeHTMLAttr = (str) => {
         if (!str) return '';
         return str.replace(/'/g, "\\'").replace(/"/g, "&quot;");
@@ -156,10 +156,12 @@ export const loadAppData = async (user) => {
         return results.flatMap(r => r.data || []);
     }
 
-    const [perfRows, venueRows] = await Promise.all([
-        fetchPerformancesInBatches(journalKeys),
-        fetchVenuesInBatches(journalVenues),
-    ]);
+    const [perfRows, venueRows] = skipPerformances
+        ? [[], await fetchVenuesInBatches(journalVenues)]
+        : await Promise.all([
+            fetchPerformancesInBatches(journalKeys),
+            fetchVenuesInBatches(journalVenues),
+          ]);
 
     const venueRes = { data: venueRows };
 
@@ -238,8 +240,58 @@ export const loadAppData = async (user) => {
 };
 
 /**
- * Loads the venue lookup from Supabase.
+ * Loads, normalises, and enriches performance data for the given journal keys.
+ * Called lazily after first paint (personal mode) or on Summary tab open (band mode).
+ * Uses the same normalisation pipeline as loadAppData so window.performanceData
+ * has an identical shape regardless of which path populated it.
  *
+ * @param {string[]} journalKeys  - Array of journal_key values to fetch performances for
+ * @param {object}   venueLookup  - window.allVenues — used to enrich City/Country on each row
+ * @returns {Promise<object[]>}   - Normalised, enriched performance rows
+ */
+export const loadPerformances = async (journalKeys, venueLookup = {}) => {
+    if (!journalKeys.length) return [];
+
+    const CHUNK_SIZE = 100;
+    const chunks = [];
+    for (let i = 0; i < journalKeys.length; i += CHUNK_SIZE) {
+        chunks.push(journalKeys.slice(i, i + CHUNK_SIZE));
+    }
+
+    const results = await Promise.all(
+        chunks.map(chunk => supabase.from('performances').select('*').in('journal_key', chunk))
+    );
+
+    const errors = results.filter(r => r.error);
+    if (errors.length) throw new Error(`Failed to load performances: ${errors[0].error.message}`);
+
+    let rows = results.flatMap(r => r.data || []);
+
+    // Normalise snake_case → app-expected casing (mirrors loadAppData)
+    rows = rows.map(p => ({
+        ...p,
+        'Journal Key': p.journal_key    || p['Journal Key'] || '',
+        Artist:        p.artist         || p.Artist         || '',
+        Role:          p.role           || p.Role           || '',
+        Setlist:       p.setlist        || p.Setlist        || '',
+        OfficialVenue: p.official_venue || p.OfficialVenue  || '',
+        SetlistURL:    p.setlist_url    || p.SetlistURL      || '',
+    }));
+
+    // Enrich with venue City/Country (mirrors loadAppData)
+    rows.forEach(perf => {
+        const venueInfo = venueLookup[perf.OfficialVenue];
+        if (venueInfo) {
+            perf.City    = venueInfo.city    || '';
+            perf.Country = venueInfo.country || '';
+        }
+    });
+
+    return rows;
+};
+
+
+ /*
  * @param {string[]|null} officialVenues - Optional list of venue names to scope the fetch.
  *   Pass null (default) to fetch all venues — used by the editor's venue search and
  *   any other caller that needs the full table. loadAppData passes the user's journal
