@@ -1,10 +1,8 @@
 /**
  * GigList Core Engine
- * v5.1.3 — 2026-05-01
+ * v5.1.4 — 2026-05-02
  * -------------------------------------------------------------------
- * ✅ First improvements to Band Mode including natural language stats summary
- * ✅ Removed broken avatar link from band mode
- * ✅ Swapped "Rank" on Home screen for Items.
+ * ✅ Fixed band mode fans count and fans list
  */
 
 import * as Data from './modules/data.js';
@@ -30,7 +28,7 @@ import { initProfile } from './modules/profile.js';
 import { initBandMode } from './modules/band.js';
 import { applyFilters, buildSummaryLine, hasActiveFilters } from './modules/filters.js';
 
-const APP_VERSION = "5.1.1";
+const APP_VERSION = "5.1.4";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 

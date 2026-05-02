@@ -2,12 +2,17 @@
  * GigList — Band Mode Module
  * band.js
  * -------------------------------------------------------------------
- * Owns all band mode tab behaviour: Shows, Story, Fans.
+ * Owns all band mode tab behaviour: Shows, Summary, Fans.
  * Imported and called from app.js after data load when isBandMode.
  *
  * Public API (exposed on window):
  *   window.switchBandView(tab)   — switches active band tab
  *   window.bandShowsSearch(val)  — filters the Shows list
+ *
+ * Data model note:
+ *   journals.user_id = null  → imported via band-archive script (setlist.fm)
+ *   journals.user_id = <uuid> → logged by a real GigList user
+ * This distinction drives the "Shows Archived" vs "Fan Attendance" stats.
  */
 
 import { supabase }             from './supabase.js';
@@ -16,12 +21,13 @@ import * as Charts              from './charts.js';
 
 // ─── Module-level state ───────────────────────────────────────────────────────
 
-let _journalData     = [];
+let _journalData     = [];   // all shows for this band (archive + user-logged)
 let _performanceData = [];
 let _currentUser     = null;
 let _filteredShows   = [];
 let _buddyStatus     = {};   // userId -> 'accepted' | 'pending' | null
-
+let _fanCount          = null;  // unique fans (distinct user_ids), set by _loadBandStats
+let _fanAttendance     = null;  // total attended show-instances, set by _loadBandStats
 // ─── INIT ─────────────────────────────────────────────────────────────────────
 
 export async function initBandMode(currentUser, journalData, performanceData) {
@@ -39,8 +45,8 @@ export async function initBandMode(currentUser, journalData, performanceData) {
         _loadBuddyStatus().catch(err => console.warn('band.js: buddy status load failed', err));
     }
 
-    // Load fan count for stat strip (non-blocking)
-    _loadFanCount().catch(err => console.warn('band.js: fan count load failed', err));
+    // Load band stats for the stat strip (non-blocking)
+    _loadBandStats().catch(err => console.warn('band.js: band stats load failed', err));
 
     // Render hero image on the shows landing tab (non-blocking)
     _renderBandHero().catch(err => console.warn('band.js: hero render failed', err));
@@ -100,9 +106,8 @@ async function _renderBandHero() {
     const slug    = bandName.toLowerCase().replace(/[^a-z0-9]/g, '-');
     const initial = bandName.charAt(0).toUpperCase();
 
-    // Supabase public bucket URLs always resolve syntactically, even for missing objects
-    // (they return an error XML with 200 or redirect). The most reliable check is to
-    // attempt to load the image and watch for the onload/onerror event.
+    // Supabase public bucket URLs don't reliably 404 on missing objects —
+    // use Image() load/error events to test whether a URL resolves as a real image.
     const tryLoad = (url) => new Promise(resolve => {
         const img = new Image();
         img.onload  = () => resolve(url);
@@ -123,7 +128,7 @@ async function _renderBandHero() {
 
     if (photoUrl) {
         container.innerHTML = `
-            <div class="relative w-full h-52 overflow-hidden rounded-3xl shadow-sm -mx-0">
+            <div class="relative w-full h-52 overflow-hidden rounded-3xl shadow-sm">
                 <img src="${photoUrl}" alt="${bandName}"
                      class="absolute inset-0 w-full h-full object-cover">
                 <div class="absolute inset-0 bg-gradient-to-t from-black/65 via-black/15 to-transparent"></div>
@@ -193,6 +198,8 @@ function _renderBandShows() {
     const rows = sorted.map(g => {
         const typeClass = typeColors[g.Type] || typeColors['Headline'];
         const keyAttr   = g['Journal Key'] ? `data-key="${g['Journal Key']}"` : '';
+        // Shows with a real user_id were logged by a GigList user — show a subtle indicator
+        const hasUser   = g.user_id && g.user_id !== 'null';
         return `
             <tr class="border-t border-slate-100 hover:bg-indigo-50/30 cursor-pointer transition-colors"
                 onclick="window.viewGigDetails('${g['Journal Key']}')"
@@ -206,8 +213,17 @@ function _renderBandShows() {
                         ${g.Type || 'Headline'}
                     </span>
                 </td>
+                <td class="p-3 w-6 text-center">
+                    ${hasUser ? `<span title="Attended by a GigList user" class="text-[#189BCC] text-xs">♪</span>` : ''}
+                </td>
             </tr>`;
     }).join('');
+
+    // Footer note distinguishing archive vs user-logged
+    const userLoggedCount = sorted.filter(g => g.user_id && g.user_id !== 'null').length;
+    const footerNote = userLoggedCount > 0
+        ? `${sorted.length} show${sorted.length !== 1 ? 's' : ''} · ${userLoggedCount} attended by GigList fans`
+        : `${sorted.length} show${sorted.length !== 1 ? 's' : ''}`;
 
     container.innerHTML = `
         <div class="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
@@ -217,12 +233,13 @@ function _renderBandShows() {
                         <th class="w-24 p-3 text-[10px] font-black uppercase tracking-widest text-slate-400">Date</th>
                         <th class="p-3 text-[10px] font-black uppercase tracking-widest text-slate-400">Venue</th>
                         <th class="w-24 p-3 text-[10px] font-black uppercase tracking-widest text-slate-400">Type</th>
+                        <th class="w-6 p-3"></th>
                     </tr>
                 </thead>
                 <tbody>${rows}</tbody>
             </table>
         </div>
-        <p class="text-center text-[10px] text-slate-400 font-bold mt-3">${sorted.length} show${sorted.length !== 1 ? 's' : ''}</p>`;
+        <p class="text-center text-[10px] text-slate-400 font-bold mt-3">${footerNote}</p>`;
 
     if (window.lucide) lucide.createIcons();
 }
@@ -248,36 +265,34 @@ function _renderSummaryNarrative() {
         return;
     }
 
-    const totalShows = data.length;
+    // Split archive vs user-logged
+    const userLoggedShows = data.filter(g => g.user_id && g.user_id !== 'null');
+    const totalShows      = data.length;
 
     // Unique venues
     const venues     = new Set(data.map(g => g.OfficialVenue || g.Venue).filter(Boolean));
     const venueCount = venues.size;
 
-    // First and most recent logged show dates
-    const dates = data.map(g => parseDate(g.Date)).filter(Boolean).sort((a, b) => a - b);
-    const fmtDate = d => d
-        ? d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
-        : null;
-    const firstDate  = fmtDate(dates[0]);
-    const latestDate = fmtDate(dates[dates.length - 1]);
+    // First and most recent show dates
+    const dates     = data.map(g => parseDate(g.Date)).filter(Boolean).sort((a, b) => a - b);
+    const fmtDate   = d => d ? d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : null;
+    const firstDate = fmtDate(dates[0]);
+    const lastDate  = fmtDate(dates[dates.length - 1]);
 
-    // Fan count — read from the stat strip if already populated by _loadFanCount()
+    // Fan count from stat strip if already resolved
     const fanEl    = document.getElementById('stat-rank');
     const fanCount = (fanEl && fanEl.textContent && !isNaN(fanEl.textContent))
-        ? parseInt(fanEl.textContent, 10)
-        : null;
+        ? parseInt(fanEl.textContent, 10) : null;
 
-    const plural       = totalShows !== 1;
-    const venuePhrase  = venueCount > 1 ? `, across ${venueCount} venues` : '';
-    const fanPhrase    = fanCount   ? ` by ${fanCount} fan${fanCount !== 1 ? 's' : ''}` : '';
-    const firstPhrase  = firstDate  ? ` First logged show was ${firstDate}.` : '';
-    const latestPhrase = latestDate && latestDate !== firstDate ? ` Most recent was ${latestDate}.` : '';
+    const plural      = totalShows !== 1;
+    const venuePhrase = venueCount > 1 ? `, across ${venueCount} venues` : '';
+    const fanPhrase   = fanCount   ? ` by ${fanCount} GigList fan${fanCount !== 1 ? 's' : ''}` : '';
+    const firstPhrase = firstDate  ? ` First logged show: ${firstDate}.` : '';
+    const lastPhrase  = lastDate && lastDate !== firstDate ? ` Most recent: ${lastDate}.` : '';
 
-    const sentence = `${bandName} ${plural ? 'have' : 'has'} been logged ${totalShows} time${plural ? 's' : ''}${fanPhrase}${venuePhrase}.${firstPhrase}${latestPhrase}`;
+    const sentence = `${bandName} ${plural ? 'have' : 'has'} ${totalShows} show${plural ? 's' : ''} archived on GigList${venuePhrase}. ${userLoggedShows.length} ${userLoggedShows.length === 1 ? 'has' : 'have'} been attended${fanPhrase}.${firstPhrase}${lastPhrase}`;
 
-    container.innerHTML = `
-        <p class="text-sm font-bold text-slate-600 leading-relaxed">${sentence}</p>`;
+    container.innerHTML = `<p class="text-sm font-bold text-slate-600 leading-relaxed">${sentence}</p>`;
 }
 
 function _renderStoryStats() {
@@ -290,23 +305,26 @@ function _renderStoryStats() {
         return;
     }
 
+    // Fan count from stat strip
+    const fanEl    = document.getElementById('stat-rank');
+    const fanCount = (fanEl && fanEl.textContent && !isNaN(fanEl.textContent))
+        ? parseInt(fanEl.textContent, 10) : null;
+
     // Years active
     const years = data.map(g => {
         const parts = (g.Date || '').split('/');
         return parts.length === 3 ? parseInt(parts[2], 10) : null;
     }).filter(Boolean);
 
-    const minYear  = Math.min(...years);
-    const maxYear  = Math.max(...years);
-    const yearsSpan = maxYear - minYear;
-    const yearsLabel = minYear === maxYear
-        ? `${minYear}`
-        : `${minYear} – ${maxYear}`;
+    const minYear    = Math.min(...years);
+    const maxYear    = Math.max(...years);
+    const yearsSpan  = maxYear - minYear;
+    const yearsLabel = minYear === maxYear ? `${minYear}` : `${minYear} – ${maxYear}`;
 
     // Peak year
     const yearCounts = {};
     years.forEach(y => { yearCounts[y] = (yearCounts[y] || 0) + 1; });
-    const peakYear  = Object.entries(yearCounts).sort((a, b) => b[1] - a[1])[0];
+    const peakYear = Object.entries(yearCounts).sort((a, b) => b[1] - a[1])[0];
 
     // Most-played venue
     const venueCounts = {};
@@ -322,34 +340,35 @@ function _renderStoryStats() {
         .filter(Boolean)
         .sort((a, b) => a - b);
 
-    let longestGapDays = 0;
+    let longestGapDays  = 0;
     let longestGapLabel = '--';
     for (let i = 1; i < dates.length; i++) {
         const diff = Math.round((dates[i] - dates[i - 1]) / (1000 * 60 * 60 * 24));
         if (diff > longestGapDays) {
-            longestGapDays = diff;
+            longestGapDays  = diff;
             const y1 = dates[i - 1].getFullYear();
             const y2 = dates[i].getFullYear();
             longestGapLabel = y1 === y2 ? `${y1}` : `${y1}–${y2}`;
         }
     }
 
-    // Fan count — read from the stat strip (populated by _loadFanCount in initBandMode)
-    const fanEl    = document.getElementById('stat-rank');
-    const fanCount = (fanEl && fanEl.textContent && !isNaN(fanEl.textContent))
-        ? parseInt(fanEl.textContent, 10)
-        : null;
-
     const cards = [
         {
-            label: 'Shows Logged',
+            label: 'Shows Archived',
             value: data.length,
-            sub:   data.length === 1 ? 'by GigList fans' : 'by GigList fans',
+            sub:   'total on GigList',
+        },
+        {
+            label: 'Fan Attendance',
+            value: _fanAttendance ?? '--',
+            sub:   (_fanAttendance != null && data.length > 0)
+                       ? `${Math.round((_fanAttendance / data.length) * 100)}% of archived shows`
+                       : 'loading…',
         },
         {
             label: 'GigList Fans',
             value: fanCount ?? '--',
-            sub:   fanCount ? `fan${fanCount !== 1 ? 's' : ''} on GigList` : 'loading…',
+            sub:   fanCount != null ? `fan${fanCount !== 1 ? 's' : ''} logged shows` : 'loading…',
         },
         {
             label: 'Active Since',
@@ -408,26 +427,39 @@ function _renderStorySongsChart() {
     }
 }
 
+// ─── RLS NOTE — band mode queries ────────────────────────────────────────────
+// Direct Supabase queries from the browser run as the authenticated user and
+// are subject to RLS. The journals and profiles tables have user-scoped RLS
+// policies, so a plain .from('journals') in band mode only returns rows the
+// current viewer is permitted to see — not all fans of the band.
+//
+// Any band mode query that needs a cross-user view (fan lists, attendance
+// counts, profile lookups by id) MUST go through a SECURITY DEFINER RPC
+// function in Supabase, which runs as the function owner and bypasses RLS.
+//
+// Current RPCs:
+//   get_band_fans(band_name)       → journals rows for a band, all users
+//   get_profiles_by_ids(user_ids)  → public profile fields for an id array
+//
+// Do NOT replace these with direct table queries, even if they look simpler.
+// ─────────────────────────────────────────────────────────────────────────────
+
 // ─── FANS TAB ─────────────────────────────────────────────────────────────────
 
 async function _renderBandFans() {
     const container = document.getElementById('band-fans-list');
     if (!container) return;
 
-    // Show loading skeleton
     const loadingEl = document.getElementById('band-fans-loading');
     if (loadingEl) loadingEl.classList.remove('hidden');
 
     try {
         const bandName = window.currentArtist;
 
-        // Step 1: get all journal rows for this band (user_id + date).
-        // Filter null user_id at DB level — these are orphaned pre-auth imports.
+        // Fetch all journal rows for this band that have a real user_id.
+        // Rows with null user_id are band-archive imports (setlist.fm), not user accounts.
         const { data: fanRows, error: fanErr } = await supabase
-            .from('journals')
-            .select('user_id, date')
-            .eq('band', bandName)
-            .not('user_id', 'is', null);
+            .rpc('get_band_fans', { band_name: bandName });
 
         if (fanErr) throw fanErr;
         if (!fanRows || !fanRows.length) {
@@ -435,8 +467,8 @@ async function _renderBandFans() {
             return;
         }
 
-        // Aggregate show counts + earliest show per user in JS
-        const countMap    = {};
+        // Aggregate show counts + earliest show per user
+        const countMap     = {};
         const firstShowMap = {};
 
         fanRows.forEach(r => {
@@ -449,32 +481,39 @@ async function _renderBandFans() {
         });
 
         const userIds = Object.keys(countMap);
+        if (!userIds.length) {
+            _renderFansEmpty(container);
+            return;
+        }
 
-        // Update stat strip
-        const rankEl  = document.getElementById('stat-rank');
-        const labelEl = document.getElementById('stat-fourth-label');
-        if (rankEl)  rankEl.textContent  = userIds.length;
-        if (labelEl) labelEl.textContent = 'Fans';
+        // Fetch profiles.
+        // Username is not a private fact — users are findable by username to send buddy
+        // requests — so profiles should be publicly readable. If RLS is restricting rows,
+        // the console log below will show the mismatch so it can be diagnosed in Supabase.
+        const { data: profileRows, error: profileErr } = await supabase
+            .rpc('get_profiles_by_ids', { user_ids: userIds });
 
-        // Step 2: fetch profiles.
-        // NOTE: RLS may restrict which profile rows come back — e.g. only the current user's
-        // own row plus accounts they follow/buddy. We handle missing rows gracefully below
-        // so fans whose profiles are RLS-filtered still appear as anonymous tiles.
-        const { data: profileRows } = await supabase
-            .from('profiles')
-            .select('id, display_name, username, avatar_url')
-            .in('id', userIds);
+        if (profileErr) {
+            console.error('band.js: profiles query error', profileErr);
+        }
 
-        // Build a lookup of whatever profiles came back
+        console.log(
+            `band.js fans: ${userIds.length} user IDs from journals, ` +
+            `${(profileRows || []).length} profiles returned by query. ` +
+            `Missing: ${userIds.length - (profileRows || []).length}`
+        );
+
+        // Build a lookup of whatever came back
         const profileMap = {};
         (profileRows || []).forEach(p => { profileMap[p.id] = p; });
 
-        // Ensure buddy status is loaded before building CTAs
+        // Ensure buddy status is ready before building CTAs
         if (_currentUser?.isAuthUser) {
             await _loadBuddyStatus();
         }
 
-        // Build fan list — create stub entries for any userId not returned by profiles query
+        // Build fan list. Any uid whose profile was RLS-filtered gets a stub entry
+        // so they still appear as a tile rather than being silently dropped.
         const fans = userIds.map(uid => {
             const p = profileMap[uid] || { id: uid, display_name: null, username: null, avatar_url: null };
             return {
@@ -484,24 +523,16 @@ async function _renderBandFans() {
             };
         });
 
-        // Sort: buddies first, then by show count desc, then earliest fan on tie
+        // Sort: buddies first, then show count desc, then earliest fan on tie
         fans.sort((a, b) => {
-            const aStatus = _buddyStatus[a.id];
-            const bStatus = _buddyStatus[b.id];
-            const aIsBuddy = aStatus === 'accepted' ? 0 : 1;
-            const bIsBuddy = bStatus === 'accepted' ? 0 : 1;
+            const aIsBuddy = _buddyStatus[a.id] === 'accepted' ? 0 : 1;
+            const bIsBuddy = _buddyStatus[b.id] === 'accepted' ? 0 : 1;
             if (aIsBuddy !== bIsBuddy) return aIsBuddy - bIsBuddy;
             if (b.showCount !== a.showCount) return b.showCount - a.showCount;
             if (a.firstShow && b.firstShow) return a.firstShow - b.firstShow;
             return 0;
         });
 
-        if (!fans.length) {
-            _renderFansEmpty(container);
-            return;
-        }
-
-        // Hide skeleton and render tiles
         if (loadingEl) loadingEl.classList.add('hidden');
         container.innerHTML = fans.map(fan => _fanTileHTML(fan)).join('');
 
@@ -520,21 +551,18 @@ async function _renderBandFans() {
 function _fanTileHTML(fan) {
     const viewerId    = _currentUser?.id;
     const isViewer    = fan.id === viewerId;
-    // display_name/username may be null if the profile was RLS-filtered
+    // display_name/username may be null if the profile row was RLS-filtered
     const displayName = fan.display_name || fan.username || null;
     const label       = displayName || 'GigList Fan';
     const initials    = displayName ? displayName.slice(0, 2).toUpperCase() : '♪';
 
-    // Avatar: use avatar_url if present, else initials circle
     const avatarHTML = fan.avatar_url
         ? `<img src="${fan.avatar_url}" alt="" class="w-12 h-12 rounded-full object-cover ring-2 ring-white flex-shrink-0">`
         : `<div class="w-12 h-12 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center text-sm font-black flex-shrink-0">${initials}</div>`;
 
-    // First show year
-    const firstShowYear = fan.firstShow ? fan.firstShow.getFullYear() : null;
+    const firstShowYear  = fan.firstShow ? fan.firstShow.getFullYear() : null;
     const firstShowLabel = firstShowYear ? `Fan since ${firstShowYear}` : '';
 
-    // Buddy CTA
     const ctaHTML = _buddyCTA(fan.id, isViewer, label);
 
     return `
@@ -575,7 +603,7 @@ function _buddyCTA(userId, isViewer, displayName) {
         return `<span class="text-[9px] font-black uppercase tracking-widest text-slate-400">Requested</span>`;
     }
 
-    // No relationship — show Send Request button
+    // No relationship — show Connect button
     return `<button
                 onclick="window._sendBandBuddyRequest('${userId}', '${displayName.replace(/'/g, "\\'")}', this)"
                 class="text-[9px] font-black uppercase tracking-widest text-white bg-indigo-600 hover:bg-indigo-700 active:scale-95 transition-all px-3 py-1.5 rounded-full">
@@ -618,7 +646,6 @@ window._sendBandBuddyRequest = async (addresseeId, displayName, btn) => {
 
         if (error) throw error;
 
-        // Optimistically update local state and re-render button
         _buddyStatus[addresseeId] = 'pending';
         btn.outerHTML = `<span class="text-[9px] font-black uppercase tracking-widest text-slate-400">Requested</span>`;
 
@@ -633,29 +660,27 @@ window._sendBandBuddyRequest = async (addresseeId, displayName, btn) => {
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 
-async function _loadFanCount() {
+async function _loadBandStats() {
     const bandName = window.currentArtist;
     if (!bandName) return;
 
-    // Count distinct users who have any journal entry for this band
     const { data: rows } = await supabase
-        .from('journals')
-        .select('user_id')
-        .eq('band', bandName);
+        .rpc('get_band_fans', { band_name: bandName });
 
     if (!rows) return;
 
-    const uniqueCount = new Set(rows.map(r => r.user_id).filter(id => id && id !== 'null')).size;
+    const fanIds       = new Set(rows.map(r => r.user_id).filter(id => id && id !== 'null'));
+    _fanCount          = fanIds.size;
+    _fanAttendance     = rows.filter(r => r.user_id && r.user_id !== 'null').length;
+
     const rankEl  = document.getElementById('stat-rank');
     const labelEl = document.getElementById('stat-fourth-label');
-    if (rankEl)  rankEl.textContent  = uniqueCount;
+    if (rankEl)  rankEl.textContent  = _fanCount;
     if (labelEl) labelEl.textContent = 'Fans';
 }
 
 async function _loadBuddyStatus() {
     const id = _currentUser?.id;
-    // Guard against JS null, undefined, or the string "null" that can appear
-    // when session?.user?.id is nullish and gets coerced during object spread
     if (!id || id === 'null' || id === 'undefined') return;
 
     const { data: rows } = await supabase
