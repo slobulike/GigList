@@ -290,7 +290,8 @@ function _renderSummaryNarrative() {
     const firstPhrase = firstDate  ? ` First logged show: ${firstDate}.` : '';
     const lastPhrase  = lastDate && lastDate !== firstDate ? ` Most recent: ${lastDate}.` : '';
 
-    const sentence = `${bandName} ${plural ? 'have' : 'has'} ${totalShows} show${plural ? 's' : ''} archived on GigList${venuePhrase}. ${userLoggedShows.length} ${userLoggedShows.length === 1 ? 'has' : 'have'} been attended${fanPhrase}.${firstPhrase}${lastPhrase}`;
+    const attendedCount = _fanAttendance ?? userLoggedShows.length;
+    const sentence = `${bandName} ${plural ? 'have' : 'has'} ${totalShows} show${plural ? 's' : ''} archived on GigList${venuePhrase}. ${attendedCount} ${attendedCount === 1 ? 'has' : 'have'} been attended${fanPhrase}.${firstPhrase}${lastPhrase}`;
 
     container.innerHTML = `<p class="text-sm font-bold text-slate-600 leading-relaxed">${sentence}</p>`;
 }
@@ -361,8 +362,15 @@ function _renderStoryStats() {
         {
             label: 'Fan Attendance',
             value: _fanAttendance ?? '--',
+            sub:   _fanAttendance != null ? `show${_fanAttendance !== 1 ? 's' : ''} attended by fans` : 'loading…',
+        },
+        {
+            label: 'GigList Reach',
+            value: (_fanAttendance != null && data.length > 0)
+                       ? `${Math.round((_fanAttendance / data.length) * 100)}%`
+                       : '--',
             sub:   (_fanAttendance != null && data.length > 0)
-                       ? `${Math.round((_fanAttendance / data.length) * 100)}% of archived shows`
+                       ? 'of archived shows attended'
                        : 'loading…',
         },
         {

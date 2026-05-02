@@ -1,8 +1,9 @@
 /**
  * GigList Core Engine
- * v5.2.0 — 2026-05-02
+ * v5.2.1 — 2026-05-02
  * -------------------------------------------------------------------
- * ✅ Added animation to home screen for stat counts and carousel
+ * ✅ Fixed bug with band summary showing 0 giglist attendees
+ * ✅ Added % of all shows attended by giglist user stat
  */
 
 import * as Data from './modules/data.js';
