@@ -675,8 +675,12 @@ async function _loadBandStats() {
 
     const rankEl  = document.getElementById('stat-rank');
     const labelEl = document.getElementById('stat-fourth-label');
-    if (rankEl)  rankEl.textContent  = _fanCount;
-    if (labelEl) labelEl.textContent = 'Fans';
+        // Animate in the fan count now we have it
+        if (rankEl) {
+            const { animateStatTo } = await import('./ui.js');
+            animateStatTo(rankEl, _fanCount);
+        }
+        if (labelEl) labelEl.textContent = 'Fans';
 }
 
 async function _loadBuddyStatus() {

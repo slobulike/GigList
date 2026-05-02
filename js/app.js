@@ -1,8 +1,8 @@
 /**
  * GigList Core Engine
- * v5.1.4 — 2026-05-02
+ * v5.2.0 — 2026-05-02
  * -------------------------------------------------------------------
- * ✅ Fixed band mode fans count and fans list
+ * ✅ Added animation to home screen for stat counts and carousel
  */
 
 import * as Data from './modules/data.js';
@@ -28,7 +28,7 @@ import { initProfile } from './modules/profile.js';
 import { initBandMode } from './modules/band.js';
 import { applyFilters, buildSummaryLine, hasActiveFilters } from './modules/filters.js';
 
-const APP_VERSION = "5.1.4";
+const APP_VERSION = "5.2.0";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
@@ -499,6 +499,44 @@ function refreshUI() {
 window.refreshUI = refreshUI;
 
 // ─── CAROUSEL ────────────────────────────────────────────────────────────────
+//
+// Auto-rotate: advances every 5 s. Pauses on hover. Any manual interaction
+// (tap/click on the half-tap zones or dots) resets the timer so the slide
+// doesn't immediately jump after a manual swipe.
+//
+// aria-live is set to 'off' by default so screen readers aren't spammed on
+// every auto-advance. It switches to 'polite' only while the carousel wrapper
+// has focus, so keyboard users get announcements when they navigate manually.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const _carousel = {
+    intervalId:  null,
+    INTERVAL_MS: 3000,
+
+    start() {
+        this.stop();
+        this.intervalId = setInterval(() => {
+            // Don't auto-advance past the CTA card
+            if (currentCarouselIndex < homeCarousel.length - 1) {
+                currentCarouselIndex++;
+                UI.renderCarouselItem(currentCarouselIndex, homeCarousel, window.journalData);
+            } else {
+                this.stop(); // reached end — no point looping to the CTA
+            }
+        }, this.INTERVAL_MS);
+    },
+
+    stop() {
+        if (this.intervalId) {
+            clearInterval(this.intervalId);
+            this.intervalId = null;
+        }
+    },
+
+    reset() {
+        this.start(); // stop + restart = reset timer
+    },
+};
 
 window.loadThrowback = (gigs) => {
     const today = new Date();
@@ -557,6 +595,32 @@ window.loadThrowback = (gigs) => {
 
     currentCarouselIndex = 0;
     UI.renderCarouselItem(currentCarouselIndex, homeCarousel, gigs);
+
+    // ── Auto-rotate setup ────────────────────────────────────────────────────
+    // Only start if there's more than one real slide
+    if (homeCarousel.length > 1) {
+        _carousel.start();
+
+        // Pause on hover — the carousel card is the `now-card` element.
+        // We attach once; if loadThrowback is called again (filter change etc.)
+        // the element is replaced so we re-attach naturally.
+        const card = document.getElementById('now-card');
+        if (card) {
+            card.addEventListener('mouseenter', () => _carousel.stop(),  { passive: true });
+            card.addEventListener('mouseleave', () => _carousel.start(), { passive: true });
+
+            // Accessibility: switch aria-live to polite while keyboard-focused
+            // so screen reader users hear slide changes when they navigate manually.
+            card.addEventListener('focusin',  () => {
+                card.setAttribute('aria-live', 'polite');
+                _carousel.stop();
+            }, { passive: true });
+            card.addEventListener('focusout', () => {
+                card.setAttribute('aria-live', 'off');
+                _carousel.start();
+            }, { passive: true });
+        }
+    }
 };
 
 window.rotateCarousel = (direction) => {
@@ -571,6 +635,7 @@ window.rotateCarousel = (direction) => {
     if (nextIndex >= 0 && nextIndex < homeCarousel.length) {
         currentCarouselIndex = nextIndex;
         UI.renderCarouselItem(currentCarouselIndex, homeCarousel, window.journalData);
+        _carousel.reset(); // manual swipe resets the 5 s timer
     }
 };
 

@@ -42,6 +42,59 @@ const safelyLoadImage = (imgElement, path, fallbackFn) => {
     imgElement.src = path;
 };
 
+// ─── STAT COUNT-UP ANIMATION ──────────────────────────────────────────────────
+// Animates a numeric element from its current displayed value to `target`.
+// Uses requestAnimationFrame with a Power2-out easing curve (~1.6s duration).
+// Skips animation if the user prefers reduced motion, or if the delta is tiny
+// (avoids flickering on filter-driven refreshes where the number barely changes).
+//
+// Usage: animateStatTo(element, 142)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const _statAnimations = new Map(); // el -> rafId, so concurrent calls cancel cleanly
+
+export const animateStatTo = (el, target) => {
+    if (!el) return;
+
+    const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const current = parseInt(el.innerText?.replace(/,/g, ''), 10) || 0;
+    const delta = Math.abs(target - current);
+
+    // Skip animation for tiny deltas or accessibility preference
+    if (prefersReduced || delta < 2) {
+        el.innerText = target.toLocaleString();
+        return;
+    }
+
+    // Cancel any in-flight animation on this element
+    if (_statAnimations.has(el)) {
+        cancelAnimationFrame(_statAnimations.get(el));
+    }
+
+    const DURATION = delta > 50 ? 1600 : 800; // shorter for small numbers
+    const start = performance.now();
+    const startVal = current;
+
+    const tick = (now) => {
+        const elapsed  = now - start;
+        const progress = Math.min(elapsed / DURATION, 1);
+        // Power2-out easing: decelerates into the final value
+        const eased    = 1 - Math.pow(1 - progress, 2);
+        const value    = Math.round(startVal + (target - startVal) * eased);
+
+        el.innerText = value.toLocaleString();
+
+        if (progress < 1) {
+            _statAnimations.set(el, requestAnimationFrame(tick));
+        } else {
+            el.innerText = target.toLocaleString(); // lock to exact value
+            _statAnimations.delete(el);
+        }
+    };
+
+    _statAnimations.set(el, requestAnimationFrame(tick));
+};
+
 /* --- DASHBOARD & TICKER --- */
 
 export const updateCurrentDate = () => {
@@ -98,20 +151,20 @@ export const updateStats = (data) => {
         }
 
     // 4. Batch Update DOM Elements
-    ['stat-total', 'dc-stat-gigs'].forEach(id => {
-        const el = document.getElementById(id);
-        if(el) el.innerText = counts.total.toLocaleString();
-    });
+        ['stat-total', 'dc-stat-gigs'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) animateStatTo(el, counts.total);
+        });
 
-    ['stat-venues', 'dc-stat-venues'].forEach(id => {
-        const el = document.getElementById(id);
-        if(el) el.innerText = counts.venues.toLocaleString();
-    });
+        ['stat-venues', 'dc-stat-venues'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) animateStatTo(el, counts.venues);
+        });
 
-    ['stat-artists', 'dc-stat-artists', 'stat-artist-count'].forEach(id => {
-        const el = document.getElementById(id);
-        if(el) el.innerText = counts.artists.toLocaleString();
-    });
+        ['stat-artists', 'dc-stat-artists', 'stat-artist-count'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) animateStatTo(el, counts.artists);
+        });
 };
 
 export const updateRank = (data) => {
@@ -119,14 +172,16 @@ export const updateRank = (data) => {
     const labelEl = document.getElementById('stat-fourth-label');
 
     if (window.isBandMode) {
-        if (labelEl) labelEl.textContent = 'Fans';
-        // Fan count is loaded async by band.js — start with --
-        if (rankEl) rankEl.textContent = '--';
-    } else {
-        if (labelEl) labelEl.textContent = 'Items';
-        const itemCount = (window._collectionItems || []).length;
-        if (rankEl) rankEl.textContent = itemCount > 0 ? itemCount : '--';
-    }
+            if (labelEl) labelEl.textContent = 'Fans';
+            if (rankEl) rankEl.textContent = '--';   // band.js sets this async — leave as-is
+        } else {
+            if (labelEl) labelEl.textContent = 'Items';
+            const itemCount = (window._collectionItems || []).length;
+            if (rankEl) {
+                if (itemCount > 0) animateStatTo(rankEl, itemCount);
+                else rankEl.textContent = '--';
+            }
+        }
 };
 
 
