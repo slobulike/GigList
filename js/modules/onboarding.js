@@ -39,8 +39,8 @@ export async function runOnboarding(currentUser) {
     // two modals don't fight for attention
     setTimeout(() => {
         window.openSettings?.();
-        const input = document.getElementById('setlistIdInput');
-        const hint  = document.getElementById('sync-status');
+        const input = document.getElementById('setlistIdInput-legacy');
+        const hint  = document.getElementById('sync-status-legacy');
         if (input) input.focus();
         if (hint) {
             hint.textContent = 'Welcome! Enter your setlist.fm username to import your full gig history.';
@@ -407,7 +407,7 @@ async function _acknowledgeCompanionTags(userId, journalKeys) {
  * and automatically when sync returns 0 results.
  */
 export function showNoSetlistTip() {
-    const hint = document.getElementById('sync-status');
+    const hint = document.getElementById('sync-status-legacy');
     if (!hint) return;
 
     hint.innerHTML = `

@@ -1,9 +1,10 @@
 /**
  * GigList Core Engine
- * v5.2.1 — 2026-05-02
+ * v5.2.2 — 2026-05-03
  * -------------------------------------------------------------------
- * ✅ Added slide puzzle and quiz to end of feed
- * ✅ Added quiz scores to DB instead of just session memory
+ * ✅ Reset carousel to first card when switching tabs
+ * ✅ Fixed filtering in Collection to apply to all views and stats
+ * ✅ Added "Show all" button to Collection
  */
 
 import * as Data from './modules/data.js';
@@ -667,15 +668,20 @@ window.rotateCarousel = (direction) => {
     if (nextIndex >= 0 && nextIndex < homeCarousel.length) {
         currentCarouselIndex = nextIndex;
         UI.renderCarouselItem(currentCarouselIndex, homeCarousel, window.journalData);
-        _carousel.reset(); // manual swipe resets the 5 s timer
+        _carousel.reset();
     }
+};
+
+window.resetCarousel = () => {
+    if (!homeCarousel || homeCarousel.length === 0) return;
+    currentCarouselIndex = 0;
+    UI.renderCarouselItem(currentCarouselIndex, homeCarousel, window.journalData);
+    if (homeCarousel.length > 1) _carousel.start();
 };
 
 // ─── VIEW SWITCHING ───────────────────────────────────────────────────────────
 
 window.switchView = (viewId) => {
-    // Profile view is accessed via openProfile(), not switchView()
-    // Redirect so carousel CTAs and other internal links don't break
     if (viewId === 'profile') {
         window.openProfile?.(null);
         return;
@@ -705,6 +711,10 @@ window.switchView = (viewId) => {
         activeNav.setAttribute('aria-current', 'page');
     }
 
+    if (viewId === 'home') {
+        window.resetCarousel?.();
+    }
+
     if (viewId === 'feed') {
         Feed.init(window.journalData || [], window.performanceData || []);
     }
@@ -712,7 +722,6 @@ window.switchView = (viewId) => {
     if (viewId === 'collection') {
         if (window._initCollection && window.currentUser) {
             window._initCollection(window.currentUser);
-            // Populate avatar initials in collection header
             const colInitials = document.getElementById('col-avatar-initials');
             if (colInitials) colInitials.textContent = (window.authDisplayName || 'U').slice(0, 2).toUpperCase();
         }

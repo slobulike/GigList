@@ -552,7 +552,7 @@ function _renderCollectionTab() {
         </div>` : '';
 
     container.innerHTML = `
-        ${_renderStatsBar(_items)}
+        ${_renderStatsBar(searched)}
 
         ${_renderBandStrip(_items)}
 
@@ -588,6 +588,22 @@ function _renderCollectionTab() {
             <div class="space-y-3">
                 ${memories.map(_renderMemoryCard).join('')}
             </div>
+        </div>` : ''}
+
+        <!-- All items — browse everything at once -->
+        ${artefacts.length > 0 ? `
+        <div class="mt-5">
+            <div class="h-0.5 rounded-full mb-5" style="background:linear-gradient(90deg,rgba(200,160,80,0.2),rgba(200,160,80,0.04))"></div>
+            <button onclick="window._colOpenDrillDown('all')"
+                    class="w-full flex items-center justify-between py-3 px-4 rounded-2xl border border-slate-200 bg-white hover:border-[#c8a050] hover:text-[#c8a050] transition-all active:scale-[0.99] group">
+                <span class="text-[10px] font-black uppercase tracking-widest text-slate-500 group-hover:text-[#c8a050] transition-colors flex items-center gap-2">
+                    <span>✦</span> All items
+                </span>
+                <span class="flex items-center gap-2 text-[9px] text-slate-400">
+                    ${artefacts.length} item${artefacts.length !== 1 ? 's' : ''}
+                    <i data-lucide="chevron-right" class="w-3.5 h-3.5" aria-hidden="true"></i>
+                </span>
+            </button>
         </div>` : ''}
     `;
 
@@ -685,8 +701,26 @@ function _renderDrillDown(subtype) {
     const panel = document.getElementById('col-drill-panel');
     if (!panel) return;
 
-    const allOfType  = _items.filter(i => i.subtype === subtype);
-    const label      = SUBTYPE_LABELS[subtype] || subtype;
+    // Apply the same band/curation/search filters that the main tab uses,
+    // so drilling into a category respects the active filter state.
+    const bandFiltered = _applyBandFilter(_items);
+    const curated      = _applyCuration(bandFiltered, _activeCuration);
+    const searched     = _searchQuery ? curated.filter(i =>
+        (i.title          || '').toLowerCase().includes(_searchQuery) ||
+        (i.body           || '').toLowerCase().includes(_searchQuery) ||
+        (i.label          || '').toLowerCase().includes(_searchQuery) ||
+        (i.artist_context || '').toLowerCase().includes(_searchQuery) ||
+        (i.provenance     || '').toLowerCase().includes(_searchQuery) ||
+        (i.signed_by      || '').toLowerCase().includes(_searchQuery) ||
+        (i.labels         || []).some(l => l.toLowerCase().includes(_searchQuery)) ||
+        (i.band_name      || '').toLowerCase().includes(_searchQuery)
+    ) : curated;
+
+    // 'all' pseudo-subtype shows every artefact (no subtype restriction)
+    const allOfType = subtype === 'all'
+        ? searched.filter(i => i.type === 'artefact')
+        : searched.filter(i => i.subtype === subtype);
+    const label = subtype === 'all' ? 'All Items' : (SUBTYPE_LABELS[subtype] || subtype);
 
     // Sub-filters for this type
     const formats = [...new Set(allOfType.map(i => i.format).filter(Boolean))];
@@ -733,7 +767,7 @@ function _renderDrillDown(subtype) {
 
         <!-- Sub-filter strip -->
         <div class="flex gap-2 overflow-x-auto px-4 py-3 border-b border-slate-100" style="scrollbar-width:none">
-            ${['all', 'has_story', 'signed', ...formats].map(f => {
+            ${['all', 'has_story', 'signed', ...(subtype === 'all' ? [] : formats)].map(f => {
                 const flabel = f === 'all' ? 'All' : f === 'has_story' ? 'Has story' : f === 'signed' ? 'Signed' : f;
                 return `<button onclick="window._colSetDrillFilter('${_esc(f)}')"
                                  class="flex-shrink-0 text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-full border transition-all whitespace-nowrap

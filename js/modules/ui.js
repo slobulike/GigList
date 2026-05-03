@@ -535,6 +535,17 @@ export const renderTable = (data) => {
     const tableContainer = document.getElementById('tableContainer');
     if (!tableContainer) return;
 
+    // Empty state
+    if (!data.length) {
+        tableContainer.innerHTML = `
+            <div class="text-center py-16 space-y-3">
+                <div class="text-5xl">🎟️</div>
+                <p class="text-sm font-black text-slate-700">No shows yet</p>
+                <p class="text-[11px] text-slate-400 leading-relaxed max-w-xs mx-auto">Add your first show, or sync your setlist.fm account to import your full history.</p>
+            </div>`;
+        return;
+    }
+
     const getArrow = (col) => {
         if (!window.currentSort || window.currentSort.column !== col) {
             return '<span class="opacity-20 ml-1 text-[8px]">↕</span>';
