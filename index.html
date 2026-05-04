@@ -15,210 +15,591 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,400;0,700;0,900;1,900&family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
+
     <style>
-        body { font-family: 'Inter', sans-serif; }
+        :root {
+            --indigo: #5B4FE8;
+            --indigo-dark: #3d32c4;
+            --slate-900: #0f172a;
+        }
+
+        * { -webkit-font-smoothing: antialiased; }
+
+        body {
+            font-family: 'Barlow', sans-serif;
+            background: #0a0a14;
+            min-height: 100dvh;
+            overflow-x: hidden;
+        }
+
+        .font-display {
+            font-family: 'Barlow Condensed', sans-serif;
+        }
+
+        /* ── Splash screen ──────────────────────────── */
+        #splash {
+            position: fixed;
+            inset: 0;
+            z-index: 50;
+            background: #0a0a14;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-end;
+            padding-bottom: env(safe-area-inset-bottom, 0px);
+            overflow: hidden;
+        }
+
+        /* Phone mockup carousel */
+        .phones-track {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 78%;
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+            gap: 16px;
+            padding-bottom: 0;
+            padding-top: 24px;
+        }
+
+        .phone-mock {
+            position: relative;
+            width: 150px;
+            flex-shrink: 0;
+            border-radius: 28px;
+            border: 2px solid rgba(255,255,255,0.12);
+            overflow: hidden;
+            box-shadow:
+                0 40px 80px rgba(0,0,0,0.8),
+                0 0 0 1px rgba(255,255,255,0.04) inset;
+            transform-origin: bottom center;
+            transition: transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+
+        .phone-mock img {
+            width: 100%;
+            height: 100%;
+            display: block;
+            object-fit: cover;
+            object-position: top;
+        }
+
+        /* Staggered heights — centre tall, sides shorter */
+        .phone-mock:nth-child(1) { height: 280px; transform: rotate(-6deg) translateX(20px); }
+        .phone-mock:nth-child(2) { height: 340px; transform: rotate(-2deg) translateX(8px); }
+        .phone-mock:nth-child(3) { height: 310px; transform: rotate(4deg) translateX(-12px); }
+
+        /* Glow under phones */
+        .phones-glow {
+            position: absolute;
+            bottom: 25%;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 320px;
+            height: 120px;
+            background: radial-gradient(ellipse, rgba(91,79,232,0.35) 0%, transparent 70%);
+            pointer-events: none;
+        }
+
+        /* Fade to dark at bottom */
+        .phones-fade {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 45%;
+            background: linear-gradient(to bottom, transparent 0%, #0a0a14 65%);
+            pointer-events: none;
+        }
+
+        /* ── Splash bottom content ──────────────────── */
+        .splash-bottom {
+            position: relative;
+            z-index: 10;
+            width: 100%;
+            max-width: 390px;
+            padding: 0 24px 40px;
+            text-align: center;
+        }
+
+        .logo-lockup {
+            margin-bottom: 20px;
+        }
+
+        .logo-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 52px;
+            height: 52px;
+            background: var(--indigo);
+            border-radius: 16px;
+            margin-bottom: 12px;
+            box-shadow: 0 8px 32px rgba(91,79,232,0.5);
+        }
+
+        .app-title {
+            font-family: 'Barlow Condensed', sans-serif;
+            font-weight: 900;
+            font-style: italic;
+            font-size: 52px;
+            letter-spacing: -1px;
+            line-height: 1;
+            color: #fff;
+            text-transform: uppercase;
+        }
+
+        .app-tagline {
+            font-size: 14px;
+            font-weight: 600;
+            color: rgba(255,255,255,0.45);
+            letter-spacing: 0.06em;
+            margin-top: 6px;
+        }
+
+        .social-proof {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(255,255,255,0.07);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 100px;
+            padding: 6px 14px 6px 10px;
+            font-size: 12px;
+            font-weight: 600;
+            color: rgba(255,255,255,0.6);
+            margin-bottom: 24px;
+        }
+
+        .social-proof .dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #4ade80;
+            box-shadow: 0 0 8px #4ade80;
+            flex-shrink: 0;
+        }
+
+        /* ── CTA buttons ─────────────────────────────── */
+        .btn-primary {
+            width: 100%;
+            padding: 18px 24px;
+            background: var(--indigo);
+            border: none;
+            border-radius: 20px;
+            color: #fff;
+            font-family: 'Barlow Condensed', sans-serif;
+            font-weight: 900;
+            font-style: italic;
+            font-size: 22px;
+            text-transform: uppercase;
+            letter-spacing: 0.02em;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            box-shadow: 0 8px 32px rgba(91,79,232,0.45);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+
+        .btn-primary:active { transform: scale(0.97); }
+        .btn-primary:hover { background: #6b60ee; }
+
+        .btn-secondary {
+            width: 100%;
+            padding: 16px 24px;
+            background: rgba(255,255,255,0.06);
+            border: 1.5px solid rgba(255,255,255,0.12);
+            border-radius: 20px;
+            color: rgba(255,255,255,0.75);
+            font-family: 'Barlow Condensed', sans-serif;
+            font-weight: 700;
+            font-size: 18px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .btn-secondary:active { transform: scale(0.97); }
+        .btn-secondary:hover { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2); }
+
+        .btn-sub {
+            font-size: 11px;
+            font-weight: 600;
+            color: rgba(255,255,255,0.3);
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            margin-top: 2px;
+        }
+
+        /* ── Auth / inner screens ────────────────────── */
+        #app-screens {
+            display: none;
+            min-height: 100dvh;
+            background: #f1f5f9;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }
+
+        #app-screens.visible {
+            display: flex;
+        }
+
+        .screen-card {
+            width: 100%;
+            max-width: 360px;
+        }
+
         .fade-in { animation: fadeIn 0.3s ease-out; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-        input:focus { outline: none; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        /* ── Auth form styles (carried over) ─────────── */
+        .auth-label {
+            display: block;
+            font-size: 10px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            color: var(--indigo);
+            margin-bottom: 6px;
+        }
+
+        .auth-input {
+            width: 100%;
+            background: #f8fafc;
+            border: 1.5px solid #e2e8f0;
+            border-radius: 16px;
+            padding: 12px 16px;
+            font-size: 14px;
+            font-weight: 600;
+            font-family: 'Barlow', sans-serif;
+            color: #1e293b;
+            transition: all 0.15s;
+            outline: none;
+        }
+
+        .auth-input:focus {
+            border-color: var(--indigo);
+            box-shadow: 0 0 0 3px rgba(91,79,232,0.12);
+        }
+
+        .auth-btn-primary {
+            width: 100%;
+            padding: 14px;
+            background: var(--indigo);
+            border: none;
+            border-radius: 16px;
+            color: #fff;
+            font-family: 'Barlow Condensed', sans-serif;
+            font-weight: 900;
+            font-style: italic;
+            font-size: 18px;
+            text-transform: uppercase;
+            letter-spacing: 0.02em;
+            cursor: pointer;
+            transition: all 0.15s;
+            box-shadow: 0 4px 20px rgba(91,79,232,0.35);
+        }
+
+        .auth-btn-primary:hover { background: var(--indigo-dark); }
+        .auth-btn-primary:active { transform: scale(0.98); }
+
+        .auth-divider {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin: 16px 0;
+        }
+
+        .auth-divider-line {
+            flex: 1;
+            height: 1px;
+            background: #e2e8f0;
+        }
+
+        .auth-divider-text {
+            font-size: 10px;
+            font-weight: 800;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
+        .back-btn {
+            font-size: 10px;
+            font-weight: 800;
+            color: var(--indigo);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 0;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        /* Splash entrance animation */
+        .phone-mock { opacity: 0; }
+        .phone-mock.revealed { opacity: 1; }
+
+        @keyframes phoneReveal {
+            from { opacity: 0; transform: rotate(var(--rot)) translateY(40px) translateX(var(--tx)); }
+            to   { opacity: 1; transform: rotate(var(--rot)) translateX(var(--tx)); }
+        }
+
+        .phone-mock:nth-child(1) { --rot: -6deg; --tx: 20px; }
+        .phone-mock:nth-child(2) { --rot: -2deg; --tx: 8px; }
+        .phone-mock:nth-child(3) { --rot: 4deg;  --tx: -12px; }
+
+        .phone-mock.animate-in {
+            animation: phoneReveal 0.9s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+        }
+
+        .splash-bottom { opacity: 0; transform: translateY(20px); transition: opacity 0.6s ease, transform 0.6s ease; }
+        .splash-bottom.visible { opacity: 1; transform: translateY(0); }
+
+        /* Shimmer on phones */
+        .phone-mock::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, rgba(255,255,255,0.08) 0%, transparent 50%);
+            pointer-events: none;
+            border-radius: inherit;
+        }
     </style>
 </head>
 
-<body class="bg-slate-50 flex flex-col items-center justify-center min-h-screen p-6">
+<body>
 
-<main class="w-full max-w-sm mx-auto space-y-8 pt-8" role="main">
+<!-- ═══════════════════════════════════════════════════════
+     SPLASH / LANDING SCREEN
+════════════════════════════════════════════════════════ -->
+<div id="splash">
 
-    <header class="text-center space-y-2">
-        <div class="inline-flex items-center justify-center w-20 h-20 bg-indigo-600 rounded-[2rem] shadow-xl shadow-indigo-200 mb-4 rotate-3" aria-hidden="true">
-            <span class="text-4xl">🎸</span>
+    <!-- Phone screenshots -->
+    <div class="phones-track">
+        <div class="phone-mock" id="phone1">
+            <!-- Home screen screenshot -->
+            <img src="assets/screenshots/home.png"
+                 onerror="this.parentElement.style.background='linear-gradient(160deg,#1e1b4b,#312e81)'; this.style.display='none'; this.parentElement.innerHTML += '<div style=\'padding:20px;color:rgba(255,255,255,0.3);font-size:11px;font-family:Barlow,sans-serif;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;text-align:center;margin-top:20px\'>311 GIGS<br><br>Next Show<br>Slam Dunk<br>19 days</div>'"
+                 alt="GigList home screen">
         </div>
-        <h1 class="text-5xl font-black italic tracking-tighter text-slate-900 uppercase">GIG LIST</h1>
-        <p id="instruction" class="text-slate-400 font-bold text-sm uppercase tracking-widest">Your Musical Journey</p>
-    </header>
-
-    <!-- Screen 1: Mode selection -->
-    <div id="screen-mode" class="space-y-4 fade-in">
-        <button onclick="window.showScreen('screen-auth')"
-                aria-label="Sign in to your personal archive"
-                class="w-full p-8 bg-white border-2 border-slate-100 rounded-[2.5rem] shadow-lg hover:border-indigo-500 transition-all text-center active:scale-[0.98]">
-            <span class="block text-2xl font-black uppercase italic">My Gig List</span>
-            <span class="block text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Personal Memories</span>
-        </button>
-
-        <button onclick="window.location.href='index.html?mode=Band'"
-                aria-label="Browse band archives — no sign in required"
-                class="w-full p-8 bg-slate-900 text-white rounded-[2.5rem] shadow-lg hover:ring-4 ring-indigo-500/20 transition-all text-center active:scale-[0.98]">
-            <span class="block text-2xl font-black uppercase italic">Band Mode</span>
-            <span class="block text-[10px] text-indigo-300 font-bold uppercase tracking-widest mt-1">Official Archives</span>
-        </button>
-    </div>
-
-    <!-- Screen 2: Band picker -->
-    <div id="screen-bands" class="hidden space-y-4 fade-in">
-        <button onclick="window.showScreen('screen-mode')" class="text-[10px] font-black text-indigo-600 uppercase tracking-widest flex items-center gap-1" aria-label="Back to mode selection">
-            &larr; Back
-        </button>
-        <div id="band-list" class="space-y-3" role="list" aria-live="polite">
-            <div class="animate-pulse space-y-3">
-                <div class="h-20 bg-slate-100 rounded-[2rem] w-full"></div>
-                <div class="h-20 bg-slate-100 rounded-[2rem] w-full"></div>
-            </div>
+        <div class="phone-mock" id="phone2">
+            <!-- Collection screenshot -->
+            <img src="assets/screenshots/collection.png"
+                 onerror="this.parentElement.style.background='linear-gradient(160deg,#1c1c2e,#2d2b4e)'; this.style.display='none'; this.parentElement.innerHTML += '<div style=\'padding:20px;color:rgba(255,255,255,0.3);font-size:11px;font-family:Barlow,sans-serif;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;text-align:center;margin-top:20px\'>COLLECTION<br><br>66 Items<br>Vinyl · CDs<br>Tapes</div>'"
+                 alt="GigList collection">
+        </div>
+        <div class="phone-mock" id="phone3">
+            <!-- Map screenshot -->
+            <img src="assets/screenshots/map.png"
+                 onerror="this.parentElement.style.background='linear-gradient(160deg,#0f2027,#203a43)'; this.style.display='none'; this.parentElement.innerHTML += '<div style=\'padding:20px;color:rgba(255,255,255,0.3);font-size:11px;font-family:Barlow,sans-serif;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;text-align:center;margin-top:20px\'>GIG MAP<br><br>Every venue<br>you\'ve ever<br>been to</div>'"
+                 alt="GigList map view">
         </div>
     </div>
 
-    <!-- Screen 3: Sign in -->
-    <div id="screen-auth" class="hidden space-y-5 fade-in">
-        <button onclick="window.showScreen('screen-mode')" class="text-[10px] font-black text-indigo-600 uppercase tracking-widest flex items-center gap-1" aria-label="Back to mode selection">
-            &larr; Back
-        </button>
+    <!-- Atmospheric glow -->
+    <div class="phones-glow"></div>
+    <div class="phones-fade"></div>
 
-        <div id="auth-error" class="hidden bg-red-50 border border-red-200 text-red-700 text-xs font-bold px-4 py-3 rounded-2xl" role="alert"></div>
+    <!-- Logo at top -->
+    <div style="position:absolute;top:0;left:0;right:0;z-index:20;text-align:center;padding:52px 24px 0;">
+        <div class="logo-icon" style="margin:0 auto 12px;">
+            <span style="font-size:26px">🎸</span>
+        </div>
+        <div class="app-title">Gig List</div>
+        <div class="app-tagline">Every show that shaped you</div>
+    </div>
 
-        <!-- Google OAuth button -->
-        <button id="btn-google"
-                aria-label="Sign in with Google"
-                class="w-full flex items-center justify-center gap-3 p-4 bg-white border-2 border-slate-200 rounded-2xl font-bold text-slate-700 hover:border-indigo-400 hover:text-indigo-700 transition-all active:scale-[0.98] shadow-sm">
-            <svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true">
-                <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
-                <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
-                <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
-                <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
-            </svg>
-            Continue with Google
-        </button>
-
-        <div class="flex items-center gap-3">
-            <div class="flex-1 h-px bg-slate-200"></div>
-            <span class="text-[10px] font-black text-slate-400 uppercase tracking-widest">or</span>
-            <div class="flex-1 h-px bg-slate-200"></div>
+    <!-- Bottom CTA area -->
+    <div class="splash-bottom" id="splashBottom">
+        <div class="social-proof" style="margin-top: 16px;">
+            <span class="dot"></span>
+            5,000+ shows already saved
         </div>
 
-        <!-- Email / password -->
-        <div class="space-y-3">
-            <div>
-                <label for="auth-email" class="block text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-2">Email</label>
-                <input type="email" id="auth-email"
-                       placeholder="you@giglist.app"
-                       autocomplete="email"
-                       class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 transition-all">
-            </div>
-            <div>
-                <label for="auth-password" class="block text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-2">Password</label>
-                <input type="password" id="auth-password"
-                       placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;"
-                       autocomplete="current-password"
-                       class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 transition-all">
-            </div>
-            <button id="btn-email-signin"
-                    class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black uppercase tracking-widest rounded-2xl transition-all active:scale-[0.98] text-sm">
-                Sign In
+        <button class="btn-primary" onclick="window.enterApp('screen-auth')">
+            Start My Gig List
+            <span style="font-size:18px; font-style:normal;">→</span>
+        </button>
+
+        <button class="btn-secondary" onclick="window.enterApp('screen-bands-splash')">
+            Browse Band Archives
+        </button>
+
+        <p class="btn-sub" style="margin-top:16px">No account needed to browse · Free to join</p>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     APP SCREENS (auth, signup, band picker etc)
+════════════════════════════════════════════════════════ -->
+<div id="app-screens">
+    <div class="screen-card">
+
+        <!-- Back to splash -->
+        <div style="text-align:center; margin-bottom:16px;">
+            <button onclick="window.backToSplash()" style="font-size:10px;font-weight:800;color:#5B4FE8;text-transform:uppercase;letter-spacing:0.1em;background:none;border:none;cursor:pointer;">
+                ← Back
             </button>
         </div>
 
-        <div class="text-center pt-2">
-            <button onclick="window.location.href='index.html?mode=Band'"
-                    class="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-slate-600 transition-colors">
-                Maybe Later &mdash; Browse Band Archives
-            </button>
-        </div>
-
-        <div class="text-center pt-2">
-            <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-2">No account yet?</p>
-            <button onclick="window.showScreen('screen-signup')"
-                    class="text-[10px] font-black text-indigo-500 uppercase tracking-widest hover:text-indigo-700 transition-colors">
-                Sign Up &rarr;
-            </button>
-        </div>
-    </div>
-
-    <!-- Screen 4: Sign up -->
-    <div id="screen-signup" class="hidden space-y-5 fade-in">
-        <button onclick="window.showScreen('screen-auth')" class="text-[10px] font-black text-indigo-600 uppercase tracking-widest flex items-center gap-1" aria-label="Back to sign in">
-            &larr; Back
-        </button>
-
-        <div class="text-center space-y-1">
-            <p class="text-sm font-black text-slate-800 uppercase tracking-tight">Create your account</p>
-            <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Your gig history awaits</p>
-        </div>
-
-        <div id="signup-error" class="hidden bg-red-50 border border-red-200 text-red-700 text-xs font-bold px-4 py-3 rounded-2xl" role="alert"></div>
-
-        <div class="space-y-3">
-            <div>
-                <label for="signup-username" class="block text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-2">Username</label>
-                <input type="text" id="signup-username"
-                       placeholder="e.g. TragicGurl"
-                       autocomplete="username"
-                       autocorrect="off"
-                       autocapitalize="off"
-                       spellcheck="false"
-                       class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 transition-all">
-                <p class="text-[10px] text-slate-400 mt-1.5 px-1">Use your setlist.fm username if you have one — it makes importing your history much easier.</p>
+        <!-- Logo -->
+        <div style="text-align:center;margin-bottom:28px;">
+            <div style="display:inline-flex;align-items:center;justify-content:center;width:72px;height:72px;background:#5B4FE8;border-radius:22px;margin-bottom:14px;box-shadow:0 8px 28px rgba(91,79,232,0.4);">
+                <span style="font-size:34px">🎸</span>
             </div>
-            <div>
-                <label for="signup-email" class="block text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-2">Email</label>
-                <input type="email" id="signup-email"
-                       placeholder="you@email.com"
-                       autocomplete="email"
-                       class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 transition-all">
-            </div>
-            <div>
-                <label for="signup-password" class="block text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-2">Password</label>
-                <input type="password" id="signup-password"
-                       placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;"
-                       autocomplete="new-password"
-                       class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 transition-all">
-            </div>
-            <button id="btn-signup"
-                    class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black uppercase tracking-widest rounded-2xl transition-all active:scale-[0.98] text-sm">
-                Create Account
+            <div style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-style:italic;font-size:44px;color:#0f172a;text-transform:uppercase;letter-spacing:-1px;line-height:1;">Gig List</div>
+            <div style="font-size:12px;font-weight:600;color:#94a3b8;letter-spacing:0.06em;margin-top:4px;">Every show that shaped you</div>
+        </div>
+
+        <!-- ── Screen: Auth ───────────────────── -->
+        <div id="screen-auth" class="hidden space-y-4 fade-in">
+            <div id="auth-error" class="hidden bg-red-50 border border-red-200 text-red-700 text-xs font-bold px-4 py-3 rounded-2xl" role="alert"></div>
+
+            <button id="btn-google"
+                    aria-label="Sign in with Google"
+                    style="width:100%;display:flex;align-items:center;justify-content:center;gap:12px;padding:14px 20px;background:#fff;border:1.5px solid #e2e8f0;border-radius:16px;font-family:'Barlow',sans-serif;font-weight:700;font-size:15px;color:#334155;cursor:pointer;transition:all 0.15s;box-shadow:0 1px 4px rgba(0,0,0,0.06);">
+                <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
+                    <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+                    <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+                    <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+                    <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+                </svg>
+                Continue with Google
             </button>
-        </div>
 
-        <p class="text-center text-[10px] text-slate-400 leading-relaxed">
-            By signing up you agree to keep it real —<br>this is a place for genuine gig memories.
-        </p>
-    </div>
-
-    <!-- Screen 5: Username picker (Google OAuth new users) -->
-    <div id="screen-username" class="hidden space-y-5 fade-in">
-        <div class="text-center space-y-1">
-            <p class="text-sm font-black text-slate-800 uppercase tracking-tight">One last thing</p>
-            <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Choose your username</p>
-        </div>
-
-        <div id="username-error" class="hidden bg-red-50 border border-red-200 text-red-700 text-xs font-bold px-4 py-3 rounded-2xl" role="alert"></div>
-
-        <div class="space-y-3">
-            <div>
-                <label for="oauth-username" class="block text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-2">Username</label>
-                <input type="text" id="oauth-username"
-                       placeholder="e.g. TragicGurl"
-                       autocomplete="username"
-                       autocorrect="off"
-                       autocapitalize="off"
-                       spellcheck="false"
-                       class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 transition-all">
-                <p class="text-[10px] text-slate-400 mt-1.5 px-1">Use your setlist.fm username if you have one.</p>
+            <div class="auth-divider">
+                <div class="auth-divider-line"></div>
+                <span class="auth-divider-text">or</span>
+                <div class="auth-divider-line"></div>
             </div>
-            <button id="btn-set-username"
-                    class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black uppercase tracking-widest rounded-2xl transition-all active:scale-[0.98] text-sm">
-                Let's Go
-            </button>
+
+            <div class="space-y-3">
+                <div>
+                    <label for="auth-email" class="auth-label">Email</label>
+                    <input type="email" id="auth-email" placeholder="you@giglist.app" autocomplete="email" class="auth-input">
+                </div>
+                <div>
+                    <label for="auth-password" class="auth-label">Password</label>
+                    <input type="password" id="auth-password" placeholder="••••••••" autocomplete="current-password" class="auth-input">
+                </div>
+                <button id="btn-email-signin" class="auth-btn-primary">Sign In</button>
+            </div>
+
+            <div style="text-align:center;padding-top:8px;display:flex;flex-direction:column;gap:8px;">
+                <button onclick="window.showScreen('screen-signup')" style="font-size:11px;font-weight:700;color:#5B4FE8;text-transform:uppercase;letter-spacing:0.08em;background:none;border:none;cursor:pointer;">
+                    No account yet? Sign up →
+                </button>
+                <button onclick="window.enterApp('screen-bands-splash')" style="font-size:10px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.08em;background:none;border:none;cursor:pointer;">
+                    Maybe later — browse band archives
+                </button>
+            </div>
         </div>
-    </div>
 
-    <!-- Loading screen -->
-    <div id="screen-loading" class="hidden text-center py-8 fade-in">
-        <div class="inline-block w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-4"></div>
-        <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Signing you in&hellip;</p>
-    </div>
+        <!-- ── Screen: Band picker ────────────── -->
+        <div id="screen-bands-splash" class="hidden space-y-4 fade-in">
+            <div style="text-align:center;margin-bottom:4px;">
+                <p style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:22px;text-transform:uppercase;color:#0f172a;letter-spacing:0.02em;">Band Archives</p>
+                <p style="font-size:11px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.08em;margin-top:2px;">No sign-in required</p>
+            </div>
+            <div id="band-list" class="space-y-3" role="list" aria-live="polite">
+                <div class="animate-pulse space-y-3">
+                    <div class="h-20 bg-slate-100 rounded-[2rem] w-full"></div>
+                    <div class="h-20 bg-slate-100 rounded-[2rem] w-full"></div>
+                    <div class="h-20 bg-slate-100 rounded-[2rem] w-full"></div>
+                </div>
+            </div>
+            <div style="text-align:center;padding-top:8px;">
+                <button onclick="window.showScreen('screen-auth')" style="font-size:11px;font-weight:700;color:#5B4FE8;text-transform:uppercase;letter-spacing:0.08em;background:none;border:none;cursor:pointer;">
+                    Sign in to track your own gigs →
+                </button>
+            </div>
+        </div>
 
-    <footer class="pt-4 text-center">
-        <p class="text-[10px] text-slate-300 font-black uppercase tracking-widest">&copy; 2026 Strictly GigList</p>
-    </footer>
-</main>
+        <!-- ── Screen: Sign up ────────────────── -->
+        <div id="screen-signup" class="hidden space-y-4 fade-in">
+            <button onclick="window.showScreen('screen-auth')" class="back-btn">← Back</button>
+
+            <div style="text-align:center;margin-bottom:4px;">
+                <p style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:22px;text-transform:uppercase;color:#0f172a;">Create Account</p>
+                <p style="font-size:11px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.08em;margin-top:2px;">Your gig history awaits</p>
+            </div>
+
+            <div id="signup-error" class="hidden bg-red-50 border border-red-200 text-red-700 text-xs font-bold px-4 py-3 rounded-2xl" role="alert"></div>
+
+            <div class="space-y-3">
+                <div>
+                    <label for="signup-username" class="auth-label">Username</label>
+                    <input type="text" id="signup-username" placeholder="e.g. TragicGurl"
+                           autocomplete="username" autocapitalize="off" spellcheck="false"
+                           class="auth-input">
+                    <p style="font-size:10px;color:#94a3b8;margin-top:6px;padding:0 4px;">Use your setlist.fm username if you have one — makes importing your history much easier.</p>
+                </div>
+                <div>
+                    <label for="signup-email" class="auth-label">Email</label>
+                    <input type="email" id="signup-email" placeholder="you@email.com" autocomplete="email" class="auth-input">
+                </div>
+                <div>
+                    <label for="signup-password" class="auth-label">Password</label>
+                    <input type="password" id="signup-password" placeholder="••••••••" autocomplete="new-password" class="auth-input">
+                </div>
+                <button id="btn-signup" class="auth-btn-primary">Create Account</button>
+            </div>
+
+            <p style="text-align:center;font-size:10px;color:#94a3b8;line-height:1.6;">
+                By signing up you agree to keep it real —<br>this is a place for genuine gig memories.
+            </p>
+        </div>
+
+        <!-- ── Screen: Username picker ────────── -->
+        <div id="screen-username" class="hidden space-y-4 fade-in">
+            <div style="text-align:center;">
+                <p style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:22px;text-transform:uppercase;color:#0f172a;">One Last Thing</p>
+                <p style="font-size:11px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.08em;margin-top:2px;">Choose your username</p>
+            </div>
+
+            <div id="username-error" class="hidden bg-red-50 border border-red-200 text-red-700 text-xs font-bold px-4 py-3 rounded-2xl" role="alert"></div>
+
+            <div class="space-y-3">
+                <div>
+                    <label for="oauth-username" class="auth-label">Username</label>
+                    <input type="text" id="oauth-username" placeholder="e.g. TragicGurl"
+                           autocomplete="username" autocapitalize="off" spellcheck="false"
+                           class="auth-input">
+                    <p style="font-size:10px;color:#94a3b8;margin-top:6px;padding:0 4px;">Use your setlist.fm username if you have one.</p>
+                </div>
+                <button id="btn-set-username" class="auth-btn-primary">Let's Go →</button>
+            </div>
+        </div>
+
+        <!-- ── Loading ────────────────────────── -->
+        <div id="screen-loading" class="hidden text-center py-8 fade-in">
+            <div style="display:inline-block;width:32px;height:32px;border:3px solid #e2e8f0;border-top-color:#5B4FE8;border-radius:50%;animation:spin 0.8s linear infinite;margin-bottom:12px;"></div>
+            <p style="font-size:10px;font-weight:800;color:#94a3b8;text-transform:uppercase;letter-spacing:0.1em;">Signing you in…</p>
+        </div>
+
+    </div>
+</div>
 
 <script type="module">
     import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
@@ -228,10 +609,11 @@
         'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFkbHp4aWh3c2tyZmNqcGJ0cmdqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2MTUwNDIsImV4cCI6MjA4OTE5MTA0Mn0.rSCjSNy6KvsjRTLyg6SprobSQA0PbxDHjbk8X75InpU'
     );
 
-    const SCREENS = ['screen-mode','screen-auth','screen-bands','screen-loading','screen-signup','screen-username'];
+    const AUTH_SCREENS = ['screen-auth','screen-bands-splash','screen-loading','screen-signup','screen-username'];
 
+    // Show/hide within the app-screens div
     window.showScreen = (id) => {
-        SCREENS.forEach(s => {
+        AUTH_SCREENS.forEach(s => {
             const el = document.getElementById(s);
             if (el) { el.classList.add('hidden'); el.classList.remove('fade-in'); }
         });
@@ -243,8 +625,38 @@
         }
     };
 
-    const showAuthError   = (msg) => { showFieldError('auth-error',     msg); window.showScreen('screen-auth'); };
-    const showSignupError = (msg) => { showFieldError('signup-error',   msg); };
+    // Transition from splash into a specific screen
+    window.enterApp = async (screen) => {
+        const splash = document.getElementById('splash');
+        const appScreens = document.getElementById('app-screens');
+
+        splash.style.transition = 'opacity 0.4s ease';
+        splash.style.opacity = '0';
+        splash.style.pointerEvents = 'none';
+
+        setTimeout(() => {
+            splash.style.display = 'none';
+            appScreens.classList.add('visible');
+            window.showScreen(screen);
+            if (screen === 'screen-bands-splash') loadBands();
+        }, 380);
+    };
+
+    // Go back to splash
+    window.backToSplash = () => {
+        const splash = document.getElementById('splash');
+        const appScreens = document.getElementById('app-screens');
+        appScreens.classList.remove('visible');
+        splash.style.display = 'flex';
+        splash.style.opacity = '0';
+        splash.style.pointerEvents = '';
+        void splash.offsetWidth;
+        splash.style.transition = 'opacity 0.3s ease';
+        splash.style.opacity = '1';
+    };
+
+    const showAuthError     = (msg) => { showFieldError('auth-error', msg);     window.showScreen('screen-auth'); };
+    const showSignupError   = (msg) => { showFieldError('signup-error', msg); };
     const showUsernameError = (msg) => { showFieldError('username-error', msg); };
 
     function showFieldError(id, msg) {
@@ -257,7 +669,6 @@
         if (el) el.classList.add('hidden');
     }
 
-    // ── Username validation ───────────────────────────────────────────────────
     function validateUsername(username) {
         if (!username) return 'Please choose a username.';
         if (username.length < 2) return 'Username must be at least 3 characters.';
@@ -266,26 +677,34 @@
         return null;
     }
 
-    // ── Create profile row ────────────────────────────────────────────────────
     async function createProfile(userId, username) {
         const { error } = await supabase.from('profiles').insert({
-            id:        userId,
+            id: userId,
             username,
             is_public: false,
         });
         return error;
     }
 
+    // ── Splash entrance animation ─────────────────────────────────────────────
+    function animateSplash() {
+        const phones = document.querySelectorAll('.phone-mock');
+        phones.forEach((p, i) => {
+            setTimeout(() => {
+                p.style.animation = `phoneReveal 0.9s cubic-bezier(0.22, 1, 0.36, 1) ${i * 80}ms forwards`;
+            }, 100 + i * 80);
+        });
+        setTimeout(() => {
+            document.getElementById('splashBottom').classList.add('visible');
+        }, 500);
+    }
+
     // ── Initialise ────────────────────────────────────────────────────────────
     (async () => {
-        window.showScreen('screen-loading');
-
         const mode = new URLSearchParams(window.location.search).get('mode');
         const { data: { session } } = await supabase.auth.getSession();
 
         if (session && mode !== 'Band') {
-            // Check if this authenticated user has a profile yet
-            // (Google OAuth users may have authed but not chosen a username)
             const { data: profile } = await supabase
                 .from('profiles')
                 .select('id')
@@ -293,8 +712,7 @@
                 .maybeSingle();
 
             if (!profile) {
-                // New Google OAuth user — needs to pick a username
-                window.showScreen('screen-username');
+                window.enterApp('screen-username');
                 return;
             }
 
@@ -303,40 +721,42 @@
         }
 
         if (mode === 'Band') {
-            await loadBands();
-            window.showScreen('screen-bands');
+            window.enterApp('screen-bands-splash');
         } else {
-            window.showScreen('screen-mode');
+            // Show splash with animation
+            animateSplash();
         }
     })();
 
     // ── Band list ─────────────────────────────────────────────────────────────
     async function loadBands() {
         const container = document.getElementById('band-list');
+        if (!container) return;
         const { data, error } = await supabase.from('bands').select('*').order('rank');
 
         if (error || !data?.length) {
-            container.innerHTML = '<p class="text-center text-slate-400 font-bold py-10">No band archives found.</p>';
+            container.innerHTML = '<p style="text-align:center;color:#94a3b8;font-weight:700;padding:40px 0;">No band archives found.</p>';
             return;
         }
 
         container.innerHTML = '';
         data.forEach(band => {
             const btn = document.createElement('button');
-            btn.className = "w-full p-6 bg-white border-2 border-white hover:border-indigo-100 shadow-sm hover:shadow-xl transition-all duration-300 rounded-[2rem] flex justify-between items-center group";
+            btn.className = "w-full";
+            btn.style.cssText = "width:100%;padding:20px 24px;background:#fff;border:1.5px solid #f1f5f9;border-radius:24px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;transition:all 0.2s;box-shadow:0 1px 4px rgba(0,0,0,0.05);text-align:left;";
             btn.setAttribute('aria-label', `Browse ${band.name} archive`);
             btn.innerHTML = `
-                <div class="flex flex-col items-start text-left">
-                    <span class="text-[10px] text-slate-400 font-black uppercase tracking-widest mb-1 group-hover:text-indigo-600 transition-colors">Band Archive</span>
-                    <span class="text-2xl font-black text-slate-900 tracking-tighter">${band.name}</span>
+                <div>
+                    <span style="display:block;font-size:10px;color:#94a3b8;font-weight:800;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:3px;">Band Archive</span>
+                    <span style="display:block;font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:22px;color:#0f172a;letter-spacing:-0.3px;">${band.name}</span>
                 </div>
-                <div class="bg-slate-50 group-hover:bg-indigo-600 w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-300" aria-hidden="true">
-                    <span class="text-slate-400 group-hover:text-white font-black">&rarr;</span>
+                <div style="width:40px;height:40px;background:#f1f5f9;border-radius:14px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                    <span style="color:#5B4FE8;font-weight:900;font-size:16px;">→</span>
                 </div>
             `;
-            btn.onclick = () => {
-                window.location.href = `vault.html?band=${encodeURIComponent(band.name)}`;
-            };
+            btn.onmouseenter = () => { btn.style.borderColor = '#c7d2fe'; btn.style.boxShadow = '0 4px 20px rgba(91,79,232,0.12)'; };
+            btn.onmouseleave = () => { btn.style.borderColor = '#f1f5f9'; btn.style.boxShadow = '0 1px 4px rgba(0,0,0,0.05)'; };
+            btn.onclick = () => { window.location.href = `vault.html?band=${encodeURIComponent(band.name)}`; };
             container.appendChild(btn);
         });
     }
@@ -351,145 +771,78 @@
         if (error) showAuthError('Google sign-in failed. Please try again.');
     });
 
-    // ── Email / password sign in ──────────────────────────────────────────────
+    // ── Email sign in ─────────────────────────────────────────────────────────
     const doEmailSignIn = async () => {
         const email    = document.getElementById('auth-email').value.trim();
         const password = document.getElementById('auth-password').value;
-
         if (!email || !password) { showAuthError('Please enter your email and password.'); return; }
-
         window.showScreen('screen-loading');
         const { error } = await supabase.auth.signInWithPassword({ email, password });
-
         if (error) {
-            showAuthError(
-                error.message === 'Invalid login credentials'
-                    ? 'Incorrect email or password. Please try again.'
-                    : error.message
-            );
+            showAuthError(error.message === 'Invalid login credentials'
+                ? 'Incorrect email or password. Please try again.'
+                : error.message);
             return;
         }
-
         window.location.href = 'vault.html';
     };
 
     document.getElementById('btn-email-signin').addEventListener('click', doEmailSignIn);
-    document.getElementById('auth-password').addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') doEmailSignIn();
-    });
+    document.getElementById('auth-password').addEventListener('keydown', (e) => { if (e.key === 'Enter') doEmailSignIn(); });
 
-    // ── Email / password sign up ──────────────────────────────────────────────
+    // ── Sign up ───────────────────────────────────────────────────────────────
     const doSignUp = async () => {
         clearError('signup-error');
-
         const username = document.getElementById('signup-username').value.trim();
         const email    = document.getElementById('signup-email').value.trim();
         const password = document.getElementById('signup-password').value;
-
-        // Validate username
         const usernameErr = validateUsername(username);
         if (usernameErr) { showSignupError(usernameErr); return; }
-
         if (!email)    { showSignupError('Please enter your email address.'); return; }
         if (!password) { showSignupError('Please choose a password.'); return; }
         if (password.length < 8) { showSignupError('Password must be at least 8 characters.'); return; }
-
         window.showScreen('screen-loading');
-
-        // Check username isn't already taken
-        const { data: existing } = await supabase
-            .from('profiles')
-            .select('id')
-            .ilike('username', username)
-            .maybeSingle();
-
-        if (existing) {
-            showSignupError('That username is already taken — please choose another.');
-            window.showScreen('screen-signup');
-            return;
-        }
-
-        // Create auth user
+        const { data: existing } = await supabase.from('profiles').select('id').ilike('username', username).maybeSingle();
+        if (existing) { showSignupError('That username is already taken — please choose another.'); window.showScreen('screen-signup'); return; }
         const { data: authData, error: authErr } = await supabase.auth.signUp({ email, password });
-        if (authErr) {
-            showSignupError(authErr.message);
-            window.showScreen('screen-signup');
-            return;
-        }
-
-        // Create profile row immediately
+        if (authErr) { showSignupError(authErr.message); window.showScreen('screen-signup'); return; }
         const profileErr = await createProfile(authData.user.id, username);
-        if (profileErr) {
-            // Profile creation failed — still signed in, but no profile
-            // Redirect to username picker as fallback
-            window.showScreen('screen-username');
-            return;
-        }
-
-        // Success — go straight to vault with ?new=true to trigger onboarding
+        if (profileErr) { window.showScreen('screen-username'); return; }
         window.location.href = 'vault.html?new=true';
     };
 
     document.getElementById('btn-signup').addEventListener('click', doSignUp);
-    document.getElementById('signup-password').addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') doSignUp();
-    });
+    document.getElementById('signup-password').addEventListener('keydown', (e) => { if (e.key === 'Enter') doSignUp(); });
 
     // ── OAuth username picker ─────────────────────────────────────────────────
     const doSetUsername = async () => {
         clearError('username-error');
-
         const username = document.getElementById('oauth-username').value.trim();
         const usernameErr = validateUsername(username);
         if (usernameErr) { showUsernameError(usernameErr); return; }
-
         window.showScreen('screen-loading');
-
         const { data: { session } } = await supabase.auth.getSession();
         if (!session?.user) { window.showScreen('screen-auth'); return; }
-
-        // Check username isn't taken
-        const { data: existing } = await supabase
-            .from('profiles')
-            .select('id')
-            .ilike('username', username)
-            .maybeSingle();
-
-        if (existing) {
-            showUsernameError('That username is already taken — please choose another.');
-            window.showScreen('screen-username');
-            return;
-        }
-
+        const { data: existing } = await supabase.from('profiles').select('id').ilike('username', username).maybeSingle();
+        if (existing) { showUsernameError('That username is already taken — please choose another.'); window.showScreen('screen-username'); return; }
         const profileErr = await createProfile(session.user.id, username);
-        if (profileErr) {
-            showUsernameError('Could not save username: ' + profileErr.message);
-            window.showScreen('screen-username');
-            return;
-        }
-
+        if (profileErr) { showUsernameError('Could not save username: ' + profileErr.message); window.showScreen('screen-username'); return; }
         window.location.href = 'vault.html?new=true';
     };
 
     document.getElementById('btn-set-username').addEventListener('click', doSetUsername);
-    document.getElementById('oauth-username').addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') doSetUsername();
-    });
+    document.getElementById('oauth-username').addEventListener('keydown', (e) => { if (e.key === 'Enter') doSetUsername(); });
 </script>
+
 <script>
     if ('serviceWorker' in navigator) {
-  // Using './sw.js' ensures it looks in the current folder,
-  // regardless of the domain name.
-  navigator.serviceWorker.register('./sw.js')
-    .then(reg => {
-      console.log('SW Registered with scope:', reg.scope);
-      // Now initialize your Push UI
-      if (typeof initPushUI === 'function') {
-        initPushUI(supabase);
-      }
-    })
-    .catch(err => console.error('SW Registration failed:', err));
-}
+        navigator.serviceWorker.register('./sw.js')
+            .then(reg => {
+                console.log('SW Registered with scope:', reg.scope);
+                if (typeof initPushUI === 'function') initPushUI(supabase);
+            })
+            .catch(err => console.error('SW Registration failed:', err));
+    }
 </script>
 </body>
 </html>

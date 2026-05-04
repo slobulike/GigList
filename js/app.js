@@ -1,9 +1,8 @@
 /**
  * GigList Core Engine
- * v5.2.3 — 2026-05-04
+ * v5.3.0 — 2026-05-04
  * -------------------------------------------------------------------
- * ✅ Onboarding and setlist sync consolidation of js into one flow
- * ✅ Fix so that Collection achievements load without needing to go to Collection tab
+ * ✅ Index page overhaul to include screenshots and dark styling
  */
 
 import * as Data from './modules/data.js';
@@ -30,7 +29,7 @@ import { initProfile } from './modules/profile.js';
 import { initBandMode } from './modules/band.js';
 import { applyFilters, buildSummaryLine, hasActiveFilters } from './modules/filters.js';
 
-const APP_VERSION = "5.2.3";
+const APP_VERSION = "5.3.0";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
