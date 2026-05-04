@@ -16,8 +16,7 @@
  */
 
 import { supabase } from './supabase.js';
-
-const WORKER_URL = 'https://setlistfm-proxy.richard-lipscombe.workers.dev';
+import { WORKER_URL } from './setlist-sync.js';
 
 // ─── Artist search ────────────────────────────────────────────────────────────
 

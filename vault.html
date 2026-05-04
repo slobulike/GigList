@@ -894,7 +894,25 @@
                     <div id="sync-progress" class="h-full bg-indigo-500 rounded-full transition-all duration-500" style="width:0%"></div>
                 </div>
                 <p id="sync-status" class="text-[10px] text-slate-400 mt-3 italic leading-relaxed">This will pull your full history, venues, and setlists.</p>
-                <button onclick="window.showNoSetlistTip()"
+
+                <div id="no-setlist-help-profile" class="hidden space-y-3 mt-3">
+                    <p class="text-sm text-slate-600 leading-relaxed">
+                        No setlist.fm account? Search your email for ticket confirmations to find the shows you've been to, then add them manually.
+                    </p>
+                    <div>
+                        <p class="text-xs font-black text-slate-500 uppercase tracking-widest mb-1.5">Try searching:</p>
+                        <code class="block bg-slate-100 text-slate-700 font-mono text-xs px-3 py-2 rounded-xl leading-relaxed">
+                            from:(TicketWeb OR Ticketmaster OR "See Tickets" OR Dice OR "Gigs &amp; Tours") "confirmation"
+                        </code>
+                    </div>
+                    <button onclick="window.openAddGigModal()"
+                            class="w-full mt-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-black rounded-2xl transition-all active:scale-95 uppercase tracking-widest">
+                        Add your first gig now →
+                    </button>
+                </div>
+
+                <button id="btn-no-setlist-account-profile"
+                        onclick="window.showNoSetlistTip()"
                         class="mt-2 text-[10px] font-black text-slate-400 hover:text-indigo-500 transition-colors uppercase tracking-widest">
                     I don't have a setlist.fm account &rarr;
                 </button>
@@ -1098,8 +1116,11 @@
         </div>
 
         <!-- NOTE: IDs below use -legacy suffix to avoid conflicts with profile screen.
-             TODO (step 3): update onboarding.js to reference these -legacy IDs,
-             then the profile screen becomes the single canonical source. -->
+             The sync button shim copies the value into the canonical #setlistIdInput
+             before calling syncSetlistFm(), which is the single source of truth for
+             the sync flow (reads #setlistIdInput / #sync-status / #sync-progress).
+             TODO (post-profile): refactor onboarding to call openSetlistSync() directly
+             and retire this modal. -->
         <div class="space-y-4">
             <div class="flex gap-2">
                 <label for="setlistIdInput-legacy" class="sr-only">setlist.fm username</label>
@@ -1109,23 +1130,94 @@
                        autocapitalize="off"
                        spellcheck="false"
                        class="flex-1 bg-slate-50 px-4 py-3 rounded-xl text-sm font-bold border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800">
-                <button onclick="window.syncSetlistFm()"
+                <button onclick="window._syncFromLegacyModal()"
                         aria-label="Run Sync"
                         class="bg-indigo-600 text-white px-4 py-3 rounded-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200">
                     <i data-lucide="refresh-cw" class="w-5 h-5"></i>
                 </button>
             </div>
-            <div class="hidden mt-3 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+            <!-- Progress bar: mirrors #sync-progress — driven by the same sync flow via the shim -->
+            <div id="sync-progress-legacy-wrap" class="hidden mt-3 h-1.5 bg-slate-200 rounded-full overflow-hidden">
                 <div id="sync-progress-legacy" class="h-full bg-indigo-500 rounded-full transition-all duration-500" style="width:0%"></div>
             </div>
-            <p id="sync-status-legacy" class="text-[10px] text-slate-400 mt-1 italic leading-relaxed">This will pull your full history, venues, and setlists.</p>
-            <button onclick="window.showNoSetlistTip()"
-                    class="mt-1 text-[10px] font-black text-slate-400 hover:text-indigo-500 transition-colors uppercase tracking-widest">
-                I don't have a setlist.fm account &rarr;
+            <p id="sync-status-legacy" class="text-sm text-slate-500 mt-1 italic leading-relaxed">Enter your setlist.fm username to import your full gig history — venues, setlists, the lot.</p>
+
+            <!-- No-account help block — toggled by showNoSetlistTip() -->
+            <div id="no-setlist-help" class="hidden space-y-3">
+                <p class="text-sm text-slate-600 leading-relaxed">
+                    No setlist.fm account? Search your email for ticket confirmations to find the shows you've been to, then add them manually.
+                </p>
+                <div>
+                    <p class="text-xs font-black text-slate-500 uppercase tracking-widest mb-1.5">Try searching:</p>
+                    <code class="block bg-slate-100 text-slate-700 font-mono text-xs px-3 py-2 rounded-xl leading-relaxed">
+                        from:(TicketWeb OR Ticketmaster OR "See Tickets" OR Dice OR "Gigs & Tours") "confirmation"
+                    </code>
+                </div>
+                <!-- CTA: add first gig manually -->
+                <button id="btn-add-first-gig-onboarding"
+                        onclick="window.closeSettings(); setTimeout(() => window.openAddGigModal(), 200);"
+                        class="w-full mt-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-black rounded-2xl transition-all active:scale-95 uppercase tracking-widest">
+                    Add your first gig now →
+                </button>
+                <!-- CTA: add something to collection -->
+                <button onclick="window.closeSettings(); setTimeout(() => window.openCollectionEditor(), 200);"
+                        class="w-full py-2.5 text-sm font-black text-slate-500 hover:text-amber-600 border border-slate-200 hover:border-amber-300 rounded-2xl transition-all active:scale-95">
+                    Or add something to your collection
+                </button>
+            </div>
+
+            <!-- "No account" trigger — hidden once tapped -->
+            <button id="btn-no-setlist-account"
+                    onclick="window.showNoSetlistTip()"
+                    class="mt-1 text-sm font-black text-slate-400 hover:text-indigo-500 transition-colors">
+                I don't have a setlist.fm account →
             </button>
         </div>
     </div>
 </div>
+
+<script>
+    /**
+     * Bridges the legacy onboarding modal to the canonical syncSetlistFm() function.
+     * syncSetlistFm() reads #setlistIdInput and updates #sync-status / #sync-progress.
+     * This shim copies the -legacy input value into the canonical input, runs the sync,
+     * then mirrors status/progress updates back so the legacy modal stays in sync.
+     */
+    window._syncFromLegacyModal = function () {
+        const legacyInput  = document.getElementById('setlistIdInput-legacy');
+        const canonInput   = document.getElementById('setlistIdInput');
+        const legacyStatus = document.getElementById('sync-status-legacy');
+        const canonStatus  = document.getElementById('sync-status');
+        const legacyProgWrap = document.getElementById('sync-progress-legacy-wrap');
+        const legacyProg   = document.getElementById('sync-progress-legacy');
+        const canonProg    = document.getElementById('sync-progress');
+
+        if (!legacyInput || !canonInput) return;
+
+        // Copy value so syncSetlistFm() picks it up
+        canonInput.value = (legacyInput.value || '').trim();
+
+        // Mirror canonical status text into legacy modal while modal is open
+        const mirrorInterval = setInterval(() => {
+            if (!document.getElementById('settingsModal')?.classList.contains('hidden')) {
+                if (canonStatus && legacyStatus && canonStatus.textContent !== legacyStatus.textContent) {
+                    legacyStatus.textContent = canonStatus.textContent;
+                }
+                if (canonProg && legacyProg) {
+                    const w = canonProg.style.width;
+                    if (w && w !== '0%') {
+                        legacyProgWrap?.classList.remove('hidden');
+                        legacyProg.style.width = w;
+                    }
+                }
+            } else {
+                clearInterval(mirrorInterval);
+            }
+        }, 300);
+
+        window.syncSetlistFm?.();
+    };
+</script>
 
 <svg style="position: absolute; width: 0; height: 0;">
     <filter id="crinkle-effect">

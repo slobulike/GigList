@@ -1,10 +1,9 @@
 /**
  * GigList Core Engine
- * v5.2.2 — 2026-05-03
+ * v5.2.3 — 2026-05-04
  * -------------------------------------------------------------------
- * ✅ Reset carousel to first card when switching tabs
- * ✅ Fixed filtering in Collection to apply to all views and stats
- * ✅ Added "Show all" button to Collection
+ * ✅ Onboarding and setlist sync consolidation of js into one flow
+ * ✅ Fix so that Collection achievements load without needing to go to Collection tab
  */
 
 import * as Data from './modules/data.js';
@@ -21,7 +20,8 @@ import { GigPuzzle } from './modules/puzzle.js';
 import { initEditor, exportCSV } from './modules/editor.js';
 import { supabase } from './modules/supabase.js';
 import { runSetlistSync } from './modules/setlist-sync.js';
-import { runOnboarding, checkCompanionTags, handleZeroSyncResult } from './modules/onboarding.js';
+import { runOnboarding, checkCompanionTags } from './modules/onboarding.js';
+import { handleZeroSyncResult } from './modules/setlist-sync.js';
 import { initSocial, checkGigOverlap, rebuildSwitcherPanel, resolveCompanionTags } from './modules/social.js';
 import { initModeSwitcher } from './modules/switcher.js';
 import * as Feed from './modules/feed.js';
@@ -30,7 +30,7 @@ import { initProfile } from './modules/profile.js';
 import { initBandMode } from './modules/band.js';
 import { applyFilters, buildSummaryLine, hasActiveFilters } from './modules/filters.js';
 
-const APP_VERSION = "5.2.1";
+const APP_VERSION = "5.2.3";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
@@ -365,23 +365,23 @@ export async function initApp() {
         }
     }
 
-    // ── Eager collection item count ───────────────────────────────────────────
-    // Fetch just the count so the Items stat tile is populated on first load,
-    // before the user visits the Collection tab. Fire-and-forget.
+    // ── Eager collection fetch ────────────────────────────────────────────────
+    // Fetch full collection items so the Items stat tile AND collection-based
+    // achievements are populated on first load, before the user visits the
+    // Collection tab. Fire-and-forget.
     if (currentUser?.isAuthUser && currentUser?.Type === 'Personal') {
         supabase
             .from('collection_items')
-            .select('id', { count: 'exact', head: true })
+            .select('id, type, subtype, band_name, band_id, item_date, body, signed_by, photos, labels')
             .eq('user_id', currentUser.id)
-            .then(({ count }) => {
-                if (count !== null) {
-                    // Stub array of correct length — updateRank reads .length
-                    window._collectionItems = Array(count);
+            .then(({ data }) => {
+                if (data) {
+                    window._collectionItems = data;
+                    window._collectionCount = data.length;
                     UI.updateRank();
                 }
             });
     }
-
     // ── Deferred performance load + chart render ──────────────────────────────
     // Performances are not needed for first paint. In personal mode we load them
     // after the page is interactive via Data.loadPerformances() — the same
@@ -910,10 +910,12 @@ window.syncSetlistFm = async function() {
 
         onComplete({ journalInserted, journalSkipped, newVenues, pages }) {
             setProgress(100);
-            const parts = [journalInserted + ' shows added'];
-            if (journalSkipped)  parts.push(journalSkipped + ' already in your list');
-            if (newVenues)       parts.push(newVenues + ' new venues discovered');
-            setStatus('\u2713 Sync complete \u2014 ' + parts.join(', ') + '.', 'success');
+            if (journalInserted > 0) {
+                const parts = [journalInserted + ' shows added'];
+                if (journalSkipped)  parts.push(journalSkipped + ' already in your list');
+                if (newVenues)       parts.push(newVenues + ' new venues discovered');
+                setStatus('\u2713 Sync complete \u2014 ' + parts.join(', ') + '.', 'success');
+            }
             if (btn) { btn.disabled = false; btn.classList.remove('opacity-50', 'cursor-not-allowed'); }
 
             window.track('setlist_sync_complete', { journalInserted, journalSkipped, newVenues, pages });
@@ -950,11 +952,10 @@ window.syncSetlistFm = async function() {
             }
         },
 
-        onError(msg) {
+        onError(msg, { userNotFound = false } = {}) {
             setProgress(0);
-            setStatus('Sync failed: ' + msg, 'error');
             if (btn) { btn.disabled = false; btn.classList.remove('opacity-50', 'cursor-not-allowed'); }
-            window.showToast('Sync failed \u2014 see settings for details.', 'error');
+            handleZeroSyncResult({ userNotFound });
             window.track('setlist_sync_error', { username, msg });
         },
     });

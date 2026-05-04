@@ -578,8 +578,7 @@ window.saveGig = async () => {
                     } catch (err) {
                         console.error('Final Save Error:', err);
                         _showError(err.message || 'Could not save show.');
-                    } finally {
-                        setSaveBtnLabel(saveBtnOrigLabel || 'Save Show', false);
+
                     }
                 }
             } catch (lookupErr) {

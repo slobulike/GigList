@@ -1365,6 +1365,7 @@ export async function init(currentUser) {
 
     // Expose items globally so feed.js can build collection cards
     window._collectionItems = _items;
+    window._collectionCount = _items.length;
     updateRank();
 
     _renderCollectionTab();
@@ -1382,6 +1383,7 @@ export async function refresh() {
     _bandNames = await _fetchBandNames(_user.id);
     // Keep window._collectionItems in sync so feed.js can read it
     window._collectionItems = _items;
+    window._collectionCount = _items.length;
     updateRank();
     _renderCollectionTab();
     if (_drillType) _renderDrillDown(_drillType);

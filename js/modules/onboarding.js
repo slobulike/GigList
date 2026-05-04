@@ -406,44 +406,50 @@ async function _acknowledgeCompanionTags(userId, journalKeys) {
  * Called by the "I don't have a setlist.fm account →" button in vault.html,
  * and automatically when sync returns 0 results.
  */
-export function showNoSetlistTip() {
-    const hint = document.getElementById('sync-status-legacy');
-    if (!hint) return;
-
-    hint.innerHTML = `
-        No setlist.fm account? Search your email inbox for ticket confirmations
-        to find the shows you've been to, then add them manually.<br><br>
-        <span class="font-black text-slate-600 not-italic">Try searching:</span><br>
-        <code class="block mt-1 bg-slate-100 text-slate-700 font-mono text-[10px] px-2 py-1 rounded-lg leading-relaxed">
-            subject:(ticket OR confirmation OR "order confirmed") (gig OR concert OR festival OR live)
-        </code>
-    `;
-    hint.className = 'text-[10px] mt-3 leading-relaxed text-slate-500 not-italic';
-    hint.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-}
-
-window.showNoSetlistTip = showNoSetlistTip;
 
 /**
  * Called from app.js syncSetlistFm onComplete when journalInserted === 0.
+ * Shows a "wrong username?" hint in the status area, then reveals the shared
+ * no-setlist-help block (same UI as clicking "I don't have a setlist.fm account").
  */
 export function handleZeroSyncResult() {
-    const hint = document.getElementById('sync-status');
-    if (!hint) return;
+    // app.js guards setStatus() behind journalInserted > 0, so by the time this runs
+    // the status element is clear and we own it completely — no setTimeout needed.
+    const hint = document.getElementById('sync-status-legacy') || document.getElementById('sync-status');
+    if (hint) {
+        hint.innerHTML = `
+            <span class="text-indigo-500 font-black not-italic">✗ No shows found for that username.</span><br><br>
+            <strong class="not-italic text-slate-700">Wrong username?</strong>
+            Check your setlist.fm profile URL — it's the part after
+            <code class="font-mono bg-slate-100 px-1 rounded">setlist.fm/user/</code>
+        `;
+        hint.className = 'text-sm mt-3 leading-relaxed text-slate-600 not-italic';
+    }
 
-    hint.innerHTML = `
-        ✗ No shows found for that username.<br><br>
-        <strong class="not-italic text-slate-600">Wrong username?</strong>
-        Check your setlist.fm profile URL — it's the part after
-        <code class="font-mono bg-slate-100 px-1 rounded">setlist.fm/user/</code><br><br>
-        <strong class="not-italic text-slate-600">No setlist.fm account?</strong>
-        Search your email for ticket confirmations to find your shows:
-        <code class="block mt-1 bg-slate-100 text-slate-700 font-mono text-[10px] px-2 py-1 rounded-lg leading-relaxed">
-            subject:(ticket OR confirmation OR "order confirmed") (gig OR concert OR festival OR live)
-        </code>
-    `;
-    hint.className = 'text-[10px] mt-3 leading-relaxed text-amber-600 not-italic';
+    // Reveal the shared no-account help block (email search tip + CTAs)
+    showNoSetlistTip();
 }
+
+// ─── FIRST GIG ACHIEVEMENT NOTIFICATION ──────────────────────────────────────
+
+/**
+ * Call this after a new journal entry is saved when the user's total gig count
+ * transitions from 0 → 1. Shows an achievement unlock toast.
+ * Safe to call unconditionally — it checks the count itself.
+ */
+export function maybeShowFirstGigToast(journalData) {
+    if (!journalData || journalData.length !== 1) return;
+    // Small delay so the save toast clears first
+    setTimeout(() => {
+        window.showToast?.(
+            '🏆 Achievement unlocked: The Beginning — you logged your first gig!',
+            'success',
+            6000
+        );
+    }, 1800);
+}
+
+window.maybeShowFirstGigToast = maybeShowFirstGigToast;
 
 // ─── HELPER ──────────────────────────────────────────────────────────────────
 

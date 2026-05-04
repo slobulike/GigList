@@ -28,6 +28,10 @@
  *     GET /?endpoint=venue&venueId=abc123
  *     → proxies: GET /rest/1.0/venue/{venueId}
  *
+ *   Single setlist by ID:
+  *     GET /?endpoint=setlist&id=4b193d11
+  *     → proxies: GET /rest/1.0/setlist/{id}
+ *
  * Response:
  *   Raw JSON from setlist.fm, with CORS headers added.
  *   Errors from setlist.fm are passed through with their original status code.
@@ -124,7 +128,13 @@ function buildSetlistFmUrl(params) {
       return { url: targetUrl };
     }
 
-    return { error: `Unknown endpoint: "${endpoint}". Valid values: user-setlists, artist-setlists, artist-search, venue` };
+    if (endpoint === 'setlist') {
+      const id = params.get('id');
+      if (!id) return { error: 'Missing required param: id' };
+      return { url: `${SETLISTFM_BASE}/setlist/${encodeURIComponent(id)}` };
+    }
+
+    return { error: `Unknown endpoint: "${endpoint}". Valid values: user-setlists, artist-setlists, artist-search, venue, setlist` };
 }
 
 // ─── Main handler ─────────────────────────────────────────────────────────────

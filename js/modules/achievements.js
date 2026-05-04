@@ -128,6 +128,17 @@ export const renderBadges = (journalData) => {
     const uniqueVenues = new Set(journalData.map(j => j.OfficialVenue)).size;
     const streakCount = checkConsecutiveMonths(journalData);
 
+    // Buddy count — derived from went_with / WentWith field
+    const buddySet = new Set();
+    journalData.forEach(entry => {
+        const raw = entry.WentWith || entry.went_with || '';
+        if (raw) raw.split('/').map(s => s.trim()).filter(Boolean).forEach(n => buddySet.add(n.toLowerCase()));
+    });
+    const uniqueBuddies = buddySet.size;
+
+    // Collection count — set on window by collection.js when it loads
+    const collectionCount = window._collectionCount ?? 0;
+
     const badgeDefs = [
         {
             id: 'first-gig',
@@ -222,6 +233,49 @@ export const renderBadges = (journalData) => {
             desc: 'Attended 3+ Festivals',
             icon: 'tent',
             earned: journalData.filter(g => g.Festival === true || g['Festival'] === true).length >= 3
+        },
+        {
+            id: 'first-buddy',
+            name: 'Better Together',
+            goal: 1,
+            current: uniqueBuddies,
+            rarity: 'common',
+            desc: 'Logged your first show with a gig buddy',
+            icon: 'users',
+            earned: uniqueBuddies >= 1,
+            sub: uniqueBuddies >= 1 ? `${uniqueBuddies} ${uniqueBuddies === 1 ? 'buddy' : 'buddies'}` : null
+        },
+        {
+            id: 'crew',
+            name: 'The Crew',
+            goal: 5,
+            current: uniqueBuddies,
+            rarity: 'rare',
+            desc: 'Been to shows with 5+ different people',
+            icon: 'users-2',
+            earned: uniqueBuddies >= 5,
+            sub: uniqueBuddies >= 5 ? `${uniqueBuddies} people` : null
+        },
+        {
+            id: 'collector-first',
+            name: 'First Artefact',
+            goal: 1,
+            current: collectionCount,
+            rarity: 'common',
+            desc: 'Added your first item to the collection',
+            icon: 'package',
+            earned: collectionCount >= 1
+        },
+        {
+            id: 'collector-ten',
+            name: 'Proper Collector',
+            goal: 10,
+            current: collectionCount,
+            rarity: 'rare',
+            desc: 'Built a collection of 10+ items',
+            icon: 'archive',
+            earned: collectionCount >= 10,
+            sub: collectionCount >= 10 ? `${collectionCount} items` : null
         }
     ];
 
