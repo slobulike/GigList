@@ -1,20 +1,26 @@
-#map { 
-    height: 450px; 
-    border-radius: 2.5rem; 
-    border: 8px solid white; 
-    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1); 
+@import url('https://fonts.googleapis.com/css2?family=Reenie+Beanie&display=swap');
+
+#map {
+    height: 450px;
+    border-radius: 2.5rem;
+    border: 8px solid white;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
     z-index: 10;
 }
 
-
 .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-.custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-
+.custom-scrollbar::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 10px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #fbbf24; /* Amber-400 */
+    border-radius: 10px;
+}
 
 /* Modal animation */
 #modal:not(.hidden) { display: flex; animation: fadeIn 0.3s ease-out; }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-
 
 .chart-container { position: relative; height: 160px; width: 100%; }
 
@@ -37,8 +43,6 @@
     display: block;
 }
 
-@import url('https://fonts.googleapis.com/css2?family=Reenie+Beanie&display=swap');
-
 .font-handwriting {
     font-family: 'Reenie Beanie', cursive;
 }
@@ -56,51 +60,21 @@
     border-width: 0;
 }
 
-/* The Ticket Container */
+/* ── Mock Ticket ────────────────────────────────────────── */
 .mock-ticket {
-    background: #fefcf0; /* Aged paper color */
-    color: #1a1a1a;
-    font-family: 'Courier New', Courier, monospace;
-    padding: 20px;
-    position: relative;
-    border: 1px solid #d1d1d1;
-    box-shadow: 2px 5px 15px rgba(0,0,0,0.1);
-    filter: url(#crinkle-effect); /* This applies the mosh-pit texture */
-    max-width: 400px;
-    margin: 0 auto;
-}
-
-/* Perforation line */
-.ticket-perf {
-    border-top: 2px dashed #ccc;
-    margin: 15px 0;
-}
-
-/* Thermal Printer Style */
-.thermal-text {
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    font-weight: bold;
-}
-
-<link href="https://fonts.googleapis.com/css2?family=Reenie+Beanie&display=swap" rel="stylesheet">
-
-<style>
-/* The Base Ticket */
-.mock-ticket {
-    background: #fdfaf0;
+    background: #fdfaf0; /* Aged paper colour */
     color: #222;
     font-family: 'Courier New', Courier, monospace;
     padding: 24px;
     width: 320px;
     position: relative;
     box-shadow: 10px 10px 25px rgba(0,0,0,0.2);
-    filter: url(#crinkle-effect); /* The secret sauce */
     border: 1px solid #e0ddd0;
     overflow: hidden;
+    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
 
-/* Subtle Paper Texture */
+/* Subtle paper texture overlay */
 .mock-ticket::before {
     content: "";
     position: absolute;
@@ -110,50 +84,7 @@
     background-image: url("https://www.transparenttextures.com/patterns/felt.png");
 }
 
-.ticket-header {
-    border-bottom: 2px solid #333;
-    padding-bottom: 8px;
-    margin-bottom: 12px;
-}
-
-.ticket-perf {
-    border-top: 2px dashed #bbb;
-    margin: 20px 0;
-    position: relative;
-}
-
-/* The "Mosh Pit" crinkle filter */
-#crinkle-effect {
-    display: none;
-}
-
-.handwritten {
-    font-family: 'Reenie Beanie', cursive;
-    font-size: 2rem;
-    color: #1d4ed8; /* Blue pen ink */
-    line-height: 1;
-}
-</style>
-
-.custom-scrollbar::-webkit-scrollbar {
-    width: 4px;
-}
-.custom-scrollbar::-webkit-scrollbar-track {
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 10px;
-}
-.custom-scrollbar::-webkit-scrollbar-thumb {
-    background: #fbbf24; /* Amber-400 */
-    border-radius: 10px;
-}
-
-.mock-ticket {
-    font-family: 'Courier New', Courier, monospace;
-    position: relative;
-    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-}
-
-/* Add a jagged edge effect to the bottom of the ticket */
+/* Jagged tear edge at bottom */
 .mock-ticket::after {
     content: "";
     position: absolute;
@@ -166,10 +97,34 @@
     background-repeat: repeat-x;
 }
 
-.backface-hidden { backface-visibility: hidden; }
-.month-card.is-flipped { transform: rotateY(180deg); }
+.ticket-header {
+    border-bottom: 2px solid #333;
+    padding-bottom: 8px;
+    margin-bottom: 12px;
+}
 
-/* Vanishing Grey Scrollbar */
+/* Perforation line */
+.ticket-perf {
+    border-top: 2px dashed #bbb;
+    margin: 20px 0;
+    position: relative;
+}
+
+/* Thermal printer style */
+.thermal-text {
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: bold;
+}
+
+.handwritten {
+    font-family: 'Reenie Beanie', cursive;
+    font-size: 2rem;
+    color: #1d4ed8; /* Blue pen ink */
+    line-height: 1;
+}
+
+/* ── Vanishing scrollbar (modals) ───────────────────────── */
 .custom-modal-scroll {
     scrollbar-width: thin;
     scrollbar-color: transparent transparent;
@@ -177,16 +132,11 @@
 }
 
 .custom-modal-scroll:hover {
-    scrollbar-color: #cbd5e1 transparent; /* Slate-300 */
+    scrollbar-color: #cbd5e1 transparent;
 }
 
-/* Webkit version (Chrome/Safari/Edge) */
-.custom-modal-scroll::-webkit-scrollbar {
-    width: 6px;
-}
-.custom-modal-scroll::-webkit-scrollbar-track {
-    background: transparent;
-}
+.custom-modal-scroll::-webkit-scrollbar { width: 6px; }
+.custom-modal-scroll::-webkit-scrollbar-track { background: transparent; }
 .custom-modal-scroll::-webkit-scrollbar-thumb {
     background-color: transparent;
     border-radius: 20px;
@@ -196,45 +146,33 @@
     background-color: #cbd5e1;
 }
 
+/* ── 3-D card flip ──────────────────────────────────────── */
 .perspective-1000 { perspective: 1000px; }
 .preserve-3d { transform-style: preserve-3d; }
 .backface-hidden { backface-visibility: hidden; -webkit-backface-visibility: hidden; }
 .rotate-y-180 { transform: rotateY(180deg); }
 .is-flipped { transform: rotateY(180deg); }
 
-/* High-level Modal hierarchy */
-#mapModal {
-    z-index: 9999; /* Ensure it is the absolute top layer */
-}
+/* ── Map modal ──────────────────────────────────────────── */
+#mapModal { z-index: 9999; }
+#mapContainer .absolute { z-index: 20; }
+#full-map-canvas { background: #f8fafc; }
 
-/* Ensure the expand button on the dashboard is lower */
-#mapContainer .absolute {
-    z-index: 20;
-}
-
-/* Matching the Chart Modal feel */
-#full-map-canvas {
-    background: #f8fafc; /* Matches your app bg */
-}
-
-/* Band Mode Theme - Colors Only */
+/* ── Band Mode theme ────────────────────────────────────── */
 body.band-mode {
-    background-color: #f0f9ff; /* Very light sky blue tint */
+    background-color: #f0f9ff;
 }
 
-/* Ensure header elements are black */
 body.band-mode header h1,
 body.band-mode header div {
     color: black !important;
 }
 
-/* Keep the Indigo box black in Band Mode to match the amber */
 body.band-mode header .bg-indigo-600 {
     background-color: black !important;
-    color: #189BCC !important; /* Amber icon */
+    color: #189BCC !important;
 }
 
-/* Standard button override */
 body.band-mode button.bg-indigo-600 {
     background-color: #189BCC !important;
     color: white !important;

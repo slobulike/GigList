@@ -1,8 +1,8 @@
 /**
  * GigList Core Engine
- * v5.3.0 — 2026-05-04
+ * v5.3.1 — 2026-05-05
  * -------------------------------------------------------------------
- * ✅ Index page overhaul to include screenshots and dark styling
+ * ✅ Font adjustments to header and title texts to align with new index styling
  */
 
 import * as Data from './modules/data.js';
