@@ -22,6 +22,7 @@
 
 import { supabase } from './supabase.js';
 import { updateRank } from './ui.js';
+import './collection-collage.js';
 
 // ─── STATE ────────────────────────────────────────────────────────────────────
 
@@ -169,6 +170,9 @@ async function _fetchSignedUrl(storagePath) {
 
 // Cache: storagePath → signedUrl. Populated once after fetch, reused across renders.
 const _signedUrlCache = new Map();
+
+// Expose for collection-collage.js
+window._colSignedUrlCache = _signedUrlCache;
 
 /**
  * Pre-resolves signed URLs for all items that have photos.
@@ -748,21 +752,28 @@ function _renderDrillDown(subtype) {
                 <p class="text-base font-black text-slate-900 leading-none">${label}</p>
                 <p class="text-[10px] font-bold text-slate-400 mt-0.5">${allOfType.length} item${allOfType.length !== 1 ? 's' : ''}</p>
             </div>
-            <!-- View toggle -->
-            <div class="flex gap-1">
-                <button onclick="window._colSetView('spine')"
-                        aria-label="Spine view"
-                        class="w-8 h-8 rounded-lg border flex items-center justify-center text-sm transition-all
-                               ${_drillView === 'spine' ? 'border-[#c8a050] text-[#c8a050] bg-amber-50' : 'border-slate-200 text-slate-400'}">
-                    ⫴
-                </button>
-                <button onclick="window._colSetView('grid')"
-                        aria-label="Grid view"
-                        class="w-8 h-8 rounded-lg border flex items-center justify-center text-sm transition-all
-                               ${_drillView === 'grid' ? 'border-[#c8a050] text-[#c8a050] bg-amber-50' : 'border-slate-200 text-slate-400'}">
-                    ⊞
-                </button>
-            </div>
+        <!-- View toggle -->
+                    <div class="flex gap-1">
+                        <button onclick="window._colSetView('spine')"
+                                aria-label="Spine view"
+                                class="w-8 h-8 rounded-lg border flex items-center justify-center text-sm transition-all
+                                       ${_drillView === 'spine' ? 'border-[#c8a050] text-[#c8a050] bg-amber-50' : 'border-slate-200 text-slate-400'}">
+                            ⫴
+                        </button>
+                        <button onclick="window._colSetView('grid')"
+                                aria-label="Grid view"
+                                class="w-8 h-8 rounded-lg border flex items-center justify-center text-sm transition-all
+                                       ${_drillView === 'grid' ? 'border-[#c8a050] text-[#c8a050] bg-amber-50' : 'border-slate-200 text-slate-400'}">
+                            ⊞
+                        </button>
+                        <button onclick="window._colSetView('collage')"
+                                aria-label="Share as image"
+                                class="w-8 h-8 rounded-lg border flex items-center justify-center transition-all border-slate-200 text-slate-400 hover:border-[#c8a050] hover:text-[#c8a050]">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/>
+                            </svg>
+                        </button>
+                    </div>
         </div>
 
         <!-- Sub-filter strip -->
@@ -1048,8 +1059,37 @@ window._colCloseDrillDown = () => {
 };
 
 window._colSetView = (view) => {
+    if (view === 'collage') {
+        // Gather the currently-displayed items for the collage
+        const bandFiltered = _applyBandFilter(_items);
+        const curated      = _applyCuration(bandFiltered, _activeCuration);
+        const searched     = _searchQuery ? curated.filter(i =>
+            (i.title          || '').toLowerCase().includes(_searchQuery) ||
+            (i.body           || '').toLowerCase().includes(_searchQuery) ||
+            (i.artist_context || '').toLowerCase().includes(_searchQuery) ||
+            (i.band_name      || '').toLowerCase().includes(_searchQuery)
+        ) : curated;
+        const items = _drillType === 'all'
+            ? searched.filter(i => i.type === 'artefact')
+            : searched.filter(i => i.subtype === _drillType);
+
+        // Apply drill sub-filter too
+        let filtered = items;
+        if (_drillFilter !== 'all') {
+            if (_drillFilter === 'has_story')  filtered = filtered.filter(i => i.body);
+            else if (_drillFilter === 'signed') filtered = filtered.filter(i => i.signed_by);
+            else filtered = filtered.filter(i => i.format === _drillFilter);
+        }
+
+        const label = _drillType === 'all'
+            ? 'All Items'
+            : (SUBTYPE_LABELS[_drillType] || _drillType);
+
+        if (window._colOpenCollage) window._colOpenCollage(filtered, label);
+        return;
+    }
     _drillView = view;
-    if (_drillType) _renderDrillDown(_drillType);
+    _renderDrillDown(_drillType);
 };
 
 window._colSetDrillFilter = (filter) => {

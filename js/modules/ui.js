@@ -1016,7 +1016,9 @@ export const openGigModal = (key, journalData, performanceData) => {
     const scrapbookPath = `assets/scrapbook/${formattedDate}-${cleanVenue}.jpg`;
     const artistPath = `assets/artists/${entry.Band.toLowerCase().replace(/ /g, '_')}_stock_photo.jpg`;
     const youtubeLink = `https://www.youtube.com/results?search_query=${encodeURIComponent(`${entry.Band} live ${entry.OfficialVenue} ${entry.Date}`)}`;
-    const spotifyLink = `https://open.spotify.com/search/${encodeURIComponent(entry.Band)}`;
+    const spotifyLink = entry.SpotifyArtistId
+        ? `https://open.spotify.com/artist/${entry.SpotifyArtistId}`
+        : `https://open.spotify.com/search/${encodeURIComponent(entry.Band)}`;
 
     // --- EXTERNAL LINKS ---
     // Photos album URL (user-supplied)

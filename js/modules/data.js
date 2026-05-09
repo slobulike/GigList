@@ -120,6 +120,29 @@ export const loadAppData = async (user, { skipPerformances = false } = {}) => {
     const journalKeys   = [...new Set(journalData.map(r => r.journal_key).filter(Boolean))];
     const journalVenues = [...new Set(journalData.map(r => r.official_venue).filter(Boolean))];
 
+// ── Step 1b: Artist lookup (spotify IDs for deep links) ──────────────────────
+const journalBands = [...new Set(journalData.map(r => r.band).filter(Boolean))];
+const artistLookup = {};
+
+if (journalBands.length) {
+    const ARTIST_CHUNK = 100;
+    const artistChunks = [];
+    for (let i = 0; i < journalBands.length; i += ARTIST_CHUNK) {
+        artistChunks.push(journalBands.slice(i, i + ARTIST_CHUNK));
+    }
+    const artistResults = await Promise.all(
+        artistChunks.map(chunk =>
+            supabase.from('artists').select('name, spotify_artist_id, spotify_image_url').in('name', chunk)
+        )
+    );
+    artistResults.flatMap(r => r.data || []).forEach(a => {
+        artistLookup[a.name] = {
+            spotify_artist_id: a.spotify_artist_id,
+            spotify_image_url: a.spotify_image_url,
+        };
+    });
+}
+
     // ── Step 2: Performances + Venues in parallel ─────────────────────────────
     // Both are scoped to the user's journal content to keep payloads minimal.
     // Performances are scoped by journal_key (not artist) so festival shows
@@ -201,6 +224,9 @@ export const loadAppData = async (user, { skipPerformances = false } = {}) => {
         Year:               row.year             || row.Year             || '',
         Month:              row.month            || row.Month            || '',
         Day:                row.day              || row.Day              || '',
+         // Artist enrichment from canonical artists table
+        SpotifyArtistId:    artistLookup[row.band]?.spotify_artist_id || null,
+        SpotifyImageUrl:    artistLookup[row.band]?.spotify_image_url || null,
     }));
 
     performanceData = performanceData.map(p => ({

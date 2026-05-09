@@ -1,8 +1,11 @@
 /**
  * GigList Core Engine
- * v5.3.1 — 2026-05-05
+ * v5.4.1 — 2026-05-09
  * -------------------------------------------------------------------
- * ✅ Font adjustments to header and title texts to align with new index styling
+ * ✅ Added new collage share feature to Collection
+ * ✅ Refactored band names to use new artist table in supabase that includes MBID and Spotify artist refs
+ * ✅ Link to spotify now uses artist ref for direct link instead of quasi link through search
+ * ✅ Band name combo box in Add Gig modal and Add Collection item now populated from artists list
  */
 
 import * as Data from './modules/data.js';

@@ -127,10 +127,26 @@ const wireCombobox = (inputId, listId, getOptions) => {
 
 // ─── OPTION GETTERS (lazy — called at input time) ────────────────────────────
 
-const getArtistOptions = () => {
-    const data = window.journalData || [];
-    return [...new Set(data.map(g => g.Band).filter(Boolean))].sort();
+let artistCache = null;
+export const invalidateArtistCache = () => { artistCache = null; };
+
+const loadArtistOptions = async () => {
+    if (artistCache) return artistCache;
+    const { data, error } = await supabase
+        .from('artists')
+        .select('name')
+        .order('name');
+    if (error) {
+        console.error('Failed to load artists:', error);
+        // Fall back to journal data if query fails
+        return [...new Set((window.journalData || []).map(g => g.Band).filter(Boolean))].sort();
+    }
+    artistCache = data.map(a => a.name);
+    return artistCache;
 };
+
+const getArtistOptions = () => artistCache ||
+    [...new Set((window.journalData || []).map(g => g.Band).filter(Boolean))].sort();
 
 const getVenueOptions = () => {
     const lookup = window.venueLookup || {};
@@ -472,6 +488,18 @@ window.saveGig = async () => {
             .upsert(supabaseRow, { onConflict: 'journal_key, user_id' });
 
         if (dbError) throw dbError;
+
+        // Ensure artist exists in canonical artists table
+        const { data: existingArtist } = await supabase
+            .from('artists')
+            .select('id')
+            .eq('name', band)
+            .maybeSingle();
+
+        if (!existingArtist) {
+            await supabase.from('artists').insert({ name: band });
+            invalidateArtistCache();
+        }
 
         // 4a. Save companions to gig_companions
         if (!isBandWrite && _companions.length > 0) {
@@ -1183,6 +1211,7 @@ function initCompanionSelector() {
 // ─── INIT (wire comboboxes once DOM is ready) ─────────────────────────────────
 
 export const initEditor = () => {
+    loadArtistOptions(); // pre-fetch so cache is warm before first keystroke
     wireCombobox('editor-band',    'editor-band-list',    getArtistOptions);
     wireCombobox('editor-venue',   'editor-venue-list',   getVenueOptions);
     wireCombobox('editor-support', 'editor-support-list', getSupportOptions);

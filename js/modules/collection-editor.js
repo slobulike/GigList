@@ -722,17 +722,27 @@ async function _populateBandSelector() {
     const dropdown = document.getElementById('col-editor-band-dropdown');
     if (!input || !dropdown) return;
 
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return;
+    // Fetch from canonical artists table (shared across all users)
+    const { data, error } = await supabase
+        .from('artists')
+        .select('name')
+        .order('name');
 
-    // Fetch bands the user has gigs for
-    const { data } = await supabase
-        .from('journals')
-        .select('band')
-        .eq('user_id', session.user.id)
-        .order('band');
-
-    _bandOptions = [...new Set((data || []).map(r => r.band).filter(Boolean))].sort();
+    if (error) {
+        console.error('Failed to load artists:', error);
+        // Fall back to user's own journals if query fails
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+            const { data: journalData } = await supabase
+                .from('journals')
+                .select('band')
+                .eq('user_id', session.user.id)
+                .order('band');
+            _bandOptions = [...new Set((journalData || []).map(r => r.band).filter(Boolean))].sort();
+        }
+    } else {
+        _bandOptions = data.map(a => a.name);
+    }
 
     // If in band mode, pre-fill
     if (window.isBandMode && window.currentArtist) {
@@ -972,6 +982,21 @@ window.saveCollectionItem = async () => {
             .upsert(row, { onConflict: 'id' });
 
         if (error) throw error;
+
+        // Ensure artist exists in canonical artists table
+        if (bandName) {
+            const { data: existingArtist } = await supabase
+                .from('artists')
+                .select('id')
+                .eq('name', bandName)
+                .maybeSingle();
+
+            if (!existingArtist) {
+                await supabase.from('artists').insert({ name: bandName });
+                // Invalidate the band options cache so new artist appears next time
+                _bandOptions = [];
+            }
+        }
 
         // Fire push notifications to each tagged buddy (non-blocking)
         if (taggedUserIds.length && _selectedType === 'memory') {
