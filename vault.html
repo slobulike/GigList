@@ -1293,7 +1293,7 @@
      class="hidden fixed inset-0 z-[110] bg-slate-900/60 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4"
      role="dialog" aria-modal="true" aria-labelledby="editor-modal-title" aria-hidden="true">
 
-    <div class="bg-white w-full sm:max-w-lg max-h-[92vh] rounded-t-[2.5rem] sm:rounded-[2.5rem] flex flex-col overflow-hidden shadow-2xl">
+    <div class="bg-white w-full sm:max-w-lg max-h-[92dvh] rounded-t-[2.5rem] sm:rounded-[2.5rem] flex flex-col overflow-hidden shadow-2xl">
 
         <!-- Header -->
         <div class="flex items-center justify-between px-6 py-5 border-b border-slate-100 flex-shrink-0">
@@ -1440,7 +1440,7 @@
         </div>
 
         <!-- Footer actions -->
-        <div class="flex flex-col gap-3 px-6 py-5 border-t border-slate-100 flex-shrink-0">
+        <div class="flex flex-col gap-3 px-6 pt-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] border-t border-slate-100 flex-shrink-0">
             <div class="flex gap-3">
                 <button onclick="window.closeEditorModal()"
                         class="flex-1 py-3 text-sm font-black text-slate-500 bg-slate-100 hover:bg-slate-200 rounded-2xl transition-all active:scale-95 uppercase tracking-widest">

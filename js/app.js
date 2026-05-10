@@ -1,11 +1,12 @@
 /**
  * GigList Core Engine
- * v5.4.1 — 2026-05-09
+ * v5.4.2 — 2026-05-10
  * -------------------------------------------------------------------
- * ✅ Added new collage share feature to Collection
- * ✅ Refactored band names to use new artist table in supabase that includes MBID and Spotify artist refs
- * ✅ Link to spotify now uses artist ref for direct link instead of quasi link through search
- * ✅ Band name combo box in Add Gig modal and Add Collection item now populated from artists list
+ * ✅ Bug fixes to adding new artists (RLS policy change to allow insert from authed user)
+ * ✅ Changed venue look up to use venues table not journals so full venue list is shown as suggestions when adding a gig
+ * ✅ UI changes to editor to make Save or Cancel cleaner on iphone
+ * ✅ Added new achievements for photographer and VIP - includes new ways to aware badges from Collection attributes and photo saves)
+ * ✅ Added invite share link to profile page when buddy search shows no results
  */
 
 import * as Data from './modules/data.js';
@@ -209,6 +210,15 @@ export async function initApp() {
     // Band mode: performances are also skipped here and loaded on-demand in band.js
     // when the Summary tab is opened (the only consumer of performance data there).
     const data = await Data.loadAppData(currentUser, { skipPerformances: true });
+
+    // Load achievement stats in parallel — personal mode only
+    if (currentUser?.Type === 'Personal') {
+        await Promise.all([
+            Data.loadGigPhotoStats(currentUser.id),
+            Data.loadCollectionStats(currentUser.id),
+        ]);
+    }
+
     window.currentUser = currentUser;
     window.journalData = data.journalData;
     window.performanceData = [];          // populated below once page is interactive

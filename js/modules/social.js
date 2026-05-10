@@ -207,7 +207,36 @@ window.searchFriends = async () => {
         .limit(8);
 
     if (error || !data?.length) {
-        results.innerHTML = '<p class="text-xs text-slate-400 italic">No users found.</p>';
+        const base    = window.location.pathname.replace(/\/[^/]*$/, '');
+        const url     = `${window.location.origin}${base}/index.html`;
+        const name    = q; // use whatever they searched for as the invitee name
+        const message = `${name}, I've been tracking my gig history on GigList — come join so I can add you as a Gig Buddy!`;
+
+        results.innerHTML = `
+            <div class="flex items-center justify-between gap-2 py-1">
+                <p class="text-xs text-slate-400 italic">No users found for "${q}".</p>
+                <button id="buddy-invite-btn"
+                        class="flex items-center gap-1.5 bg-slate-100 border border-slate-200 text-slate-600 text-[10px] font-black px-3 py-1.5 rounded-full hover:bg-indigo-50 hover:border-indigo-200 hover:text-indigo-600 transition-all active:scale-95 uppercase tracking-widest">
+                    <i data-lucide="share-2" class="w-3 h-3"></i>
+                    Invite
+                </button>
+            </div>`;
+
+        if (window.lucide) lucide.createIcons();
+
+        document.getElementById('buddy-invite-btn').addEventListener('click', async () => {
+            try {
+                if (navigator.share) {
+                    await navigator.share({ title: 'Join me on GigList', text: message, url });
+                } else {
+                    await navigator.clipboard.writeText(`${message} ${url}`);
+                    if (window.showToast) window.showToast('Invite link copied!', 'success');
+                }
+            } catch (err) {
+                if (err.name !== 'AbortError') console.warn('Share failed:', err);
+            }
+        });
+
         return;
     }
 

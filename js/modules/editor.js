@@ -148,7 +148,41 @@ const loadArtistOptions = async () => {
 const getArtistOptions = () => artistCache ||
     [...new Set((window.journalData || []).map(g => g.Band).filter(Boolean))].sort();
 
+let venueCache = null;
+let venueLoadInFlight = false;
+export const invalidateVenueCache = () => { venueCache = null; };
+
+const loadVenueOptions = async () => {
+    if (venueCache) return venueCache;
+    const { data, error } = await supabase
+        .from('venues')
+        .select('official_name')
+        .order('official_name');
+    if (error) {
+        console.error('Failed to load venues:', error);
+        // Fall back to journal data if query fails
+        const lookup = window.venueLookup || {};
+        const fromData = (window.journalData || []).map(g => g.OfficialVenue).filter(Boolean);
+        return [...new Set([...Object.keys(lookup), ...fromData])].sort();
+    }
+    venueCache = data.map(v => v.official_name).filter(Boolean);
+    return venueCache;
+};
+
 const getVenueOptions = () => {
+    if (venueCache) return venueCache;
+    // Cache cold — fire a single background fetch (guard prevents re-entrancy),
+    // then re-trigger the input event so the dropdown refreshes with full data.
+    if (!venueLoadInFlight) {
+        venueLoadInFlight = true;
+        loadVenueOptions().then(() => {
+            venueLoadInFlight = false;
+            const input = document.getElementById('editor-venue');
+            if (input && input.value.trim().length >= 1) {
+                input.dispatchEvent(new Event('input'));
+            }
+        });
+    }
     const lookup = window.venueLookup || {};
     const fromData = (window.journalData || []).map(g => g.OfficialVenue).filter(Boolean);
     return [...new Set([...Object.keys(lookup), ...fromData])].sort();
@@ -489,16 +523,33 @@ window.saveGig = async () => {
 
         if (dbError) throw dbError;
 
-        // Ensure artist exists in canonical artists table
+        // Ensure artist exists and fetch their id for the journal FK
+        let artistId = null;
         const { data: existingArtist } = await supabase
             .from('artists')
             .select('id')
             .eq('name', band)
             .maybeSingle();
 
-        if (!existingArtist) {
-            await supabase.from('artists').insert({ name: band });
+        if (existingArtist) {
+            artistId = existingArtist.id;
+        } else {
+            const { data: newArtist } = await supabase
+                .from('artists')
+                .insert({ name: band })
+                .select('id')
+                .single();
+            if (newArtist) artistId = newArtist.id;
             invalidateArtistCache();
+        }
+
+        // Patch artist_id onto the journal row now we have it
+        if (artistId) {
+            await supabase
+                .from('journals')
+                .update({ artist_id: artistId })
+                .eq('journal_key', journalKey)
+                .eq('user_id', writeUserId ?? session.user.id);
         }
 
         // 4a. Save companions to gig_companions
@@ -1142,7 +1193,8 @@ async function _saveCompanions(journalId, ownerId) {
  * Shares an invite link for a legacy (unmatched) companion via Web Share API.
  */
 async function _shareInvite(name) {
-    const url = `${window.location.origin}/index.html`;
+    const base = window.location.pathname.replace(/\/[^/]*$/, '');
+    const url  = `${window.location.origin}${base}/index.html`;
     const shareData = {
         title: 'Join me on GigList',
         text:  `${name}, I've been adding our gig memories to GigList — come join so I can tag you properly!`,
@@ -1212,6 +1264,7 @@ function initCompanionSelector() {
 
 export const initEditor = () => {
     loadArtistOptions(); // pre-fetch so cache is warm before first keystroke
+    loadVenueOptions();  // pre-fetch venues from global table, not just user's own
     wireCombobox('editor-band',    'editor-band-list',    getArtistOptions);
     wireCombobox('editor-venue',   'editor-venue-list',   getVenueOptions);
     wireCombobox('editor-support', 'editor-support-list', getSupportOptions);

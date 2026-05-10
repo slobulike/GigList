@@ -127,6 +127,7 @@ export const renderBadges = (journalData) => {
     const maxVenueVisits = Math.max(...Object.values(venueCounts), 0);
     const uniqueVenues = new Set(journalData.map(j => j.OfficialVenue)).size;
     const streakCount = checkConsecutiveMonths(journalData);
+    const festivalCount = journalData.filter(g => g['Festival?'] === 'Y').length;
 
     // Buddy count — derived from went_with / WentWith field
     const buddySet = new Set();
@@ -228,11 +229,12 @@ export const renderBadges = (journalData) => {
             id: 'festival-pro',
             name: 'Mud & Music',
             goal: 3,
-            current: journalData.filter(g => g.Festival === true || g['Festival'] === true).length,
+            current: festivalCount,
             rarity: 'rare',
             desc: 'Attended 3+ Festivals',
             icon: 'tent',
-            earned: journalData.filter(g => g.Festival === true || g['Festival'] === true).length >= 3
+            earned: festivalCount >= 3,
+            sub: festivalCount >= 3 ? `${festivalCount} festivals` : null
         },
         {
             id: 'first-buddy',
@@ -276,7 +278,29 @@ export const renderBadges = (journalData) => {
             icon: 'archive',
             earned: collectionCount >= 10,
             sub: collectionCount >= 10 ? `${collectionCount} items` : null
-        }
+        },
+                 {
+                     id: 'photographer',
+                     name: 'Photographer',
+                     goal: 1,
+                     current: window._gigPhotoCount ?? 0,
+                     rarity: 'rare',
+                     desc: 'Added your first photo to a show',
+                     icon: 'camera',
+                     earned: (window._gigPhotoCount ?? 0) >= 1,
+                     sub: (window._gigPhotoCount ?? 0) >= 1 ? `${window._gigPhotoCount} photo${window._gigPhotoCount === 1 ? '' : 's'}` : null
+                 },
+                 {
+                     id: 'vip',
+                     name: 'VIP',
+                     goal: 1,
+                     current: window._laminateCount ?? 0,
+                     rarity: 'legendary',
+                     desc: 'Added your first laminate to the collection',
+                     icon: 'badge-check',
+                     earned: (window._laminateCount ?? 0) >= 1,
+                     sub: (window._laminateCount ?? 0) >= 1 ? `${window._laminateCount} laminate${window._laminateCount === 1 ? '' : 's'}` : null
+                 }
     ];
 
     badgeContainer.setAttribute('role', 'region');
@@ -411,6 +435,7 @@ export const renderBandBadges = (performanceData) => {
             sub: `${maxYearCount} in ${bestYear}`
         }
     ];
+
 
     drawBadges(badgeContainer, badgeDefs);
 };

@@ -508,3 +508,30 @@ export const getBandAppearanceStats = (journalData, performanceData) => {
 
     return stats;
 };
+
+/**
+ * Checks the user's gig-photos storage bucket and sets window._gigPhotoCount.
+ * Used by achievements.js for the Photographer badge.
+ * A single list() call with limit:1 is enough — we only need to know if *any* files exist.
+ */
+export const loadGigPhotoStats = async (userId) => {
+    if (!userId) { window._gigPhotoCount = 0; return; }
+    const { data, error } = await supabase.storage
+        .from('gig-photos')
+        .list(userId, { limit: 1000 });
+    window._gigPhotoCount = (!error && data) ? data.length : 0;
+};
+
+/**
+ * Counts laminate items in collection_items for the current user.
+ * Sets window._laminateCount — used by achievements.js for the VIP badge.
+ */
+export const loadCollectionStats = async (userId) => {
+    if (!userId) { window._laminateCount = 0; return; }
+    const { count, error } = await supabase
+        .from('collection_items')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', userId)
+        .eq('subtype', 'laminate');
+    window._laminateCount = (!error && count) ? count : 0;
+};
