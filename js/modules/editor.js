@@ -190,6 +190,35 @@ const getVenueOptions = () => {
 
 const getSupportOptions = () => getArtistOptions();
 
+// ── Hydrate Spotify data for a newly added artist ─────────────────────────────
+
+const _hydrateArtistSpotify = async (bandName) => {
+    try {
+        const res = await fetch(
+            `https://api.spotify.com/v1/search?q=${encodeURIComponent(bandName)}&type=artist&limit=1`,
+            { headers: { 'Authorization': `Bearer ${await _getSpotifyToken()}` } }
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        const artist = data.artists?.items?.[0];
+        if (!artist) return;
+
+        // Basic name sanity check
+        if (!artist.name.toLowerCase().includes(bandName.toLowerCase()) &&
+            !bandName.toLowerCase().includes(artist.name.toLowerCase())) return;
+
+        await supabase.from('artists').update({
+            spotify_artist_id: artist.id,
+            spotify_image_url: artist.images?.[0]?.url || null,
+            spotify_url:       artist.external_urls?.spotify || null,
+        }).eq('name', bandName).is('spotify_artist_id', null);
+
+        invalidateArtistCache();
+    } catch (e) {
+        console.warn('Spotify hydration failed for', bandName, e);
+    }
+};
+
 // ─── JOURNAL KEY GENERATION ───────────────────────────────────────────────────
 
 // Convert DD/MM/YYYY → YYYY-MM-DD for native date input
@@ -268,6 +297,11 @@ const renderEditorModal = (entry) => {
 
     modal.classList.remove('hidden');
     modal.setAttribute('aria-hidden', 'false');
+    const scrollY = window.scrollY;
+    document.body.dataset.scrollY = scrollY;
+    document.body.style.position = 'fixed';
+    document.body.style.top = `-${scrollY}px`;
+    document.body.style.width = '100%';
     document.body.style.overflow = 'hidden';
     document.getElementById('editor-date')?.focus();
 
@@ -282,7 +316,12 @@ export const closeEditorModal = () => {
         modal.classList.add('hidden');
         modal.setAttribute('aria-hidden', 'true');
     }
-    document.body.style.overflow = 'auto';
+    const scrollY = parseInt(document.body.dataset.scrollY || '0');
+    document.body.style.position = '';
+    document.body.style.top = '';
+    document.body.style.width = '';
+    document.body.style.overflow = '';
+    window.scrollTo(0, scrollY);
 };
 
 window.closeEditorModal = closeEditorModal;
@@ -482,9 +521,34 @@ window.saveGig = async () => {
         return;
     }
 
+// ── Prevent double-submission ─────────────────────────────────────────────────
+const saveBtn = document.querySelector('#editor-modal button[onclick="saveGig()"]');
+if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving…';
+}
+window.showSpinner?.('Saving show…');
+
     const journalKey = buildJournalKey(dateStr, venue);
     const isFest = document.getElementById('editor-festival')?.checked ? 'Y' : 'N';
     const [d, m, y] = dateStr.split('/');
+
+// ── Hydrate Spotify data for a newly added artist (non-blocking) ──────────────
+const _hydrateArtistSpotify = (bandName) => {
+    fetch(`${WORKER_URL}/?endpoint=spotify-artist&name=${encodeURIComponent(bandName)}`)
+        .then(r => r.json())
+        .then(async spotifyData => {
+            if (spotifyData.id) {
+                await supabase.from('artists').update({
+                    spotify_artist_id: spotifyData.id,
+                    spotify_image_url: spotifyData.image_url || null,
+                    spotify_url:       spotifyData.url || null,
+                }).eq('name', bandName).is('spotify_artist_id', null);
+                invalidateArtistCache();
+            }
+        })
+        .catch(e => console.warn('Spotify hydration failed for', bandName, e));
+};
 
     // 2. Auth Check
     const { data: { session } } = await supabase.auth.getSession();
@@ -569,8 +633,7 @@ window.saveGig = async () => {
 
         // 4. Trigger Setlist Lookup (personal users only, not band archive writes)
         if (!isBandWrite) {
-            const saveBtn = document.querySelector('#editor-modal button[onclick="saveGig()"]');
-            const origLabel = saveBtn?.textContent;
+            const origLabel = 'Save'; // button already relabelled above
 
             try {
                 if (isFest === 'Y') {
@@ -617,6 +680,18 @@ window.saveGig = async () => {
                             // return early; fall through to UI update below.
                             await _submitPendingVenue({ session, journalKey, band, dateStr, venue });
                         } else {
+                            // Step 1b: Write mbid back to artists table (non-blocking)
+                            supabase
+                                .from('artists')
+                                .update({ mbid })
+                                .eq('name', band)
+                                .is('mbid', null)
+                                .then(() => console.log(`Artist mbid updated for ${band}`))
+                                .catch(e => console.warn('Artist mbid update failed:', e));
+
+                            // Step 1c: Hydrate Spotify data (non-blocking)
+                            _hydrateArtistSpotify(band);
+
                             // Step 2: Polite delay before second API call
                             console.log("MBID found. Waiting for API cooldown...");
                             await new Promise(resolve => setTimeout(resolve, 1100));
@@ -655,15 +730,19 @@ window.saveGig = async () => {
                             }
                         }
                     } catch (err) {
-                        console.error('Final Save Error:', err);
-                        _showError(err.message || 'Could not save show.');
-
-                    }
+                            console.error('Final Save Error:', err);
+                            _showError(err.message || 'Could not save show.');
+                        } finally {
+                            window.hideSpinner?.();
+                            if (saveBtn) {
+                                saveBtn.disabled = false;
+                                saveBtn.textContent = 'Save';
+                            }
+                        }
                 }
             } catch (lookupErr) {
                 console.warn('Setlist lookup background process failed:', lookupErr);
-            } finally {
-                if (saveBtn) saveBtn.textContent = origLabel;
+
             }
         }
 
@@ -713,11 +792,17 @@ window.saveGig = async () => {
 
        closeEditorModal();
        if (window.showToast) window.showToast('Show Saved ✓', 'success');
+       window.hideSpinner?.();           // ← hide here on success
        if (window.refreshUI) window.refreshUI();
 
     } catch (err) {
         console.error('Final Save Error:', err);
+        window.hideSpinner?.();       // ← hide here on error too
         _showError(err.message || 'Could not save show.');
+        if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.textContent = 'Save';
+        }
     }
 };
 

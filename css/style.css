@@ -181,3 +181,14 @@ body.band-mode button.bg-indigo-600 {
 body.band-mode .text-indigo-600 {
     color: #189BCC !important;
 }
+/* ── iOS modal body lock ────────────────────────────────── */
+body.modal-open {
+    position: fixed;
+    width: 100%;
+    overflow-y: hidden;
+}
+
+#editor-modal {
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+}

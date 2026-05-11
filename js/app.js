@@ -1,12 +1,10 @@
 /**
  * GigList Core Engine
- * v5.4.2 — 2026-05-10
+ * v5.4.3 — 2026-05-11
  * -------------------------------------------------------------------
- * ✅ Bug fixes to adding new artists (RLS policy change to allow insert from authed user)
- * ✅ Changed venue look up to use venues table not journals so full venue list is shown as suggestions when adding a gig
- * ✅ UI changes to editor to make Save or Cancel cleaner on iphone
- * ✅ Added new achievements for photographer and VIP - includes new ways to aware badges from Collection attributes and photo saves)
- * ✅ Added invite share link to profile page when buddy search shows no results
+ * ✅ Prevented duplicate save on editor modal and display spinner for long running processes
+ * ✅ Fixed iOS specific display issues where modal could scroll side to side
+ * ✅ Added artist db hydration to save function so that MBID and Spotify IDs are now added
  */
 
 import * as Data from './modules/data.js';
@@ -33,7 +31,7 @@ import { initProfile } from './modules/profile.js';
 import { initBandMode } from './modules/band.js';
 import { applyFilters, buildSummaryLine, hasActiveFilters } from './modules/filters.js';
 
-const APP_VERSION = "5.3.0";
+const APP_VERSION = "5.4.3";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
