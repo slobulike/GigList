@@ -192,3 +192,9 @@ body.modal-open {
     overflow-x: hidden;
     overscroll-behavior: contain;
 }
+
+/* ── iOS modal inner scroll lock ───────────────────────── */
+#editor-modal .overflow-y-auto {
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: auto; /* explicitly NOT touch — that's what causes rubber-band drift */
+}
