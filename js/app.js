@@ -1,10 +1,8 @@
 /**
  * GigList Core Engine
- * v5.4.3 — 2026-05-11
+ * v5.4.3.2 — 2026-05-12
  * -------------------------------------------------------------------
- * ✅ Prevented duplicate save on editor modal and display spinner for long running processes
  * ✅ Fixed iOS specific display issues where modal could scroll side to side
- * ✅ Added artist db hydration to save function so that MBID and Spotify IDs are now added
  */
 
 import * as Data from './modules/data.js';
@@ -31,7 +29,7 @@ import { initProfile } from './modules/profile.js';
 import { initBandMode } from './modules/band.js';
 import { applyFilters, buildSummaryLine, hasActiveFilters } from './modules/filters.js';
 
-const APP_VERSION = "5.4.3";
+const APP_VERSION = "5.4.3.2";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
