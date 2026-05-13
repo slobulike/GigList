@@ -5,10 +5,13 @@ import { buildPushHTTPRequest } from '@pushforge/builder';
 // To add a new notification type:
 //   1. Add an entry here defining the webhook event and payload builder
 //   2. Add a Supabase Database Webhook pointing to /push/webhook/<key>
+//      — OR — call /push/webhook/<key> directly from client code (for client-
+//        triggered events like memory tagging that don't have a DB webhook).
 //   That's it.
 //
 // Each entry has:
-//   event:       'INSERT' | 'UPDATE' — the Supabase webhook event type
+//   event:       'INSERT' | 'UPDATE' | 'CLIENT' — the source event type.
+//                'CLIENT' means triggered directly by app code, not a DB webhook.
 //   description: human-readable note for future you
 //   shouldFire(record, oldRecord) → bool
 //     Optional guard — return false to skip silently. Defaults to true if omitted.
@@ -58,6 +61,22 @@ const NOTIFICATIONS = {
         body: `${username} accepted your request — check out their gig history!`,
         url: '/GigList/',
         tag: 'buddy-accepted',
+      };
+    },
+  },
+
+  'memory-tag': {
+    event: 'CLIENT',
+    description: 'Notify buddies when they are tagged in a collection memory — triggered directly by collection-editor.js, not a DB webhook',
+    // No shouldFire guard — collection-editor only calls this when buddyIds.length > 0
+    getRecipientIds: async (record) => record.buddy_ids ?? [],
+    buildPayload: async (record, _old, env) => {
+      const username = await getUsername(env, record.tagger_id);
+      return {
+        title: '📼 You were tagged in a memory',
+        body: `${username} added a memory and tagged you in it`,
+        url: '/GigList/',
+        tag: 'memory-tag',
       };
     },
   },
@@ -345,6 +364,7 @@ async function handleRequest(request, env) {
   }
 
   // POST /push/webhook/:type — Supabase Database Webhook entry point
+  // Also used by client-triggered notifications (event: 'CLIENT') such as memory-tag.
   const webhookMatch = url.pathname.match(/^\/push\/webhook\/([a-z-]+)$/);
   if (request.method === 'POST' && webhookMatch) {
     return handleWebhook(webhookMatch[1], request, env);

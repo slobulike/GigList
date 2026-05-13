@@ -181,20 +181,17 @@ body.band-mode button.bg-indigo-600 {
 body.band-mode .text-indigo-600 {
     color: #189BCC !important;
 }
-/* ── iOS modal body lock ────────────────────────────────── */
+
+/* This kills the wiggle for both modals on iOS/Mac */
+#editor-modal, #col-editor-modal {
+    touch-action: pan-y !important;
+    overscroll-behavior-x: none !important;
+}
+
+/* Ensure the scroll lock is actually a lock */
 body.modal-open {
+    overflow: hidden !important;
+    height: 100vh;
+    width: 100vw;
     position: fixed;
-    width: 100%;
-    overflow-y: hidden;
-}
-
-#editor-modal {
-    overflow-x: hidden;
-    overscroll-behavior: contain;
-}
-
-/* ── iOS modal inner scroll lock ───────────────────────── */
-#editor-modal .overflow-y-auto {
-    overscroll-behavior: contain;
-    -webkit-overflow-scrolling: auto; /* explicitly NOT touch — that's what causes rubber-band drift */
 }

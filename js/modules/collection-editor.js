@@ -21,6 +21,7 @@
  */
 
 import { supabase } from './supabase.js';
+const PUSH_WORKER_URL = 'https://giglist-push.richard-lipscombe.workers.dev';
 
 // ─── STATE ────────────────────────────────────────────────────────────────────
 
@@ -1023,52 +1024,28 @@ window.saveCollectionItem = async () => {
 
 /**
  * Sends a push notification to each tagged buddy after saving a memory.
- * Looks up each buddy's push subscription from push_subscriptions table,
- * then calls the Cloudflare Worker to deliver the notification.
+ * Delegates to the Cloudflare Worker (/push/webhook/memory-tag) so the Worker
+ * handles subscription lookup and delivery — matching the buddy-request pattern.
  * Runs non-blocking — failures are logged but don't surface to the user.
  */
 async function _notifyTaggedBuddies(taggerUserId, itemId, memoryTitle, buddyIds) {
     try {
-        // Get the tagger's display name for the notification message
-        const { data: taggerProfile } = await supabase
-            .from('profiles')
-            .select('display_name, username')
-            .eq('id', taggerUserId)
-            .maybeSingle();
-
-        const taggerName = taggerProfile?.display_name || taggerProfile?.username || 'Someone';
-
-        // Fetch push subscriptions for all tagged buddies in one query
-        const { data: subscriptions } = await supabase
-            .from('push_subscriptions')
-            .select('user_id, subscription')
-            .in('user_id', buddyIds);
-
-        if (!subscriptions?.length) return;
-
-        // Send a notification for each subscription
-        const notifyPromises = subscriptions.map(async ({ subscription }) => {
-            if (!subscription) return;
-            try {
-                await fetch('/api/send-push', {
-                    method:  'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        subscription,
-                        title:   '📼 You were tagged in a memory',
-                        body:    `${taggerName} added a memory and tagged you in it`,
-                        data:    { url: '/vault.html', itemId },
-                    }),
-                });
-            } catch (e) {
-                console.warn('[ColEditor] push send failed:', e.message);
-            }
+        await fetch(`${PUSH_WORKER_URL}/push/webhook/memory-tag`, {
+            method:  'POST',
+            headers: {
+                'Content-Type':      'application/json',
+                'x-webhook-secret':  'CLIENT_TRIGGER',   // ← see note below
+            },
+            body: JSON.stringify({
+                record: {
+                    tagger_id:    taggerUserId,
+                    item_id:      itemId,
+                    title:        memoryTitle,
+                    buddy_ids:    buddyIds,
+                },
+            }),
         });
-
-        await Promise.allSettled(notifyPromises);
-
     } catch (e) {
-        // Non-blocking — don't surface push failures to user
         console.warn('[ColEditor] _notifyTaggedBuddies error:', e.message);
     }
 }

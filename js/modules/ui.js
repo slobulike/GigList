@@ -400,15 +400,12 @@ export const renderCarouselItem = (index, carouselData, fullData) => {
     const item = carouselData[index];
     const fallback = defaultImages[index % defaultImages.length];
 
-    // Build Paths based on your specific naming convention
     const [d, m, y] = item.Date ? item.Date.split('/') : ['01','01','1970'];
     const scrapbookPath = `assets/scrapbook/${y}-${m}-${d}-${slugify(item.OfficialVenue || '')}.jpg`;
-
-    // Updated to match your "brand_new_stock_photo.jpg" format
-    const artistPath = `assets/artists/${slugifyArtist(item.Band || item.band || '')}_stock_photo.jpg`;
+    const artistPath    = `assets/artists/${slugifyArtist(item.Band || item.band || '')}_stock_photo.jpg`;
 
     const accentClass = item.isFuture ? 'bg-emerald-600' : 'bg-indigo-600';
-    const hoverClass = item.isFuture ? 'group-hover:text-emerald-400' : 'group-hover:text-indigo-400';
+    const hoverClass  = item.isFuture ? 'group-hover:text-emerald-400' : 'group-hover:text-indigo-400';
 
     let subtext = item.details;
     let showNumberPill = '';
@@ -433,7 +430,6 @@ export const renderCarouselItem = (index, carouselData, fullData) => {
             subtext = `🔥 ${verb} ${pastCount} time${pastCount !== 1 ? 's' : ''} before`;
         }
 
-        // Only show the number pill from show #2 onwards
         if (nextCount > 1) {
             showNumberPill = `<span class="bg-emerald-400/90 text-emerald-950 font-black text-[9px] uppercase tracking-widest px-3 py-1 rounded-full">${isFest ? 'Visit' : 'Show'} #${nextCount}</span>`;
         }
@@ -442,10 +438,9 @@ export const renderCarouselItem = (index, carouselData, fullData) => {
     card.innerHTML = `
         <div class="relative h-full w-full overflow-hidden rounded-[2.5rem] bg-slate-900 shadow-2xl">
             <img id="carousel-img-${index}"
-                 src="${item.isCTA ? "https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?auto=format&fit=crop&q=80" : scrapbookPath}"
+                 src="${item.isCTA ? "https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?auto=format&fit=crop&q=80" : ""}"
                  class="absolute inset-0 w-full h-full object-cover opacity-60 transition-opacity duration-500"
-                 alt=""
-                 onerror="this.onerror=function(){this.src='${fallback}';this.onerror=null;}; this.src='${artistPath}';">
+                 alt="">
 
             <div class="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/40 to-transparent"></div>
 
@@ -483,50 +478,66 @@ export const renderCarouselItem = (index, carouselData, fullData) => {
             </div>
         </div>`;
 
-    // Async: check Supabase Storage for a photo — swaps in if found, otherwise keeps fallback chain result
-    if (!item.isCTA && item.Date && item.OfficialVenue) {
-        const imgEl = document.getElementById(`carousel-img-${index}`);
-        if (imgEl) {
+    // ── IMAGE RESOLUTION WATERFALL ────────────────────────────────────────────
+        // Priority: 1. Supabase Storage (gig-photo / band-photo)
+        //           2. Local assets/scrapbook/
+        //           3. Spotify artist image
+        //           4. Local assets/artists/ stock photo
+        //           5. Fallback (default concert image)
+
+    if (item.isCTA) return;
+
+    const imgEl = document.getElementById(`carousel-img-${index}`);
+    if (!imgEl) return;
+
+    // Tries each src in order, resolving to the first that loads successfully.
+    const tryInOrder = (sources) => {
+        if (!sources.length) return;
+        const [next, ...rest] = sources;
+        if (!next) { tryInOrder(rest); return; }
+        const probe = new Image();
+        probe.onload  = () => { imgEl.src = next; };
+        probe.onerror = () => { tryInOrder(rest); };
+        probe.src = next;
+    };
+
+    import('./supabase.js').then(async ({ supabase }) => {
+        let storageUrl = null;
+
+        if (window.isBandMode) {
+            const bandSlug     = (window.currentArtist || '').toLowerCase().replace(/[^a-z0-9]/g, '-');
             const scrapbookFile = scrapbookPath.split('/').pop();
-            import('./supabase.js').then(async ({ supabase }) => {
-                let storageUrl = null;
-
-                if (window.isBandMode) {
-                    const bandSlug = (window.currentArtist || '').toLowerCase().replace(/[^a-z0-9]/g, '-');
-                    const { data: listed } = await supabase.storage
-                        .from('band-photos')
-                        .list(bandSlug, { search: scrapbookFile });
-                    if (listed?.length) {
-                        const { data } = supabase.storage.from('band-photos').getPublicUrl(`${bandSlug}/${scrapbookFile}`);
-                        storageUrl = data.publicUrl;
-                    }
-                } else {
-                    const userId = window.currentUser?.id;
-                    if (userId) {
-                        // Check existence first to avoid noisy 400 errors
-                        const { data: listed } = await supabase.storage
-                            .from('gig-photos')
-                            .list(userId, { search: scrapbookFile });
-                        if (listed?.length) {
-                            const { data, error } = await supabase.storage
-                                .from('gig-photos')
-                                .createSignedUrl(`${userId}/${scrapbookFile}`, 3600);
-                            if (!error && data?.signedUrl) storageUrl = data.signedUrl;
-                        }
-                    }
+            const { data: listed } = await supabase.storage
+                .from('band-photos')
+                .list(bandSlug, { search: scrapbookFile });
+            if (listed?.length) {
+                const { data } = supabase.storage.from('band-photos').getPublicUrl(`${bandSlug}/${scrapbookFile}`);
+                storageUrl = data.publicUrl;
+            }
+        } else {
+            const userId = window.currentUser?.id;
+            if (userId) {
+                const scrapbookFile = scrapbookPath.split('/').pop();
+                const { data: listed } = await supabase.storage
+                    .from('gig-photos')
+                    .list(userId, { search: scrapbookFile });
+                if (listed?.length) {
+                    const { data, error } = await supabase.storage
+                        .from('gig-photos')
+                        .createSignedUrl(`${userId}/${scrapbookFile}`, 3600);
+                    if (!error && data?.signedUrl) storageUrl = data.signedUrl;
                 }
-
-                if (storageUrl) {
-                    const current = document.getElementById(`carousel-img-${index}`);
-                    if (current) {
-                        const probe = new Image();
-                        probe.onload = () => { current.src = storageUrl; };
-                        probe.src = storageUrl;
-                    }
-                }
-            });
+            }
         }
-    }
+
+        tryInOrder([
+                    storageUrl,
+                    scrapbookPath,
+                    item.SpotifyImageUrl || null,
+                    artistPath,
+                    fallback,
+                ]);
+    });
 };
 
 /* --- TABLE & CALENDAR VIEWS --- */
@@ -1095,25 +1106,25 @@ export const openGigModal = (key, journalData, performanceData) => {
         <div class="flex flex-col h-full max-h-[90vh]">
             <div class="flex-none bg-white rounded-t-[2.5rem] overflow-hidden border-b border-slate-100 shadow-sm z-50">
                 <div class="relative h-48 md:h-64 w-full bg-slate-900 flex items-center justify-center overflow-hidden">
-                    <img id="h-supabase"
-                         src=""
-                         alt=""
-                         class="absolute inset-0 w-full h-full object-cover z-20 hidden">
+                                    <img id="h-supabase"
+                                         src=""
+                                         alt=""
+                                         class="absolute inset-0 w-full h-full object-cover z-20 hidden">
 
-                    <img id="h-scrapbook"
-                         src="${scrapbookPath}"
-                         alt=""
-                         class="absolute inset-0 w-full h-full object-cover z-10 hidden">
+                                    <img id="h-scrapbook"
+                                         src=""
+                                         alt=""
+                                         class="absolute inset-0 w-full h-full object-cover z-10 hidden">
 
-                    <img id="h-artist"
-                         src="${artistPath}"
-                         alt=""
-                         class="absolute inset-0 w-full h-full object-cover z-10 hidden">
+                                    <img id="h-artist"
+                                         src=""
+                                         alt=""
+                                         class="absolute inset-0 w-full h-full object-cover z-10 hidden">
 
-                    <div id="h-ticket"
-                         class="absolute inset-0 z-10 items-center justify-center p-6 bg-slate-50 hidden">
-                        ${ticketHTML}
-                    </div>
+                                    <div id="h-ticket"
+                                         class="absolute inset-0 z-10 items-center justify-center p-6 bg-slate-50 hidden">
+                                        ${ticketHTML}
+                                    </div>
 
                     <!-- Camera upload button — personal users + band admins -->
                     ${(!window.isReadOnly && (window.currentUser?.Type === 'Personal' || (window.isBandMode && window.currentUser?.is_admin))) ? `
@@ -1224,88 +1235,104 @@ export const openGigModal = (key, journalData, performanceData) => {
 
 // --- ASSET RESOLUTION WATERFALL ---
 // Priority: 1. Supabase Storage (user's private scrapbook)
-//           2. Local assets/scrapbook/ (existing photos, .jpg then .JPG)
-//           3. Local assets/artists/ stock photo (.jpg then .JPG)
-//           4. Mock ticket (generated HTML)
+//           2. Spotify artist image (from artists table via data.js lookup)
+//           3. Local assets/scrapbook/ (existing photos, .jpg then .JPG)
+//           4. Local assets/artists/ stock photo (.jpg then .JPG)
+//           5. Mock ticket (generated HTML)
 
     const imgSupabase  = document.getElementById('h-supabase');
     const imgScrapbook = document.getElementById('h-scrapbook');
     const imgArtist    = document.getElementById('h-artist');
     const divTicket    = document.getElementById('h-ticket');
 
-    const tryLocalScrapbook = () => {
-        imgScrapbook.onload = () => imgScrapbook.classList.remove('hidden');
-        imgScrapbook.onerror = () => {
-            if (imgScrapbook.src.endsWith('.jpg')) {
-                imgScrapbook.src = scrapbookPath.replace('.jpg', '.JPG');
-            } else {
-                tryArtist();
-            }
-        };
-        imgScrapbook.src = scrapbookPath;
-    };
-
-    const tryArtist = () => {
-        imgArtist.onload = () => imgArtist.classList.remove('hidden');
-        imgArtist.onerror = () => {
-            if (imgArtist.src.endsWith('.jpg')) {
-                imgArtist.src = artistPath.replace('.jpg', '.JPG');
-            } else {
-                divTicket.classList.remove('hidden');
-                divTicket.style.display = 'flex';
-            }
-        };
-        imgArtist.src = artistPath;
-    };
-
-    // Step 1: try Supabase Storage
-    const userId = window.currentUser?.id;
-    import('./supabase.js').then(async ({ supabase }) => {
-        if (window.isBandMode) {
-            // Band archive — use storage.list() to check existence, no noisy 404/400 errors
-            const bandSlug = (window.currentArtist || 'band').toLowerCase().replace(/[^a-z0-9]/g, '-');
-            const fileName  = `${formattedDate}-${cleanVenue}.jpg`;
-            const { data: listed } = await supabase.storage
-                .from('band-photos')
-                .list(bandSlug, { search: fileName });
-            if (listed?.length) {
-                const { data } = supabase.storage.from('band-photos').getPublicUrl(`${bandSlug}/${fileName}`);
-                imgSupabase.onload = () => imgSupabase.classList.remove('hidden');
-                imgSupabase.onerror = () => tryLocalScrapbook();
-                imgSupabase.src = data.publicUrl;
-            } else {
-                tryLocalScrapbook();
-            }
-        } else if (userId) {
-            // Personal archive — check file exists first to avoid noisy 400 errors
-            const storagePath = `${userId}/${formattedDate}-${cleanVenue}.jpg`;
-            const { data: listed } = await supabase.storage
-                .from('gig-photos')
-                .list(userId, { search: `${formattedDate}-${cleanVenue}.jpg` });
-            if (!listed?.length) {
-                tryLocalScrapbook();
-            } else {
-                const { data, error } = await supabase.storage
-                    .from('gig-photos')
-                    .createSignedUrl(storagePath, 3600);
-                if (error || !data?.signedUrl) {
-                    tryLocalScrapbook();
+    const trySpotify = () => {
+                const spotifyUrl = entry.SpotifyImageUrl || null;
+                if (spotifyUrl) {
+                    imgArtist.onload  = () => imgArtist.classList.remove('hidden');
+                    imgArtist.onerror = () => tryArtist();
+                    imgArtist.src     = spotifyUrl;
                 } else {
-                    imgSupabase.onload = () => imgSupabase.classList.remove('hidden');
-                    imgSupabase.onerror = () => tryLocalScrapbook();
-                    imgSupabase.src = data.signedUrl;
+                    tryArtist();
                 }
-            }
-        } else {
-            tryLocalScrapbook();
-        }
-    });
+            };
 
-    modal.classList.remove('hidden');
-    document.body.style.overflow = 'hidden';
-    setTimeout(() => document.getElementById('modal-title')?.focus(), 100);
-    if (window.lucide) lucide.createIcons();
-};
+        const tryLocalScrapbook = () => {
+                    const jpgProbe = new Image();
+                    jpgProbe.onload  = () => {
+                        imgScrapbook.onload = () => imgScrapbook.classList.remove('hidden');
+                        imgScrapbook.src = scrapbookPath;
+                    };
+                    jpgProbe.onerror = () => {
+                        const jpgUpperProbe = new Image();
+                        jpgUpperProbe.onload  = () => {
+                            imgScrapbook.onload = () => imgScrapbook.classList.remove('hidden');
+                            imgScrapbook.src = scrapbookPath.replace('.jpg', '.JPG');
+                        };
+                        jpgUpperProbe.onerror = () => trySpotify();
+                        jpgUpperProbe.src = scrapbookPath.replace('.jpg', '.JPG');
+                    };
+                    jpgProbe.src = scrapbookPath;
+                };
+
+        const tryArtist = () => {
+            imgArtist.onload = () => imgArtist.classList.remove('hidden');
+            imgArtist.onerror = () => {
+                if (imgArtist.src.endsWith('.jpg')) {
+                    imgArtist.src = artistPath.replace('.jpg', '.JPG');
+                } else {
+                    divTicket.classList.remove('hidden');
+                    divTicket.style.display = 'flex';
+                }
+            };
+            imgArtist.src = artistPath;
+        };
+
+        // Step 1: try Supabase Storage
+            const userId = window.currentUser?.id;
+            import('./supabase.js').then(async ({ supabase }) => {
+                if (window.isBandMode) {
+                    const bandSlug = (window.currentArtist || 'band').toLowerCase().replace(/[^a-z0-9]/g, '-');
+                    const fileName  = `${formattedDate}-${cleanVenue}.jpg`;
+                    const { data: listed } = await supabase.storage
+                        .from('band-photos')
+                        .list(bandSlug, { search: fileName });
+                    if (listed?.length) {
+                        const { data } = supabase.storage.from('band-photos').getPublicUrl(`${bandSlug}/${fileName}`);
+                        imgSupabase.onload = () => imgSupabase.classList.remove('hidden');
+                        imgSupabase.onerror = () => tryLocalScrapbook();
+                        imgSupabase.src = data.publicUrl;
+                    } else {
+                        tryLocalScrapbook();
+                    }
+                } else if (userId) {
+                    const storagePath = `${userId}/${formattedDate}-${cleanVenue}.jpg`;
+                    const { data: listed } = await supabase.storage
+                        .from('gig-photos')
+                        .list(userId, { search: `${formattedDate}-${cleanVenue}.jpg` });
+                    if (!listed?.length) {
+                        tryLocalScrapbook();
+                    } else {
+                        const { data, error } = await supabase.storage
+                            .from('gig-photos')
+                            .createSignedUrl(storagePath, 3600);
+                        if (error || !data?.signedUrl) {
+                            tryLocalScrapbook();
+                        } else {
+                            imgSupabase.onload = () => imgSupabase.classList.remove('hidden');
+                            imgSupabase.onerror = () => tryLocalScrapbook();
+                            imgSupabase.src = data.signedUrl;
+                        }
+                    }
+                } else {
+                    tryLocalScrapbook();
+                }
+            });
+
+                modal.classList.remove('hidden');
+                document.body.style.overflow = 'hidden';
+                setTimeout(() => document.getElementById('modal-title')?.focus(), 100);
+                if (window.lucide) lucide.createIcons();
+            };
 
 // ─── ARCHIVE REQUEST BUTTON ───────────────────────────────────────────────────
 

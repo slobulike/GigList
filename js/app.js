@@ -1,8 +1,10 @@
 /**
  * GigList Core Engine
- * v5.4.3.2 — 2026-05-12
+ * v5.4.4 — 2026-05-13
  * -------------------------------------------------------------------
- * ✅ Fixed iOS specific display issues where modal could scroll side to side
+ * ✅ Added push notification to buddy tag in collection memory
+ * ✅ Update gig modal and carousel photo waterfall to use spotify artist image
+ * ✅ Further efforts to fix un-anchored inner gig modal on ios - believe to be unsuccessful
  */
 
 import * as Data from './modules/data.js';
@@ -29,7 +31,7 @@ import { initProfile } from './modules/profile.js';
 import { initBandMode } from './modules/band.js';
 import { applyFilters, buildSummaryLine, hasActiveFilters } from './modules/filters.js';
 
-const APP_VERSION = "5.4.3.2";
+const APP_VERSION = "5.4.4";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 

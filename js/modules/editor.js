@@ -298,6 +298,7 @@ const renderEditorModal = (entry) => {
     modal.classList.remove('hidden');
     modal.setAttribute('aria-hidden', 'false');
     const scrollY = window.scrollY;
+    document.body.classList.add('modal-open');
     document.body.dataset.scrollY = scrollY;
     document.body.style.position = 'fixed';
     document.body.style.top = `-${scrollY}px`;
@@ -317,6 +318,8 @@ export const closeEditorModal = () => {
         modal.setAttribute('aria-hidden', 'true');
     }
     const scrollY = parseInt(document.body.dataset.scrollY || '0');
+    document.body.classList.remove('modal-open');
+    editingKey = null;
     document.body.style.position = '';
     document.body.style.top = '';
     document.body.style.width = '';
