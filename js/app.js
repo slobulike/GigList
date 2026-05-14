@@ -1,10 +1,8 @@
 /**
  * GigList Core Engine
- * v5.4.4 — 2026-05-13
+ * v5.4.5 — 2026-05-14
  * -------------------------------------------------------------------
- * ✅ Added push notification to buddy tag in collection memory
- * ✅ Update gig modal and carousel photo waterfall to use spotify artist image
- * ✅ Further efforts to fix un-anchored inner gig modal on ios - believe to be unsuccessful
+ * ✅ Updated companion / buddy logic in gig modal view to show invite, add, and profile view links
  */
 
 import * as Data from './modules/data.js';
@@ -31,7 +29,7 @@ import { initProfile } from './modules/profile.js';
 import { initBandMode } from './modules/band.js';
 import { applyFilters, buildSummaryLine, hasActiveFilters } from './modules/filters.js';
 
-const APP_VERSION = "5.4.4";
+const APP_VERSION = "5.4.5";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
@@ -820,8 +818,8 @@ window.viewGigDetails = (key) => {
     UI.openGigModal(key, window.journalData, window.performanceData);
 
     if (currentUser?.isAuthUser && !window.isBandMode) {
-        setTimeout(() => window.loadGigAttendees(key), 100);
         const entry = (window.journalData || []).find(g => g['Journal Key'] === key);
+        setTimeout(() => window.loadGigAttendees(key, entry?.id), 100);
         if (entry) setTimeout(() => initArchiveButton(entry), 150);
     }
 

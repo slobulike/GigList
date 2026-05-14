@@ -176,7 +176,7 @@ function _renderBuddyList() {
 
     container.innerHTML = _following.map(f => `
         <div class="flex items-center justify-between gap-2">
-            <button onclick="window._switchToFriend('${f.id}', '${f.username}')"
+            <button onclick="window._openProfileFromModal('${userId}')"
                     class="text-sm font-black text-slate-700 hover:text-indigo-600 transition-colors text-left">
                 ${f.username}
             </button>
@@ -505,47 +505,142 @@ window.dismissConnectionsBanner = function() {
 
 // ─── GIG ATTENDEES (MODAL) ────────────────────────────────────────────────────
 
-window.loadGigAttendees = async (journalKey) => {
+window.loadGigAttendees = async (journalKey, journalId) => {
     if (!_currentUser?.isAuthUser) return;
 
     const safeKey   = journalKey.replace(/[^a-z0-9]/gi, '_');
-    const container = document.getElementById(`modal-giglist-attendees-${safeKey}`);
-    const list      = document.getElementById(`modal-giglist-attendees-list-${safeKey}`);
-    if (!container || !list) return;
+    const container = document.getElementById(`modal-companions-${safeKey}`);
+    if (!container) return;
 
-    const { data: attendees, error } = await supabase
+    const buddyIds = new Set((_following || []).map(f => f.id));
+
+    // ── 1. Companions for this gig ──────────────────────────────────────────
+    const { data: companionRows } = await supabase
+        .from('gig_companions')
+        .select('companion_name, companion_user_id, status')
+        .eq('journal_id', journalId);
+
+    // ── 2. Other GigList users who also logged this show ────────────────────
+    const { data: attendeeRows } = await supabase
         .from('show_attendance')
         .select('user_id')
         .eq('journal_key', journalKey)
         .neq('user_id', _currentUser.id);
 
-    if (error) { console.warn('loadGigAttendees:', error.message); return; }
-    if (!attendees?.length) return;
+    // Collect all user IDs we need profiles for
+    const companionUserIds = (companionRows || [])
+        .map(r => r.companion_user_id).filter(Boolean);
+    const attendeeUserIds  = (attendeeRows  || [])
+        .map(r => r.user_id).filter(id => id !== _currentUser.id);
+    const allUserIds = [...new Set([...companionUserIds, ...attendeeUserIds])];
 
-    const otherIds = attendees.map(r => r.user_id);
+    let profileMap = {};
+    if (allUserIds.length) {
+        const { data: profiles } = await supabase
+            .from('profiles')
+            .select('id, username, is_public')
+            .in('id', allUserIds);
+        (profiles || []).forEach(p => { profileMap[p.id] = p; });
+    }
 
-    const { data: profiles } = await supabase
-        .from('profiles')
-        .select('id, username')
-        .in('id', otherIds);
+    // ── 3. Build unified chip list ──────────────────────────────────────────
+    // Track rendered user IDs to avoid duplicates
+    const rendered = new Set();
+    const chips    = [];
 
-    if (!profiles?.length) return;
+    // Process tagged companions first (they have a name to show)
+    for (const row of (companionRows || [])) {
+        const name    = row.companion_name?.trim();
+        if (!name) continue;
 
-    const buddyIds = new Set((_following || []).map(f => f.id));
+        const userId  = row.companion_user_id;
+        const profile = userId ? profileMap[userId] : null;
+        const isBuddy = userId ? buddyIds.has(userId) : false;
 
-    list.innerHTML = profiles.map(p => {
-        const isBuddy = buddyIds.has(p.id);
-        return `
-            <span class="inline-flex items-center gap-1.5 bg-indigo-50 border border-indigo-200 text-indigo-700 text-[9px] px-2 py-1 rounded-md font-black uppercase tracking-wider">
-                <i data-lucide="music" class="w-2.5 h-2.5" aria-hidden="true"></i>
-                ${p.username}
-                ${!isBuddy
-                    ? `<button onclick="window.followUser('${p.id}', '${p.username}', this)" class="ml-0.5 text-indigo-400 hover:text-indigo-700 font-black transition-colors">+add</button>`
-                    : ''}
-            </span>`;
-    }).join('');
+        if (userId) rendered.add(userId);
 
-    container.classList.remove('hidden');
+        if (!userId) {
+            // State 1: named companion, not on GigList → share/invite chip
+            const inviteMsg = `${name}, I've been tracking my gig history on GigList — come join so I can add you as a Gig Buddy!`;
+            const inviteUrl = window.location.origin + window.location.pathname.replace(/\/[^/]*$/, '/index.html');
+            chips.push(`
+                <span class="inline-flex items-center gap-1.5 bg-slate-100 border border-slate-200 text-slate-600 text-[9px] px-2 py-1 rounded-md font-bold uppercase tracking-wider">
+                    ${name}
+                    <button onclick="(async()=>{try{if(navigator.share){await navigator.share({title:'Join me on GigList',text:'${inviteMsg.replace(/'/g,"\\'")}',url:'${inviteUrl}'});}else{await navigator.clipboard.writeText('${inviteMsg.replace(/'/g,"\\'")} ${inviteUrl}');window.showToast('Invite link copied!','success');}}catch(e){}})()"
+                            class="text-slate-400 hover:text-indigo-600 transition-colors" title="Invite ${name} to GigList">
+                        <i data-lucide="share-2" class="w-2.5 h-2.5"></i>
+                    </button>
+                </span>`);
+
+        } else if (isBuddy) {
+            // State 3: companion + confirmed buddy → tappable name
+            chips.push(`
+                <button onclick="window._openProfileFromModal('${userId}')"
+                        class="inline-flex items-center gap-1 bg-indigo-50 border border-indigo-200 text-indigo-700 text-[9px] px-2 py-1 rounded-md font-black uppercase tracking-wider hover:bg-indigo-100 transition-colors">
+                    <i data-lucide="music" class="w-2.5 h-2.5"></i>
+                    ${name}
+                </button>`);
+
+        } else {
+            // State 2: companion + on GigList, not yet a buddy
+            const isPublic = profile?.is_public;
+            const nameEl = isPublic
+                ? `<button onclick="window._openProfileFromModal('${userId}')" class="hover:underline">${name}</button>`
+                : `<span>${name}</span>`;
+            chips.push(`
+                <span class="inline-flex items-center gap-1.5 bg-indigo-50 border border-indigo-200 text-indigo-700 text-[9px] px-2 py-1 rounded-md font-bold uppercase tracking-wider">
+                    <i data-lucide="music" class="w-2.5 h-2.5"></i>
+                    ${nameEl}
+                    <button onclick="window.followUser('${userId}', '${profile?.username || name}', this)"
+                            class="text-indigo-400 hover:text-indigo-700 font-black transition-colors" title="Add ${name} as Gig Buddy">
+                        <i data-lucide="user-plus" class="w-2.5 h-2.5"></i>
+                    </button>
+                </span>`);
+        }
+    }
+
+    // Process GigList attendees not already rendered (not tagged as companions)
+    for (const userId of attendeeUserIds) {
+        if (rendered.has(userId)) continue;
+        const profile = profileMap[userId];
+        if (!profile) continue;
+
+        const isBuddy    = buddyIds.has(userId);
+        const isPublic   = profile.is_public;
+        const username   = profile.username;
+
+        if (isBuddy) {
+            // State 3: at the show, confirmed buddy
+            chips.push(`
+                <button onclick="window._openProfileFromModal('${userId}')"
+                        class="inline-flex items-center gap-1 bg-indigo-50 border border-indigo-200 text-indigo-700 text-[9px] px-2 py-1 rounded-md font-black uppercase tracking-wider hover:bg-indigo-100 transition-colors">
+                    <i data-lucide="music" class="w-2.5 h-2.5"></i>
+                    ${username}
+                </button>`);
+        } else {
+            // State 2: at the show, not a buddy
+            const nameEl = isPublic
+                ? `<button onclick="window._openProfileFromModal('${userId}')" class="hover:underline">${username}</button>`
+                : `<span>${username}</span>`;
+            chips.push(`
+                <span class="inline-flex items-center gap-1.5 bg-indigo-50 border border-indigo-200 text-indigo-700 text-[9px] px-2 py-1 rounded-md font-bold uppercase tracking-wider">
+                    <i data-lucide="music" class="w-2.5 h-2.5"></i>
+                    ${nameEl}
+                    <button onclick="window.followUser('${userId}', '${username}', event.currentTarget)"
+                            class="text-indigo-400 hover:text-indigo-700 font-black transition-colors" title="Add ${username} as Gig Buddy">
+                        <i data-lucide="user-plus" class="w-2.5 h-2.5"></i>
+                    </button>
+                </span>`);
+        }
+    }
+
+    // ── 4. Render ───────────────────────────────────────────────────────────
+    if (chips.length) {
+        container.innerHTML = chips.join('');
+    } else {
+        container.innerHTML = `<span class="text-[9px] opacity-60 italic text-slate-400">Solo Mission</span>`;
+    }
+
     if (window.lucide) lucide.createIcons();
 };
 
@@ -587,3 +682,10 @@ export async function resolveCompanionTags(user) {
 
     console.log(`resolveCompanionTags: promoted ${ids.length} legacy companion row(s) for ${user.display_name}`);
 }
+
+// ─── MANAGE PROFILE SCREEN DISPLAY ─────────────────────────────────────────────
+
+window._openProfileFromModal = (userId) => {
+    window.closeModal();
+    window.openProfile(userId);
+};

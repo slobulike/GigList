@@ -1199,14 +1199,8 @@ export const openGigModal = (key, journalData, performanceData) => {
                 <div class="flex items-start gap-2 mb-6 pb-4 border-b border-slate-50">
                     <i data-lucide="users" class="w-4 h-4 text-slate-300 mt-0.5 flex-shrink-0"></i>
                     <div class="flex-1 min-w-0">
-                        <div class="flex flex-wrap gap-1.5 mb-2">${
-                            entry['Went With'] && entry['Went With'] !== "nan" && entry['Went With'] !== "Alone"
-                            ? entry['Went With'].split(/[,\/&]/).map(n => `<span class="bg-slate-100 text-slate-600 text-[9px] px-2 py-1 rounded-md font-bold uppercase tracking-wider border border-slate-200">${n.trim()}</span>`).join('')
-                            : `<span class="text-[9px] opacity-60 italic text-slate-400">Solo Mission</span>`
-                        }</div>
-                        <div id="modal-giglist-attendees-${entry['Journal Key']?.replace(/[^a-z0-9]/gi,'_')}" class="hidden">
-                            <p class="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-1">Also on GigList</p>
-                            <div class="flex flex-wrap gap-1.5" id="modal-giglist-attendees-list-${entry['Journal Key']?.replace(/[^a-z0-9]/gi,'_')}"></div>
+                        <div id="modal-companions-${entry['Journal Key']?.replace(/[^a-z0-9]/gi,'_')}" class="flex flex-wrap gap-1.5">
+                            <span class="text-[9px] opacity-60 italic text-slate-400">Loading…</span>
                         </div>
                     </div>
                 </div>
