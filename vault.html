@@ -740,7 +740,6 @@
                         <p class="text-[9px] font-black uppercase tracking-widest text-slate-400">Favourite Show</p>
                         <p id="profile-fav-show" class="text-sm font-black text-slate-800 truncate">--</p>
                     </div>
-                </div>
             </div>
 
             <!-- Edit mode — hidden until Edit tapped -->
@@ -778,37 +777,53 @@
                     Save
                 </button>
             </div>
-        </div>
+            </div>
 
-        <!-- ── Stats strip ── -->
-        <div id="profile-stats-grid" class="grid grid-cols-2 gap-3">
-            <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm text-center">
-                <p class="text-[9px] font-black uppercase text-slate-400 tracking-widest">Total Gigs</p>
-                <p id="profile-stat-gigs" class="text-3xl font-black text-indigo-600 leading-none mt-1">--</p>
+            <!-- ── Stats strip ── -->
+            <div id="profile-stats-grid" class="grid grid-cols-2 gap-3">
+                <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm text-center">
+                    <p class="text-[9px] font-black uppercase text-slate-400 tracking-widest">Total Gigs</p>
+                    <p id="profile-stat-gigs" class="text-3xl font-black text-indigo-600 leading-none mt-1">--</p>
+                </div>
+                <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm text-center">
+                    <p class="text-[9px] font-black uppercase text-slate-400 tracking-widest">Years Active</p>
+                    <p id="profile-stat-years" class="text-3xl font-black text-slate-800 leading-none mt-1">--</p>
+                </div>
+                <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm text-center">
+                    <p class="text-[9px] font-black uppercase text-slate-400 tracking-widest">Venues</p>
+                    <p id="profile-stat-venues" class="text-3xl font-black text-slate-800 leading-none mt-1">--</p>
+                </div>
+                <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm text-center">
+                    <p class="text-[9px] font-black uppercase text-slate-400 tracking-widest">First Show</p>
+                    <p id="profile-stat-first-show" class="text-sm font-black text-slate-800 leading-tight mt-1 px-1">--</p>
+                </div>
             </div>
-            <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm text-center">
-                <p class="text-[9px] font-black uppercase text-slate-400 tracking-widest">Years Active</p>
-                <p id="profile-stat-years" class="text-3xl font-black text-slate-800 leading-none mt-1">--</p>
-            </div>
-            <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm text-center">
-                <p class="text-[9px] font-black uppercase text-slate-400 tracking-widest">Venues</p>
-                <p id="profile-stat-venues" class="text-3xl font-black text-slate-800 leading-none mt-1">--</p>
-            </div>
-            <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm text-center">
-                <p class="text-[9px] font-black uppercase text-slate-400 tracking-widest">First Show</p>
-                <p id="profile-stat-first-show" class="text-sm font-black text-slate-800 leading-tight mt-1 px-1">--</p>
-            </div>
-        </div>
 
-        <!-- ── Achievements ── -->
-        <!-- TODO (step 6): migrate achievements.js rendering into this section -->
-        <div id="profile-achievements-section" class="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-6">
-            <p class="text-[10px] font-black uppercase text-indigo-500 tracking-widest mb-4">Achievements</p>
-            <div id="profile-achievements-container" class="grid grid-cols-2 gap-3">
-                <!-- Injected by profile.js / achievements.js -->
-                <p class="text-xs text-slate-400 italic">Loading achievements…</p>
+            <!-- ── Badge strip + achievements drill-in ── -->
+            <div id="profile-achievements-section">
+
+                <!-- Profile strip: compact preview, always visible -->
+                <div class="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-5">
+                    <div id="profile-badge-strip">
+                        <!-- Injected by achievements.js renderBadgeStrip -->
+                    </div>
+                </div>
+
+                <!-- Full achievements view: shown when "View all" is tapped -->
+                <div id="view-profile-achievements" class="hidden mt-3 bg-white rounded-[2rem] border border-slate-100 shadow-sm p-5">
+                    <div class="flex items-center gap-3 mb-5 pb-4 border-b border-slate-100">
+                        <button onclick="window.closeAchievements()"
+                                class="w-8 h-8 flex items-center justify-center rounded-xl bg-slate-100 hover:bg-slate-200 transition-colors">
+                            <i data-lucide="arrow-left" class="w-4 h-4 text-slate-600"></i>
+                        </button>
+                        <p class="text-[10px] font-black uppercase text-indigo-500 tracking-widest">Achievements</p>
+                    </div>
+                    <div id="profile-achievements-container" class="space-y-1">
+                        <!-- Injected by achievements.js renderBadges -->
+                    </div>
+                </div>
+
             </div>
-        </div>
 
         <!-- ── Buddies — inline in profile ── -->
         <div id="profile-buddies-section" class="space-y-3">
@@ -953,7 +968,7 @@
                 </div>
             </div>
         </div>
-
+        </div>
     </section>
 
     <!-- ── BAND MODE: SHOWS VIEW ──────────────────────────────────────────────── -->

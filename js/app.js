@@ -1,8 +1,8 @@
 /**
  * GigList Core Engine
- * v5.4.5 — 2026-05-14
+ * v5.5.0 — 2026-05-15
  * -------------------------------------------------------------------
- * ✅ Updated companion / buddy logic in gig modal view to show invite, add, and profile view links
+ * ✅ Overhauled achievements feature - improved layout, drill in, additional achievements
  */
 
 import * as Data from './modules/data.js';
@@ -29,7 +29,7 @@ import { initProfile } from './modules/profile.js';
 import { initBandMode } from './modules/band.js';
 import { applyFilters, buildSummaryLine, hasActiveFilters } from './modules/filters.js';
 
-const APP_VERSION = "5.4.5";
+const APP_VERSION = "5.5.0";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 

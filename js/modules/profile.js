@@ -15,7 +15,7 @@
  */
 
 import { supabase } from './supabase.js';
-import { renderBadges } from './achievements.js';
+import { renderBadges, renderBadgeStrip, buildBadgeDefs, deriveFanType } from './achievements.js';
 import { initPushUI } from './push.js';
 
 // ─── MODULE STATE ─────────────────────────────────────────────────────────────
@@ -467,12 +467,54 @@ function _renderStats(gigs) {
 
 // ─── ACHIEVEMENTS ─────────────────────────────────────────────────────────────
 
+// ─── ACHIEVEMENTS ─────────────────────────────────────────────────────────────
+
 function _renderAchievements(gigs) {
     const section = document.getElementById('profile-achievements-section');
     if (!section) return;
     section.classList.remove('hidden');
-    // Delegate to achievements.js — targets #profile-achievements-container
-    renderBadges(gigs);
+    renderBadges(gigs);          // full page
+    renderBadgeStrip(gigs);      // profile strip
+    _renderFanType(gigs);        // fan type row (remove from identity section)
+}
+
+// wire up the drill-in:
+window.openAchievements = () => {
+    document.getElementById('profile-badge-strip')?.closest('.bg-white')?.classList.add('hidden');
+    document.getElementById('view-profile-achievements')?.classList.remove('hidden');
+};
+
+window.closeAchievements = () => {
+    document.getElementById('view-profile-achievements')?.classList.add('hidden');
+    document.getElementById('profile-badge-strip')?.closest('.bg-white')?.classList.remove('hidden');
+};
+
+function _renderFanType(gigs) {
+    const el = document.getElementById('profile-fan-type');
+    if (!el) return;
+
+    const { groups, statsData } = buildBadgeDefs(gigs);
+    const fanType = deriveFanType(groups, statsData);
+
+    if (!fanType) {
+        el.classList.add('hidden');
+        return;
+    }
+
+    el.classList.remove('hidden');
+    el.innerHTML = `
+        <i data-lucide="${fanType.icon}" class="w-3.5 h-3.5 text-indigo-500 flex-shrink-0 mt-0.5" aria-hidden="true"></i>
+        <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2">
+                <span class="text-sm font-black text-slate-900">${fanType.label}</span>
+                <button onclick="this.nextElementSibling.classList.toggle('hidden')"
+                        class="text-[9px] font-black text-indigo-400 hover:text-indigo-600 uppercase tracking-widest transition-colors">
+                    why?
+                </button>
+                <span class="hidden text-[10px] text-slate-500 font-bold italic">${fanType.desc}</span>
+            </div>
+        </div>`;
+    if (window.lucide) lucide.createIcons();
 }
 
 // ─── AVATAR UPLOAD ────────────────────────────────────────────────────────────
