@@ -78,13 +78,18 @@ export async function initSocial(currentUser) {
     if (allNeededIds.length) {
         const { data: profileRows } = await supabase
             .from('profiles')
-            .select('id, username')
+            .select('id, username, display_name, avatar_url')
             .in('id', allNeededIds);
         (profileRows || []).forEach(p => { profileMap[p.id] = p; });
     }
 
     // Buddies is symmetric — accepted buddies populate both _following and _followers
-    _following = acceptedIds.map(id => profileMap[id]).filter(Boolean).map(p => ({ id: p.id, username: p.username }));
+    _following = acceptedIds.map(id => profileMap[id]).filter(Boolean).map(p => ({
+        id:           p.id,
+        username:     p.username,
+        display_name: p.display_name || p.username,
+        avatar_url:   p.avatar_url || null,
+    }));
     _followers = _following;
 
     window._following = _following;
@@ -174,18 +179,137 @@ function _renderBuddyList() {
         return;
     }
 
-    container.innerHTML = _following.map(f => `
-        <div class="flex items-center justify-between gap-2">
-            <button onclick="window._openProfileFromModal('${userId}')"
-                    class="text-sm font-black text-slate-700 hover:text-indigo-600 transition-colors text-left">
-                ${f.username}
+    // Enrich each buddy with shared show count and last show together
+    const myJournal   = window.journalData || [];
+    const buddyKeys   = window._buddyJournalKeys || {};
+
+    const enriched = _following.map(f => {
+        const sharedKeys = buddyKeys[f.id] ? [...buddyKeys[f.id]] : [];
+        const sharedCount = sharedKeys.length;
+
+        // Find most recent shared show from journal data
+        const sharedShows = myJournal
+            .filter(g => sharedKeys.includes(g['Journal Key']))
+            .sort((a, b) => {
+                const [ad, am, ay] = a.Date.split('/');
+                const [bd, bm, by] = b.Date.split('/');
+                return new Date(by, bm-1, bd) - new Date(ay, am-1, ad);
+            });
+        const lastShow = sharedShows[0];
+        const lastTogether = lastShow
+            ? `${lastShow.Band} at ${lastShow.OfficialVenue}`
+            : null;
+
+        return { ...f, sharedCount, lastTogether };
+    }).sort((a, b) => b.sharedCount - a.sharedCount);
+
+    // ── Strip (top 4, shown on profile page) ─────────────────────────────────
+    const tileColours = [
+        { bg: 'bg-indigo-100', text: 'text-indigo-700' },
+        { bg: 'bg-emerald-100', text: 'text-emerald-700' },
+        { bg: 'bg-amber-100', text: 'text-amber-700' },
+        { bg: 'bg-rose-100', text: 'text-rose-700' },
+        { bg: 'bg-sky-100', text: 'text-sky-700' },
+    ];
+
+    const stripContainer = document.getElementById('profile-buddy-strip');
+    if (stripContainer) {
+        const preview = enriched.slice(0, 4);
+        const stripChips = preview.map(f => {
+            const hash    = f.id.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+            const colour  = tileColours[hash % tileColours.length];
+            const initials = (f.display_name || f.username).slice(0, 2).toUpperCase();
+            const avatarEl = f.avatar_url
+                ? `<img src="${f.avatar_url}" alt="${f.display_name || f.username}"
+                        class="w-12 h-12 rounded-full object-cover border-2 border-white shadow-sm"
+                        onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+                : '';
+            const initialsEl = `<div class="w-12 h-12 rounded-full flex items-center justify-center text-sm font-black ${colour.bg} ${colour.text} ${f.avatar_url ? 'hidden' : ''}">${initials}</div>`;
+
+            return `
+            <button onclick="window.openProfile('${f.id}')"
+                    class="flex flex-col items-center gap-1.5 flex-shrink-0">
+                <div class="relative">
+                    ${avatarEl}${initialsEl}
+                </div>
+                <span class="text-[8px] font-black text-slate-500 text-center leading-tight max-w-[48px]">${f.display_name || f.username}</span>
+                ${f.sharedCount > 0
+                    ? `<span class="text-[8px] font-black text-indigo-500">${f.sharedCount} shared</span>`
+                    : `<span class="text-[8px] text-slate-300 font-bold">no shows yet</span>`}
+            </button>`;
+        }).join('');
+
+        const findBuddySlot = `
+            <div class="flex flex-col items-center gap-1.5 flex-shrink-0">
+                <div class="w-12 h-12 rounded-full flex items-center justify-center border border-dashed border-slate-200 bg-slate-50">
+                    <i data-lucide="user-plus" class="w-4 h-4 text-slate-300"></i>
+                </div>
+                <span class="text-[8px] font-black text-slate-300 text-center leading-tight max-w-[48px]">Find buddies</span>
+            </div>`;
+
+        stripContainer.innerHTML = `
+            <div class="flex items-center justify-between mb-3">
+                <span class="text-[10px] font-black uppercase tracking-widest text-slate-500">Gig Buddies</span>
+                <button onclick="window.openBuddyList()"
+                        class="text-[10px] font-black text-indigo-500 uppercase tracking-widest hover:text-indigo-700 transition-colors">
+                    ${enriched.length} buddies · View all ›
+                </button>
+            </div>
+            <div class="flex gap-4 justify-between">
+                ${stripChips}
+                ${enriched.length < 5 ? findBuddySlot : ''}
+            </div>`;
+
+        if (window.lucide) lucide.createIcons();
+    }
+
+    // ── Full list (shown in drill-in view) ────────────────────────────────────
+    container.innerHTML = enriched.map(f => {
+        const hash    = f.id.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+        const colour  = tileColours[hash % tileColours.length];
+        const initials = (f.display_name || f.username).slice(0, 2).toUpperCase();
+        const myCount = myJournal.length;
+        const buddyGigCount = (buddyKeys[f.id]?.size ?? 0); // approximate from shared data
+
+        const avatarEl = f.avatar_url
+            ? `<img src="${f.avatar_url}" alt="${f.display_name || f.username}"
+                    class="w-11 h-11 rounded-full object-cover border-2 border-white shadow-sm flex-shrink-0"
+                    onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+            : '';
+        const initialsEl = `<div class="w-11 h-11 rounded-full flex items-center justify-center text-sm font-black flex-shrink-0 ${colour.bg} ${colour.text} ${f.avatar_url ? 'hidden' : ''}">${initials}</div>`;
+
+        const lastLine = f.lastTogether
+            ? `<span class="text-[9px] text-slate-400 italic mt-0.5">Last together: ${f.lastTogether}</span>`
+            : `<span class="text-[9px] text-indigo-400 italic mt-0.5">No shows together yet — change that! 🎸</span>`;
+
+        return `
+        <div class="flex items-center gap-3 py-3 border-b border-slate-50 last:border-0">
+            <button onclick="window.openProfile('${f.id}')" class="flex-shrink-0">
+                ${avatarEl}${initialsEl}
             </button>
-            <button onclick="window.unfollowUser('${f.id}', '${f.username}')"
-                    class="text-[10px] font-bold text-slate-400 hover:text-red-500 transition-colors uppercase tracking-widest">
-                Remove
-            </button>
-        </div>
-    `).join('');
+            <div class="flex-1 min-w-0">
+                <div class="flex items-center justify-between">
+                    <button onclick="window.openProfile('${f.id}')"
+                            class="text-sm font-black text-slate-800 hover:text-indigo-600 transition-colors">
+                        ${f.display_name || f.username}
+                    </button>
+                    <button onclick="window.unfollowUser('${f.id}', '${f.username}')"
+                            class="text-[9px] font-bold text-slate-300 hover:text-red-400 transition-colors uppercase tracking-widest ml-2 flex-shrink-0">
+                        Remove
+                    </button>
+                </div>
+                <div class="flex gap-1.5 mt-1 flex-wrap">
+                    ${f.sharedCount > 0
+                        ? `<span class="text-[9px] font-black bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full">${f.sharedCount} together</span>`
+                        : `<span class="text-[9px] font-black bg-slate-50 text-slate-400 px-2 py-0.5 rounded-full">0 together</span>`}
+                </div>
+                ${lastLine}
+            </div>
+            <i data-lucide="chevron-right" class="w-4 h-4 text-slate-300 flex-shrink-0"></i>
+        </div>`;
+    }).join('');
+
+    if (window.lucide) lucide.createIcons();
 }
 
 // ─── SEARCH ───────────────────────────────────────────────────────────────────

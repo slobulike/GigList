@@ -62,7 +62,27 @@ export async function initBuddies(currentUser) {
     // Expose keys globally so other modules can still use them if needed
     window._buddyJournalKeys = _buddyJournalKeys;
 
-    renderBuddyTiles(buddies);
+    // Augment each buddy in _following with pre-computed stats so profile.js
+    // and other modules can read totalGigs / sharedGigs / lastSharedShow directly
+    const myKeys = new Set((window.journalData || []).map(g => g['Journal Key']));
+    window._following = (window._following || []).map(buddy => {
+        const buddyKeys   = _buddyJournalKeys[buddy.id];
+        const sharedKeys  = buddyKeys ? [...buddyKeys].filter(k => myKeys.has(k)) : [];
+        const lastShared  = (window.journalData || [])
+            .filter(g => sharedKeys.includes(g['Journal Key']))
+            .sort((a, b) => {
+                const parse = d => { const [dd,mm,yy] = d.split('/'); return new Date(`${yy}-${mm}-${dd}`); };
+                return parse(b.Date) - parse(a.Date);
+            })[0];
+        return {
+            ...buddy,
+            totalGigs:      buddyKeys?.size ?? 0,
+            sharedGigs:     sharedKeys.length,
+            lastSharedShow: lastShared ? `${lastShared.Band} at ${lastShared.OfficialVenue}` : null,
+        };
+    });
+
+    renderBuddyTiles(window._following);
     wireDrillInSearch();
 
     // Keys are now populated — re-render the table so buddy pills appear.
@@ -99,10 +119,10 @@ function renderBuddyTiles(buddies) {
     const myKeys = new Set((window.journalData || []).map(g => g['Journal Key']));
 
     container.innerHTML = buddies.map(buddy => {
-        const colour   = buddyColour(buddy.id);
+        const colour     = buddyColour(buddy.id);
         const initials   = (buddy.display_name || buddy.username || '?').slice(0, 2).toUpperCase();
-        const totalGigs  = _buddyJournalKeys[buddy.id]?.size ?? 0;
-        const sharedGigs = [...(_buddyJournalKeys[buddy.id] || [])].filter(k => myKeys.has(k)).length;
+        const totalGigs  = buddy.totalGigs  ?? _buddyJournalKeys[buddy.id]?.size ?? 0;
+        const sharedGigs = buddy.sharedGigs ?? [...(_buddyJournalKeys[buddy.id] || [])].filter(k => myKeys.has(k)).length;
         const safeName   = (buddy.display_name || buddy.username || '').replace(/'/g, "\\'");
         const avatarHtml = buddy.avatar_url
             ? `<img src="${buddy.avatar_url}" alt="${buddy.display_name || buddy.username}" class="w-full h-full object-cover rounded-2xl">`

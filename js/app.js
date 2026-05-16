@@ -1,8 +1,8 @@
 /**
  * GigList Core Engine
- * v5.5.0 — 2026-05-15
+ * v5.5.1 — 2026-05-16
  * -------------------------------------------------------------------
- * ✅ Overhauled achievements feature - improved layout, drill in, additional achievements
+ * ✅ Gave buddies tiles in profiles the same look and feel as new Achievements tiles
  */
 
 import * as Data from './modules/data.js';

@@ -165,6 +165,14 @@ async function _renderOwnProfile() {
     // Buddies section — visible for own profile
     document.getElementById('profile-buddies-section')?.classList.remove('hidden');
 
+    // Buddy strip — visible for own profile (full list stays hidden until opened)
+    document.getElementById('profile-buddy-strip')?.closest('.bg-white')?.classList.remove('hidden');
+    document.getElementById('view-profile-buddies')?.classList.add('hidden');
+
+    // Achievement strip — visible for own profile (full list stays hidden until opened)
+    document.getElementById('profile-badge-strip')?.closest('.bg-white')?.classList.remove('hidden');
+    document.getElementById('view-profile-achievements')?.classList.add('hidden');
+
     // Shared callout — hidden for own profile
     const callout = document.getElementById('profile-shared-callout');
     if (callout) callout.classList.add('hidden');
@@ -215,6 +223,9 @@ async function _renderOwnProfile() {
 
     // ── Achievements ──
     _renderAchievements(window.journalData || []);
+
+    // ── Buddy strip ──
+    renderBuddyStrip(window._following || []);
 }
 
 // ─── BUDDY PROFILE (read-only) ────────────────────────────────────────────────
@@ -235,6 +246,14 @@ async function _renderBuddyProfile(userId) {
 
     // Buddies section (Find Buddies search + own tile list) — hidden for buddy profile
     document.getElementById('profile-buddies-section')?.classList.add('hidden');
+
+    // Buddy strip + full buddy list — hidden for buddy profile
+    document.getElementById('profile-buddy-strip')?.closest('.bg-white')?.classList.add('hidden');
+    document.getElementById('view-profile-buddies')?.classList.add('hidden');
+
+    // Achievement strip + full achievements — hidden for buddy profile
+    document.getElementById('profile-badge-strip')?.closest('.bg-white')?.classList.add('hidden');
+    document.getElementById('view-profile-achievements')?.classList.add('hidden');
 
     // Music identity edit button — hidden for buddy profile
     document.getElementById('profile-identity-edit-btn')?.classList.add('hidden');
@@ -473,9 +492,128 @@ function _renderAchievements(gigs) {
     const section = document.getElementById('profile-achievements-section');
     if (!section) return;
     section.classList.remove('hidden');
-    renderBadges(gigs);          // full page
-    renderBadgeStrip(gigs);      // profile strip
-    _renderFanType(gigs);        // fan type row (remove from identity section)
+    renderBadges(gigs);
+    renderBadgeStrip(gigs);
+    _renderFanType(gigs);
+}
+
+// ─── BUDDY STRIP ──────────────────────────────────────────────────────────────
+
+export function renderBuddyStrip(buddies) {
+    const stripContainer = document.getElementById('profile-buddy-strip');
+    const listContainer  = document.getElementById('profile-buddy-list');
+    if (!stripContainer && !listContainer) return;
+
+    if (!buddies?.length) {
+        if (stripContainer) stripContainer.innerHTML = `
+            <div class="flex items-center justify-between mb-3">
+                <span class="text-[10px] font-black uppercase tracking-widest text-slate-500">Gig Buddies</span>
+            </div>
+            <p class="text-xs text-slate-400 italic">No gig buddies yet — search above to find friends.</p>`;
+        return;
+    }
+
+    // Sort by shared gigs descending, then alphabetically
+    const sorted = [...buddies].sort((a, b) => {
+        const diff = (b.sharedGigs ?? 0) - (a.sharedGigs ?? 0);
+        if (diff !== 0) return diff;
+        return (a.display_name || a.username).localeCompare(b.display_name || b.username);
+    });
+
+    const totalBuddies = sorted.length;
+
+    // ── Strip (compact preview — top 4 + find slot, matching achievements strip) ─
+    if (stripContainer) {
+        const preview = sorted.slice(0, 5);
+        const showFindSlot = sorted.length < 5;
+
+        const chips = preview.map(f => {
+            const shared   = f.sharedGigs ?? 0;
+            const name     = f.display_name || f.username;
+            const safeName = name.replace(/'/g, "\\'");
+            const avatarHtml = f.avatar_url
+                ? `<img src="${f.avatar_url}" alt="${name}" class="w-12 h-12 rounded-full object-cover">`
+                : `<div class="w-12 h-12 rounded-full flex items-center justify-center text-white text-sm font-black"
+                        style="background:${_stableColour(name)}">${_initials(name)}</div>`;
+            return `
+            <button onclick="window.openBuddyDrillIn('${f.id}', '${safeName}')"
+                    class="flex flex-col items-center gap-1.5 hover:opacity-80 transition-opacity">
+                ${avatarHtml}
+                <span class="text-[8px] font-black text-slate-500 text-center leading-tight truncate">${name}</span>
+                ${shared > 0
+                    ? `<span class="text-[8px] font-black text-indigo-500">${shared} shared</span>`
+                    : `<span class="text-[8px] text-slate-300 font-bold">no shows yet</span>`}
+            </button>`;
+        }).join('');
+
+        const findSlot = showFindSlot ? `
+            <button onclick="document.getElementById('friend-search-input')?.scrollIntoView({behavior:'smooth'});document.getElementById('friend-search-input')?.focus();"
+                    class="flex flex-col items-center gap-1.5 hover:opacity-80 transition-opacity">
+                <div class="w-12 h-12 rounded-full flex items-center justify-center border-2 border-dashed border-slate-200 bg-slate-50">
+                    <i data-lucide="plus" class="w-5 h-5 text-slate-300"></i>
+                </div>
+                <span class="text-[8px] font-black text-slate-300 text-center leading-tight">Find</span>
+                <span class="text-[8px] text-transparent select-none">·</span>
+            </button>` : '';
+
+        stripContainer.innerHTML = `
+            <div class="flex items-center justify-between mb-3">
+                <span class="text-[10px] font-black uppercase tracking-widest text-slate-500">Gig Buddies</span>
+                <button onclick="window.openBuddyList()"
+                        class="text-[10px] font-black text-indigo-500 uppercase tracking-widest hover:text-indigo-700 transition-colors">
+                    ${totalBuddies} ${totalBuddies === 1 ? 'buddy' : 'buddies'} · View all ›
+                </button>
+            </div>
+            <div class="grid grid-cols-5 gap-2">
+                            ${chips}${findSlot}
+                        </div>`;
+
+        if (window.lucide) lucide.createIcons();
+    }
+    // ── Full list ─────────────────────────────────────────────────────────────
+    if (listContainer) {
+        listContainer.innerHTML = sorted.map(f => {
+            const shared    = f.sharedGigs ?? 0;
+            const last      = f.lastSharedShow ?? null;
+            const name      = f.display_name || f.username;
+            const safeName  = name.replace(/'/g, "\\'");
+            const totalGigs = f.totalGigs ?? '—';
+            const avatarHtml = f.avatar_url
+                ? `<img src="${f.avatar_url}" alt="${name}" class="w-11 h-11 rounded-full object-cover">`
+                : `<div class="w-11 h-11 rounded-full flex items-center justify-center text-white text-sm font-black"
+                        style="background:${_stableColour(name)}">${_initials(name)}</div>`;
+
+            return `
+            <div class="flex items-center gap-3 pb-6 mb-6 border-b border-slate-100 last:border-0 last:mb-0 last:pb-0">
+                <!-- Avatar → profile screen -->
+                <button onclick="window.openProfile('${f.id}')"
+                        class="flex-shrink-0 rounded-full overflow-hidden hover:ring-2 hover:ring-indigo-400 hover:ring-offset-1 transition-all active:scale-95"
+                        aria-label="View ${name}'s profile">
+                    ${avatarHtml}
+                </button>
+                <!-- Rest of row → buddy drill-in -->
+                <button onclick="window.openBuddyDrillIn('${f.id}', '${safeName}')"
+                        class="flex-1 min-w-0 flex items-center gap-2 text-left hover:opacity-80 transition-opacity active:scale-[0.99]"
+                        aria-label="View ${name}'s shows">
+                    <div class="flex-1 min-w-0">
+                        <span class="text-sm font-black text-slate-800">${name}</span>
+                        <div class="flex gap-2 mt-1.5">
+                            <span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">${totalGigs} gigs</span>
+                            ${shared > 0
+                                ? `<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600">${shared} together</span>`
+                                : `<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-slate-50 text-slate-300">no shows yet</span>`}
+                        </div>
+                        ${last
+                            ? `<p class="text-[9px] text-slate-400 italic mt-1 truncate">Last together: ${last}</p>`
+                            : `<p class="text-[9px] text-slate-300 italic mt-1">Plan your first show together →</p>`}
+                    </div>
+                    <i data-lucide="chevron-right" class="w-4 h-4 text-slate-300 flex-shrink-0"></i>
+                </button>
+            </div>`;
+        }).join('');
+
+        if (window.lucide) lucide.createIcons();
+    }
 }
 
 // wire up the drill-in:
@@ -487,6 +625,16 @@ window.openAchievements = () => {
 window.closeAchievements = () => {
     document.getElementById('view-profile-achievements')?.classList.add('hidden');
     document.getElementById('profile-badge-strip')?.closest('.bg-white')?.classList.remove('hidden');
+};
+
+window.openBuddyList = () => {
+    document.getElementById('profile-buddy-strip')?.closest('.bg-white')?.classList.add('hidden');
+    document.getElementById('view-profile-buddies')?.classList.remove('hidden');
+};
+
+window.closeBuddyList = () => {
+    document.getElementById('view-profile-buddies')?.classList.add('hidden');
+    document.getElementById('profile-buddy-strip')?.closest('.bg-white')?.classList.remove('hidden');
 };
 
 function _renderFanType(gigs) {

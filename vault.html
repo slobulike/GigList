@@ -824,56 +824,70 @@
                 </div>
 
             </div>
-
-        <!-- ── Buddies — inline in profile ── -->
-        <div id="profile-buddies-section" class="space-y-3">
-            <p class="text-[10px] font-black uppercase text-slate-400 tracking-widest px-1">Buddies</p>
-
-            <!-- Find Buddies search -->
-            <div class="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-5 space-y-4">
-                <p class="text-[10px] font-black uppercase text-indigo-500 tracking-widest">Find Buddies</p>
-                <div class="relative">
-                    <input type="text" id="friend-search-input"
-                           placeholder="Search by username…"
-                           aria-label="Search for a buddy by username"
-                           autocomplete="off"
-                           class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all">
-                    <button onclick="window.searchFriends()"
-                            aria-label="Search"
-                            class="absolute right-2 top-1/2 -translate-y-1/2 bg-indigo-600 text-white p-2 rounded-xl hover:bg-indigo-700 transition-colors">
-                        <i data-lucide="search" class="w-4 h-4" aria-hidden="true"></i>
-                    </button>
+            <!-- ── Buddy strip ── -->
+            <div class="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-5">
+                <div id="profile-buddy-strip">
+                    <!-- populated by profile.js renderBuddyStrip -->
                 </div>
-                <div id="friend-search-results" class="hidden space-y-2"></div>
             </div>
 
-            <!-- Buddy tiles -->
-            <div id="buddy-tiles-container" class="space-y-3">
-                <!-- Tiles injected by buddies.js -->
+            <!-- Buddy full list drill-in -->
+            <div id="view-profile-buddies" class="hidden mt-3 bg-white rounded-[2rem] border border-slate-100 shadow-sm p-5">
+                <div class="flex items-center gap-3 mb-4 pb-4 border-b border-slate-100">
+                    <button onclick="window.closeBuddyList()"
+                            class="w-8 h-8 flex items-center justify-center rounded-xl bg-slate-100 hover:bg-slate-200 transition-colors">
+                        <i data-lucide="arrow-left" class="w-4 h-4 text-slate-600"></i>
+                    </button>
+                    <p class="text-[10px] font-black uppercase text-indigo-500 tracking-widest">Gig Buddies</p>
+                </div>
+                <div id="profile-buddy-list">
+                    <!-- populated by profile.js renderBuddyStrip -->
+                </div>
             </div>
-        </div>
 
-        <!-- ── Settings actions — own profile only, hidden for buddy view ── -->
-        <div id="profile-settings-section" class="space-y-3">
+            <!-- ── Buddies — inline in profile ── -->
+            <div id="profile-buddies-section" class="space-y-3">
 
-            <p class="text-[10px] font-black uppercase text-slate-400 tracking-widest px-1">Account</p>
-
-            <!-- Privacy -->
-            <div class="bg-white rounded-[2rem] border border-slate-100 shadow-sm px-5 py-4">
-                <div class="flex items-center justify-between gap-4">
-                    <div>
-                        <p class="text-sm font-black text-slate-800">Public Profile</p>
-                        <p class="text-[10px] text-slate-400 mt-0.5 leading-relaxed">Anyone can send you a buddy request. Off = requests need your approval.</p>
+                <!-- Find Buddies search -->
+                <div class="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-5 space-y-4">
+                    <p class="text-[10px] font-black uppercase text-indigo-500 tracking-widest">Find Buddies</p>
+                    <div class="relative">
+                        <input type="text" id="friend-search-input"
+                               placeholder="Search by username…"
+                               aria-label="Search for a buddy by username"
+                               autocomplete="off"
+                               class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all">
+                        <button onclick="window.searchFriends()"
+                                aria-label="Search"
+                                class="absolute right-2 top-1/2 -translate-y-1/2 bg-indigo-600 text-white p-2 rounded-xl hover:bg-indigo-700 transition-colors">
+                            <i data-lucide="search" class="w-4 h-4" aria-hidden="true"></i>
+                        </button>
                     </div>
-                    <button id="privacy-toggle"
-                            onclick="window.togglePrivacy()"
-                            role="switch"
-                            aria-checked="false"
-                            class="relative flex-shrink-0 w-12 h-6 rounded-full transition-colors duration-200 bg-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
-                        <span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 translate-x-0" id="privacy-knob"></span>
-                    </button>
+                    <div id="friend-search-results" class="hidden space-y-2"></div>
                 </div>
             </div>
+
+            <!-- ── Settings actions — own profile only, hidden for buddy view ── -->
+            <div id="profile-settings-section" class="space-y-3">
+
+                <p class="text-[10px] font-black uppercase text-slate-400 tracking-widest px-1">Account</p>
+
+                <!-- Privacy -->
+                <div class="bg-white rounded-[2rem] border border-slate-100 shadow-sm px-5 py-4">
+                    <div class="flex items-center justify-between gap-4">
+                        <div>
+                            <p class="text-sm font-black text-slate-800">Public Profile</p>
+                            <p class="text-[10px] text-slate-400 mt-0.5 leading-relaxed">Anyone can send you a buddy request. Off = requests need your approval.</p>
+                        </div>
+                        <button id="privacy-toggle"
+                                onclick="window.togglePrivacy()"
+                                role="switch"
+                                aria-checked="false"
+                                class="relative flex-shrink-0 w-12 h-6 rounded-full transition-colors duration-200 bg-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
+                            <span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 translate-x-0" id="privacy-knob"></span>
+                        </button>
+                    </div>
+                </div>
 
             <!-- Push Notifications -->
             <div class="bg-white rounded-[2rem] border border-slate-100 shadow-sm px-5 py-4" data-push-row>
@@ -1270,7 +1284,7 @@
     </div>
 </div>
 <div id="modal"
-     class="hidden fixed inset-0 z-[300] bg-slate-900/90 backdrop-blur-sm flex items-center justify-center p-4"
+     class="hidden fixed inset-0 z-[420] bg-slate-900/90 backdrop-blur-sm flex items-center justify-center p-4"
      role="dialog" aria-modal="true" aria-labelledby="modal-title" aria-hidden="true"
      tabindex="-1">
     <div class="bg-white w-full max-w-2xl max-h-[90vh] rounded-[3rem] overflow-hidden shadow-2xl relative overflow-y-auto custom-scrollbar">
@@ -1496,7 +1510,7 @@ window.openCollectionEditor  = openCollectionEditor;
 
 <!-- Buddy drill-in panel — slides in over the tile view -->
 <div id="buddy-drill-in"
-     class="fixed inset-0 z-[350] bg-[#f8fafc] translate-x-full transition-transform duration-300 ease-in-out overflow-y-auto"
+     class="fixed inset-0 z-[400] bg-[#f8fafc] translate-x-full transition-transform duration-300 ease-in-out overflow-y-auto"
      aria-hidden="true">
 
     <!-- Drill-in header -->
