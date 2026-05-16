@@ -1,8 +1,9 @@
 /**
  * GigList Core Engine
- * v5.5.1 — 2026-05-16
+ * v5.5.2 — 2026-05-16
  * -------------------------------------------------------------------
- * ✅ Gave buddies tiles in profiles the same look and feel as new Achievements tiles
+ * ✅ Bug fix to setlist display in band mode
+ * ✅ Added text reveal "eye" to password field on sign in page
  */
 
 import * as Data from './modules/data.js';
@@ -29,7 +30,7 @@ import { initProfile } from './modules/profile.js';
 import { initBandMode } from './modules/band.js';
 import { applyFilters, buildSummaryLine, hasActiveFilters } from './modules/filters.js';
 
-const APP_VERSION = "5.5.0";
+const APP_VERSION = "5.5.2";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
@@ -814,7 +815,19 @@ function initEventListeners() {
 
 // ─── GIG MODAL ────────────────────────────────────────────────────────────────
 
-window.viewGigDetails = (key) => {
+window.viewGigDetails = async (key) => {
+    if (window.isBandMode) {
+        const alreadyLoaded = (window.performanceData || []).some(p => p['Journal Key'] === key);
+        if (!alreadyLoaded) {
+            try {
+                const perfs = await Data.loadPerformances([key], window.allVenues || {});
+                window.performanceData = [...(window.performanceData || []), ...perfs];
+            } catch (err) {
+                console.warn('viewGigDetails: performance fetch failed for', key, err);
+            }
+        }
+    }
+
     UI.openGigModal(key, window.journalData, window.performanceData);
 
     if (currentUser?.isAuthUser && !window.isBandMode) {
