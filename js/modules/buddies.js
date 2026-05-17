@@ -76,9 +76,10 @@ export async function initBuddies(currentUser) {
             })[0];
         return {
             ...buddy,
-            totalGigs:      buddyKeys?.size ?? 0,
-            sharedGigs:     sharedKeys.length,
-            lastSharedShow: lastShared ? `${lastShared.Band} at ${lastShared.OfficialVenue}` : null,
+            totalGigs:       buddyKeys?.size ?? 0,
+            sharedGigs:      sharedKeys.length,
+            lastSharedShow:  lastShared ? `${lastShared.Band} at ${lastShared.OfficialVenue}` : null,
+            lastSharedDate:  lastShared ? lastShared.Date : null,   // ← add this
         };
     });
 

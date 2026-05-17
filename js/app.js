@@ -1,9 +1,9 @@
 /**
  * GigList Core Engine
- * v5.5.2 — 2026-05-16
+ * v5.5.3 — 2026-05-17
  * -------------------------------------------------------------------
- * ✅ Bug fix to setlist display in band mode
- * ✅ Added text reveal "eye" to password field on sign in page
+ * ✅ Bug fix to "Last show together" text in buddy tiles - now shows next show if future shows exist
+ * ✅ Improved performance of Collections tab
  */
 
 import * as Data from './modules/data.js';
@@ -30,7 +30,7 @@ import { initProfile } from './modules/profile.js';
 import { initBandMode } from './modules/band.js';
 import { applyFilters, buildSummaryLine, hasActiveFilters } from './modules/filters.js';
 
-const APP_VERSION = "5.5.2";
+const APP_VERSION = "5.5.3";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 

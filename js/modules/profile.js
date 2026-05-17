@@ -575,6 +575,7 @@ export function renderBuddyStrip(buddies) {
         listContainer.innerHTML = sorted.map(f => {
             const shared    = f.sharedGigs ?? 0;
             const last      = f.lastSharedShow ?? null;
+            const lastDate  = f.lastSharedDate ?? null;
             const name      = f.display_name || f.username;
             const safeName  = name.replace(/'/g, "\\'");
             const totalGigs = f.totalGigs ?? '—';
@@ -604,7 +605,13 @@ export function renderBuddyStrip(buddies) {
                                 : `<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-slate-50 text-slate-300">no shows yet</span>`}
                         </div>
                         ${last
-                            ? `<p class="text-[9px] text-slate-400 italic mt-1 truncate">Last together: ${last}</p>`
+                            ? (() => {
+                                const isUpcoming = lastDate
+                                    ? (() => { const [dd,mm,yy] = lastDate.split('/'); return new Date(`${yy}-${mm}-${dd}`) >= new Date(); })()
+                                    : false;
+                                const label = isUpcoming ? 'Next together:' : 'Last together:';
+                                return `<p class="text-[9px] text-slate-400 italic mt-1 truncate">${label} ${last}</p>`;
+                              })()
                             : `<p class="text-[9px] text-slate-300 italic mt-1">Plan your first show together →</p>`}
                     </div>
                     <i data-lucide="chevron-right" class="w-4 h-4 text-slate-300 flex-shrink-0"></i>

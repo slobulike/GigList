@@ -120,7 +120,15 @@ function _formatAcquiredDate(raw) {
 async function _fetchItems(userId) {
     const { data, error } = await supabase
         .from('collection_items')
-        .select('*')
+        .select([
+            'id', 'user_id', 'type', 'subtype', 'title',
+            'band_id', 'band_name', 'artist_context',
+            'item_date', 'acquired_date',
+            'photos', 'hero_color',
+            'body', 'signed_by', 'provenance',
+            'format', 'label', 'catalogue_number', 'condition',
+            'labels', 'tagged_user_ids',
+        ].join(', '))
         .eq('user_id', userId)
         .order('item_date', { ascending: true });
 
@@ -129,7 +137,13 @@ async function _fetchItems(userId) {
         return [];
     }
     const items = data || [];
-    await _preloadSignedUrls(items);
+
+    // Fire URL signing in the background — don't block the render.
+    // _renderCollectionTab() will be called again once URLs are warm.
+    _preloadSignedUrls(items).then(() => {
+        if (_items.length) _renderCollectionTab();
+    });
+
     return items;
 }
 
@@ -1387,7 +1401,14 @@ export async function init(currentUser) {
     const container = document.getElementById('col-main-container');
     if (!container) return;
 
-    // Show skeleton while loading
+    // If we already have data for this user, re-render immediately — no fetch needed.
+    // refresh() bypasses this and always re-fetches (called after save/delete).
+    if (_items.length > 0) {
+        _renderCollectionTab();
+        return;
+    }
+
+    // First load — show skeleton while fetching
     container.innerHTML = `
         <div class="animate-pulse space-y-4 mt-4">
             <div class="h-20 bg-slate-200 rounded-2xl"></div>
