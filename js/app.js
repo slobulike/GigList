@@ -1,9 +1,8 @@
 /**
  * GigList Core Engine
- * v5.5.3 — 2026-05-17
+ * v5.5.4 — 2026-05-19
  * -------------------------------------------------------------------
- * ✅ Bug fix to "Last show together" text in buddy tiles - now shows next show if future shows exist
- * ✅ Improved performance of Collections tab
+ * ✅ Updated feed logic to generate more cards with more variety
  */
 
 import * as Data from './modules/data.js';
@@ -30,7 +29,7 @@ import { initProfile } from './modules/profile.js';
 import { initBandMode } from './modules/band.js';
 import { applyFilters, buildSummaryLine, hasActiveFilters } from './modules/filters.js';
 
-const APP_VERSION = "5.5.3";
+const APP_VERSION = "5.5.4";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
