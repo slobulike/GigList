@@ -1,8 +1,10 @@
 /**
  * GigList Core Engine
- * v5.5.5 — 2026-05-19
+ * v5.6.0 — 2026-05-21
  * -------------------------------------------------------------------
- * ✅ Updated feed logic to include new buddy logic based cards
+ * ✅ Added new push notification for Weezer Wednesday by updating sw.js and push wrangler file
+ * ✅ Added new Weezer Wednesday shareable canvas
+ * ✅ Added deep link capability across the app for push notification
  */
 
 import * as Data from './modules/data.js';
@@ -28,8 +30,9 @@ import { initBuddies } from './modules/buddies.js';
 import { initProfile } from './modules/profile.js';
 import { initBandMode } from './modules/band.js';
 import { applyFilters, buildSummaryLine, hasActiveFilters } from './modules/filters.js';
+import { initDeepLink, markAppReady } from './modules/deep-link.js';
 
-const APP_VERSION = "5.5.5";
+const APP_VERSION = "5.6.0";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
@@ -335,6 +338,9 @@ export async function initApp() {
     initEventListeners();
     initEditor();
 
+    // Register deep-link listeners (URL params + SW postMessage)
+    initDeepLink();
+
     // Load social data FIRST so _following is ready when the switcher panel builds
         if (currentUser?.isAuthUser && currentUser?.Type === 'Personal') {
             await initSocial(currentUser);
@@ -357,6 +363,9 @@ export async function initApp() {
             initProfile(currentUser),
         ]);
     }
+
+    // App is fully ready — flush any queued deep-link intent
+    markAppReady();
 
     // ── Onboarding & companion notifications ─────────────────────────────────
     if (currentUser?.Type === 'Personal') {
@@ -842,7 +851,35 @@ window.viewGigDetails = async (key) => {
         key,
     });
 };
-window.openGigModal = window.viewGigDetails;
+
+// openGigModal — called by deep-link.js when a push notification is tapped.
+// Accepts either a Journal Key (normal UI path) or a Supabase row id (deep-link
+// path), plus an options object for special modes like Weezer Wednesday.
+window.openGigModal = async (keyOrId, options = {}) => {
+    const { weezerWednesday = false } = options;
+
+    // Resolve the Journal Key from either a key or a numeric/UUID row id.
+    // journalData entries have both 'Journal Key' (the share key) and 'id' (the
+    // Supabase row id). Deep-links arrive with the row id.
+    let key = keyOrId;
+    const byId = (window.journalData || []).find(g => String(g.id) === String(keyOrId));
+    if (byId) {
+        key = byId.journal_key ?? byId['Journal Key'];
+    }
+
+    if (!key) {
+        console.warn('[openGigModal] could not resolve Journal Key for:', keyOrId);
+        return;
+    }
+
+    await window.viewGigDetails(key);
+
+    if (weezerWednesday) {
+        // Weezer Wednesday canvas — wired up in the next PR.
+        console.log('[openGigModal] Weezer Wednesday mode for key:', key);
+        window.openWeezerWednesdayCanvas(key);
+    }
+};
 
 window.closeModal = () => {
     const modal = document.getElementById('modal');

@@ -3,143 +3,449 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GigList | Show Detail</title>
+    <title>Gig List | Show</title>
 
-    <!-- Favicon -->
-    <link rel="stylesheet" href="css/style.css">
     <link rel="icon" type="image/png" href="assets/icon-512.png">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎸</text></svg>">
     <link rel="apple-touch-icon" href="assets/icon-512.png">
+    <link rel="stylesheet" href="css/style.css">
 
-    <!-- Open Graph — defaults overwritten by JS once data loads -->
+    <!-- Open Graph — overwritten by JS once data loads -->
     <meta property="og:type" content="website">
-    <meta property="og:title" content="A Live Music Memory on GigList">
-    <meta property="og:description" content="Setlist, memories and more — tracked on GigList.">
+    <meta property="og:title" content="A Live Music Memory on Gig List">
+    <meta property="og:description" content="Setlist, memories and more — tracked on Gig List.">
     <meta property="og:image" content="https://slobulike.github.io/GigList/assets/og-preview.png">
-    <meta property="og:site_name" content="GigList">
+    <meta property="og:site_name" content="Gig List">
     <meta name="twitter:card" content="summary_large_image">
 
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://unpkg.com/lucide@0.469.0/dist/umd/lucide.min.js"></script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,900;1,900&family=Plus+Jakarta+Sans:ital,wght@0,400;0,600;0,800;1,800&display=swap" rel="stylesheet">
+
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,800;1,800&display=swap');
+        * { -webkit-font-smoothing: antialiased; }
         body { font-family: 'Plus Jakarta Sans', sans-serif; }
+        .font-display {
+            font-family: 'Barlow Condensed', sans-serif;
+            font-weight: 900;
+        }
+
+        /* Loader pulse */
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .spin { animation: spin 0.8s linear infinite; }
+
+        /* Stagger-in for main content sections */
+        @keyframes fadeUp {
+            from { opacity: 0; transform: translateY(16px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+        .fade-up { animation: fadeUp 0.5s ease-out both; }
+        .delay-1 { animation-delay: 0.08s; }
+        .delay-2 { animation-delay: 0.16s; }
+        .delay-3 { animation-delay: 0.24s; }
+        .delay-4 { animation-delay: 0.32s; }
+        .delay-5 { animation-delay: 0.40s; }
+
+        /* Setlist track rows */
+        .track-row {
+            display: flex;
+            align-items: baseline;
+            gap: 0.75rem;
+            padding: 0.625rem 0;
+            border-bottom: 1px solid #f1f5f9;
+        }
+        .track-row:last-child { border-bottom: none; }
+        .track-num {
+            font-size: 10px;
+            font-weight: 800;
+            color: #94a3b8;
+            min-width: 1.25rem;
+            text-align: right;
+            letter-spacing: 0.05em;
+            flex-shrink: 0;
+        }
+        .track-name {
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: #1e293b;
+            line-height: 1.4;
+        }
+
+        /* CTA gradient bar */
+        .cta-bar {
+            background: linear-gradient(to top, #f8fafc 80%, transparent);
+        }
+
+        /* Avatar stack emoji */
+        .avatar-emoji {
+            width: 2rem;
+            height: 2rem;
+            border-radius: 9999px;
+            border: 2px solid white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            flex-shrink: 0;
+        }
+
+        /* Share button active state */
+        .share-btn:active { transform: scale(0.94); }
     </style>
 </head>
-<body class="bg-slate-950 text-slate-100 min-h-screen">
-<div id="loader" class="fixed inset-0 flex items-center justify-center bg-slate-950 z-50">
-    <div class="animate-spin rounded-full h-10 w-10 border-t-2 border-indigo-500"></div>
+
+<body class="bg-[#f8fafc] text-slate-900 min-h-screen selection:bg-indigo-100">
+
+<!-- ── LOADER ──────────────────────────────────────────────────────────────── -->
+<div id="loader" class="fixed inset-0 flex flex-col items-center justify-center bg-[#f8fafc] z-50">
+    <div class="w-10 h-10 text-indigo-600 mb-4">
+        <svg class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+        </svg>
+    </div>
+    <p class="text-[10px] font-black uppercase tracking-widest text-slate-400">Gig List</p>
 </div>
 
-<main id="main-content" class="hidden max-w-md mx-auto p-6 pb-24">
-    <div class="flex justify-center mb-10">
-            <span class="text-xs font-black tracking-[0.3em] uppercase text-indigo-500 bg-indigo-500/10 px-4 py-1.5 rounded-full border border-indigo-500/20">
-                Strictly GigList
-            </span>
-    </div>
+<!-- ── PAGE ────────────────────────────────────────────────────────────────── -->
+<div id="main-content" class="hidden">
 
-    <header class="text-center mb-8">
-        <h1 id="band-name" class="text-5xl font-black italic tracking-tighter mb-2 text-white"></h1>
-        <div id="venue-date" class="text-slate-400 font-medium"></div>
+    <!-- Header — matches app chrome -->
+    <header class="sticky top-0 bg-white/80 backdrop-blur-xl z-40 px-5 py-3 flex justify-between items-center border-b border-slate-100">
+        <a href="index.html" class="flex items-center gap-3 hover:opacity-70 transition-opacity" aria-label="Gig List home">
+            <div class="w-10 h-10 bg-indigo-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-indigo-200 flex-shrink-0">
+                <i data-lucide="music" class="w-6 h-6" aria-hidden="true"></i>
+            </div>
+            <div class="min-w-0">
+                <h1 class="font-display text-2xl italic tracking-tight text-slate-800 leading-none uppercase">Gig List</h1>
+                <p class="text-[10px] text-slate-400 font-bold mt-0.5 leading-none">Live music journal</p>
+            </div>
+        </a>
+        <!-- Share button — top-right -->
+        <button id="share-btn"
+                aria-label="Share this show"
+                class="share-btn flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black uppercase tracking-widest px-4 py-2.5 rounded-full transition-all shadow-md shadow-indigo-200">
+            <i data-lucide="share-2" class="w-3.5 h-3.5" aria-hidden="true"></i>
+            Share
+        </button>
     </header>
 
-    <div id="social-proof" class="bg-slate-900/50 border border-slate-800 rounded-3xl p-5 mb-8 flex items-center justify-between">
-        <div class="flex -space-x-3">
-            <div class="w-10 h-10 rounded-full border-2 border-slate-900 bg-indigo-600 flex items-center justify-center text-xs">🤘</div>
-            <div class="w-10 h-10 rounded-full border-2 border-slate-900 bg-emerald-600 flex items-center justify-center text-xs">🎸</div>
-        </div>
-        <p class="text-xs font-bold text-slate-300">
-            <span id="attendee-count">1</span> GigList user<span id="attendee-plural">s</span> tracked this show
-        </p>
-    </div>
+    <!-- Main scroll area -->
+    <main class="max-w-md mx-auto px-4 pt-6 pb-36 space-y-5">
 
-    <section class="mb-10">
-        <h2 class="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 mb-4 px-1">Setlist</h2>
-        <div id="setlist-content" class="bg-slate-900 border border-slate-800 rounded-3xl p-6 text-sm leading-relaxed italic text-slate-300 whitespace-pre-line">
-            No setlist available for this performance.
-        </div>
-    </section>
+        <!-- ── HERO BLOCK ─────────────────────────────────────────────────── -->
+        <div class="fade-up bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden">
 
-    <section class="fixed bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-slate-950 via-slate-950 to-transparent">
-        <div class="max-w-md mx-auto">
-            <a href="index.html" class="block w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white text-center rounded-2xl font-black uppercase tracking-widest transition-transform active:scale-95 shadow-xl shadow-indigo-500/20">
-                Track your own gigs
+            <!-- Band / artist name -->
+            <div class="px-6 pt-7 pb-5 border-b border-slate-50">
+                <p class="text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-2">Live Show</p>
+                <h2 id="band-name" class="font-display text-6xl italic tracking-tight text-slate-900 leading-none uppercase">—</h2>
+            </div>
+
+            <!-- Venue & Date meta row -->
+            <div class="px-6 py-4 flex items-center gap-3">
+                <div class="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center flex-shrink-0">
+                    <i data-lucide="map-pin" class="w-4 h-4 text-slate-500" aria-hidden="true"></i>
+                </div>
+                <div class="min-w-0">
+                    <p id="venue-name" class="text-sm font-black text-slate-800 truncate">—</p>
+                    <p id="show-date" class="text-[11px] font-bold text-slate-400 mt-0.5">—</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── SOCIAL PROOF ────────────────────────────────────────────────── -->
+        <div id="social-proof-card"
+             class="fade-up delay-1 bg-indigo-600 rounded-[2rem] px-5 py-4 flex items-center justify-between shadow-md shadow-indigo-100">
+            <div>
+                <p class="text-[9px] font-black uppercase tracking-widest text-indigo-300 mb-1">Also tracked this</p>
+                <p class="text-sm font-black text-white">
+                    <span id="attendee-count">1</span> Gig List user<span id="attendee-plural">s</span>
+                </p>
+            </div>
+            <div class="flex -space-x-2">
+                <div class="avatar-emoji bg-indigo-500">🤘</div>
+                <div class="avatar-emoji bg-indigo-400">🎸</div>
+                <div class="avatar-emoji bg-indigo-300 text-indigo-800">🎵</div>
+            </div>
+        </div>
+
+        <!-- ── REVIEW / NOTES ─────────────────────────────────────────────── -->
+        <div id="review-card" class="hidden fade-up delay-2 bg-white rounded-[2rem] border border-slate-100 shadow-sm p-6">
+            <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">Notes</p>
+            <p id="review-text" class="text-sm text-slate-700 leading-relaxed italic"></p>
+        </div>
+
+        <!-- ── SETLIST ────────────────────────────────────────────────────── -->
+        <div class="fade-up delay-2 bg-white rounded-[2rem] border border-slate-100 shadow-sm p-6">
+            <div class="flex items-center justify-between mb-4">
+                <p class="text-[10px] font-black uppercase tracking-widest text-slate-400">Setlist</p>
+                <div id="setlist-count" class="hidden bg-indigo-50 text-indigo-600 text-[10px] font-black px-2.5 py-1 rounded-full"></div>
+            </div>
+            <div id="setlist-content">
+                <p class="text-sm text-slate-400 italic">No setlist available for this performance.</p>
+            </div>
+            <!-- "Show more" expander for long setlists -->
+            <button id="setlist-expand-btn"
+                    class="hidden mt-4 w-full py-2 text-[11px] font-black uppercase tracking-widest text-indigo-500 hover:text-indigo-700 transition-colors"
+                    aria-expanded="false">
+                Show all <span id="setlist-hidden-count"></span> songs
+            </button>
+        </div>
+
+        <!-- ── ADD TO YOUR LIST nudge ─────────────────────────────────────── -->
+        <div id="setlist-url-card" class="hidden fade-up delay-3 bg-white rounded-[2rem] border border-slate-100 shadow-sm p-5 flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center flex-shrink-0">
+                <i data-lucide="list-music" class="w-5 h-5 text-indigo-500" aria-hidden="true"></i>
+            </div>
+            <div class="flex-1 min-w-0">
+                <p class="text-xs font-black text-slate-700">Setlist available</p>
+                <p class="text-xs text-slate-700 mt-0.5">Via setlist.fm</p>
+            </div>
+            <a id="setlist-url-link"
+               href="#"
+               target="_blank"
+               rel="noopener"
+               class="text-[10px] font-black uppercase tracking-widest text-indigo-500 hover:text-indigo-700 transition-colors flex-shrink-0">
+                View →
             </a>
         </div>
-    </section>
-</main>
+
+        <!-- ── PHOTO REVIEW LINK ───────────────────────────────────────────── -->
+        <div id="review-url-card" class="hidden fade-up delay-4 bg-white rounded-[2rem] border border-slate-100 shadow-sm p-5 flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center flex-shrink-0">
+                <i data-lucide="external-link" class="w-5 h-5 text-amber-600" aria-hidden="true"></i>
+            </div>
+            <div class="flex-1 min-w-0">
+                <p class="text-xs font-black text-slate-700">Review or photos</p>
+                <p id="review-url-host" class="text-[10px] text-slate-400 mt-0.5 truncate">—</p>
+            </div>
+            <a id="review-url-link"
+               href="#"
+               target="_blank"
+               rel="noopener"
+               class="text-[10px] font-black uppercase tracking-widest text-amber-600 hover:text-amber-800 transition-colors flex-shrink-0">
+                Open →
+            </a>
+        </div>
+
+        <!-- ── "WANT TO TRACK YOURS?" promo ───────────────────────────────── -->
+        <div class="fade-up delay-5 bg-slate-900 rounded-[2rem] p-6 space-y-4">
+            <div>
+                <p class="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-1">Built for live music fans</p>
+                <p class="font-display text-3xl italic text-white uppercase leading-tight">Track every show<br>you've ever seen.</p>
+            </div>
+            <p class="text-sm text-slate-400 leading-relaxed">Setlists, venues, companions, memories — all in one place. Shared with the people who were there.</p>
+            <a href="index.html"
+               class="block w-full py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white text-center rounded-2xl text-[11px] font-black uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-indigo-900/30">
+                Start your Gig List
+            </a>
+        </div>
+
+    </main>
+
+    <!-- ── STICKY SHARE BAR (mobile-friendly bottom CTA) ──────────────────── -->
+    <div class="fixed bottom-0 left-0 right-0 cta-bar pt-8 pb-6 px-4 z-30 pointer-events-none">
+        <div class="max-w-md mx-auto pointer-events-auto">
+            <button id="share-bottom-btn"
+                    aria-label="Share this show"
+                    class="share-btn w-full py-4 bg-white border border-slate-200 hover:border-indigo-300 text-slate-700 hover:text-indigo-600 rounded-2xl text-[11px] font-black uppercase tracking-widest transition-all shadow-sm flex items-center justify-center gap-2">
+                <i data-lucide="share-2" class="w-4 h-4" aria-hidden="true"></i>
+                Share this show
+            </button>
+        </div>
+    </div>
+
+</div><!-- /main-content -->
 
 <script type="module">
     import { supabase } from './js/modules/supabase.js';
 
+    // ── Helpers ────────────────────────────────────────────────────────────
+
+    function fmt(dateStr) {
+        if (!dateStr || dateStr === 'nan') return 'Date TBC';
+        let d;
+        const parts = dateStr.split('/');
+        if (parts.length === 3) {
+            // DD/MM/YYYY — legacy format used in the CSV import pipeline
+            d = new Date(parts[2], parts[1] - 1, parts[0]);
+        } else {
+            // ISO YYYY-MM-DD (Supabase default) — append noon to avoid UTC midnight rollback
+            d = new Date(dateStr + 'T12:00:00');
+        }
+        if (!d || isNaN(d)) return 'Date TBC';
+        return d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    }
+
+    function hostnameOf(url) {
+        try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return url; }
+    }
+
+    function setlist_html(raw, maxVisible = 12) {
+        const tracks = raw.split('|').map(s => s.trim()).filter(Boolean);
+        if (!tracks.length) return null;
+
+        const container  = document.getElementById('setlist-content');
+        const countEl    = document.getElementById('setlist-count');
+        const expandBtn  = document.getElementById('setlist-expand-btn');
+        const hiddenSpan = document.getElementById('setlist-hidden-count');
+
+        countEl.textContent = `${tracks.length} songs`;
+        countEl.classList.remove('hidden');
+
+        const visible = tracks.slice(0, maxVisible);
+        const hidden  = tracks.slice(maxVisible);
+
+        const rows = (arr, startIdx) => arr.map((t, i) => `
+            <div class="track-row">
+                <span class="track-num">${startIdx + i + 1}</span>
+                <span class="track-name">${t}</span>
+            </div>`).join('');
+
+        container.innerHTML = `<div id="setlist-visible">${rows(visible, 0)}</div>`;
+
+        if (hidden.length) {
+            const hiddenDiv = document.createElement('div');
+            hiddenDiv.id = 'setlist-hidden';
+            hiddenDiv.className = 'hidden';
+            hiddenDiv.innerHTML = rows(hidden, maxVisible);
+            container.appendChild(hiddenDiv);
+
+            hiddenSpan.textContent = hidden.length;
+            expandBtn.classList.remove('hidden');
+
+            expandBtn.addEventListener('click', () => {
+                hiddenDiv.classList.remove('hidden');
+                expandBtn.classList.add('hidden');
+            });
+        }
+    }
+
+    function setupShare(title, text, url) {
+        const doShare = () => {
+            if (navigator.share) {
+                navigator.share({ title, text, url }).catch(() => {});
+            } else {
+                navigator.clipboard.writeText(url).then(() => {
+                    showToast('Link copied!');
+                }).catch(() => {});
+            }
+        };
+        document.getElementById('share-btn').addEventListener('click', doShare);
+        document.getElementById('share-bottom-btn').addEventListener('click', doShare);
+    }
+
+    function showToast(msg) {
+        const t = document.createElement('div');
+        t.className = 'fixed bottom-28 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-xs font-bold px-4 py-2 rounded-full shadow-xl z-50 pointer-events-none';
+        t.textContent = msg;
+        document.body.appendChild(t);
+        setTimeout(() => t.remove(), 2200);
+    }
+
+    // ── Main load ──────────────────────────────────────────────────────────
+
     async function loadPublicGig() {
-        const params = new URLSearchParams(window.location.search);
+        const params     = new URLSearchParams(window.location.search);
         const encodedKey = params.get('k');
 
-        if (!encodedKey) {
-            showError("No show key provided.");
-            return;
-        }
+        if (!encodedKey) { showError('No show key provided.'); return; }
 
         try {
             const rawKey = atob(encodedKey);
-            console.log("Fetching show for key:", rawKey);
 
-            // 1. Fetch Performance (Using lowercase column names from your SQL results)
-            const { data: performance, error: perfError } = await supabase
+            // 1. Performance record
+            const { data: perf, error: perfErr } = await supabase
                 .from('performances')
                 .select('*')
                 .eq('journal_key', rawKey)
-                .limit(1)        // Add this: tells Postgres to stop at one
-                .maybeSingle();  // Add this: handles 0 or 1 row gracefully
+                .limit(1)
+                .maybeSingle();
 
-            if (perfError) throw perfError;
-            if (!performance) throw new Error("Show details not found in database.");
+            if (perfErr) throw perfErr;
+            if (!perf)   throw new Error('Show not found.');
 
-            // 2. Fetch Attendee Count (Table is 'journals' plural based on your state.md)
-            const { data: countData, error: countError } = await supabase
+            // 2. Attendee count
+            const { data: countData } = await supabase
                 .rpc('get_public_attendee_count', { p_journal_key: rawKey });
-            const count = countData ?? 1;
+            const attendeeCount = Math.max(countData ?? 1, 1);
 
-            // 3. Render UI
-            document.getElementById('band-name').textContent = performance.artist;
-            document.getElementById('venue-date').textContent =
-                `${performance.official_venue} • ${performance.date}`;
+            // 3. Populate hero
+            const bandNameEl = document.getElementById('band-name');
+            const venueEl    = document.getElementById('venue-name');
+            const dateEl     = document.getElementById('show-date');
 
-            // Logic for the count (at least 1 if we found the performance)
-            const attendeeCount = count || 1;
+            bandNameEl.textContent = perf.artist;
+            venueEl.textContent    = perf.official_venue || 'Venue unknown';
+            dateEl.textContent     = fmt(perf.date);
+
+            // 4. Social proof
             document.getElementById('attendee-count').textContent = attendeeCount;
-            const pluralEl = document.getElementById('attendee-plural');
-            if (pluralEl) pluralEl.textContent = attendeeCount === 1 ? '' : 's';
+            document.getElementById('attendee-plural').textContent = attendeeCount === 1 ? '' : 's';
 
-            if (performance.setlist) {
-                // Clean up the pipe-separated setlist from your SQL result
-                const formattedSetlist = performance.setlist
-                    .split('|')
-                    .filter(s => s.trim())
-                    .map(s => `• ${s.trim()}`)
-                    .join('\n');
-                document.getElementById('setlist-content').textContent = formattedSetlist;
+            // 5. Review / notes
+            if (perf.notes) {
+                document.getElementById('review-text').textContent = perf.notes;
+                document.getElementById('review-card').classList.remove('hidden');
             }
 
-            document.title = `${performance.artist} at ${performance.official_venue} | GigList`;
-            document.querySelector('meta[property="og:title"]')?.setAttribute('content', `${performance.artist} at ${performance.official_venue}`);
-            document.querySelector('meta[property="og:description"]')?.setAttribute('content', `${performance.date} · ${performance.official_venue} — tracked on GigList`);
+            // 6. Setlist
+            if (perf.setlist) setlist_html(perf.setlist);
+
+            // 7. Setlist URL
+            if (perf.setlist_url) {
+                document.getElementById('setlist-url-link').href = perf.setlist_url;
+                document.getElementById('setlist-url-card').classList.remove('hidden');
+            }
+
+            // 8. Review URL
+            if (perf.review_url) {
+                document.getElementById('review-url-link').href    = perf.review_url;
+                document.getElementById('review-url-host').textContent = hostnameOf(perf.review_url);
+                document.getElementById('review-url-card').classList.remove('hidden');
+            }
+
+            // 9. Page meta
+            const pageTitle = `${perf.artist} at ${perf.official_venue}`;
+            const pageDesc  = `${fmt(perf.date)} · ${perf.official_venue} — tracked on Gig List`;
+            document.title = `${pageTitle} | Gig List`;
+            document.querySelector('meta[property="og:title"]')?.setAttribute('content', pageTitle);
+            document.querySelector('meta[property="og:description"]')?.setAttribute('content', pageDesc);
+
+            // 10. Share
+            setupShare(
+                pageTitle,
+                `${perf.artist} at ${perf.official_venue}, ${fmt(perf.date)} — tracked on Gig List`,
+                window.location.href
+            );
+
+            // Show
             document.getElementById('loader').classList.add('hidden');
             document.getElementById('main-content').classList.remove('hidden');
             if (window.lucide) lucide.createIcons();
 
         } catch (err) {
-            console.error("Public Page Error:", err);
+            console.error('Public page error:', err);
             showError(err.message);
         }
     }
 
     function showError(msg) {
         document.getElementById('loader').innerHTML = `
-            <div class="text-center p-6 max-w-xs">
-                <p class="text-red-400 font-bold mb-4">${msg}</p>
-                <a href="index.html" class="inline-block px-6 py-2 bg-slate-800 rounded-xl text-xs uppercase tracking-widest text-white">Return to GigList</a>
+            <div class="text-center p-8 max-w-xs mx-auto space-y-4">
+                <div class="w-14 h-14 bg-red-50 rounded-2xl flex items-center justify-center mx-auto">
+                    <svg class="w-7 h-7 text-red-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                    </svg>
+                </div>
+                <p class="text-sm font-bold text-slate-700">${msg}</p>
+                <a href="index.html"
+                   class="inline-block px-6 py-2.5 bg-indigo-600 rounded-2xl text-[11px] font-black uppercase tracking-widest text-white hover:bg-indigo-700 transition-colors">
+                    Return to Gig List
+                </a>
             </div>
         `;
     }

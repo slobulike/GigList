@@ -19,6 +19,14 @@ import { buildPushHTTPRequest } from '@pushforge/builder';
 //     Return the user IDs who should receive the notification.
 //   buildPayload(record, oldRecord, env) → Promise<{ title, body, url, tag }>
 //     Return the notification content.
+//
+// URL convention for data.url:
+//   /GigList/vault.html                        — open the app, no specific gig
+//   /GigList/vault.html?open=<journalId>       — open a specific gig modal
+//   /GigList/vault.html?open=<journalId>&ww=1  — open gig + Weezer Wednesday canvas
+//
+//   sw.js reads data.url on notificationclick and routes accordingly.
+//   deep-link.js handles the URL param / postMessage on the client side.
 
 const NOTIFICATIONS = {
 
@@ -27,7 +35,6 @@ const NOTIFICATIONS = {
     description: 'Notify the recipient when someone sends them a buddy request',
     shouldFire: (record) => record.status === 'pending',
     getRecipientIds: async (record) => {
-      // Notify whoever is NOT the initiator
       const recipientId = record.initiator_id === record.requester_id
         ? record.addressee_id
         : record.requester_id;
@@ -38,7 +45,7 @@ const NOTIFICATIONS = {
       return {
         title: '🎸 New buddy request',
         body: `${username} wants to be your gig buddy!`,
-        url: '/GigList/',
+        url: '/GigList/vault.html',        // no specific gig to open
         tag: 'buddy-request',
       };
     },
@@ -51,7 +58,6 @@ const NOTIFICATIONS = {
       oldRecord?.status === 'pending' && record.status === 'accepted',
     getRecipientIds: async (record) => [record.initiator_id],
     buildPayload: async (record, _old, env) => {
-      // The acceptor is whoever is NOT the initiator
       const acceptorId = record.initiator_id === record.requester_id
         ? record.addressee_id
         : record.requester_id;
@@ -59,7 +65,7 @@ const NOTIFICATIONS = {
       return {
         title: '🎉 Buddy request accepted!',
         body: `${username} accepted your request — check out their gig history!`,
-        url: '/GigList/',
+        url: '/GigList/vault.html',        // no specific gig to open
         tag: 'buddy-accepted',
       };
     },
@@ -68,14 +74,13 @@ const NOTIFICATIONS = {
   'memory-tag': {
     event: 'CLIENT',
     description: 'Notify buddies when they are tagged in a collection memory — triggered directly by collection-editor.js, not a DB webhook',
-    // No shouldFire guard — collection-editor only calls this when buddyIds.length > 0
     getRecipientIds: async (record) => record.buddy_ids ?? [],
     buildPayload: async (record, _old, env) => {
       const username = await getUsername(env, record.tagger_id);
       return {
         title: '📼 You were tagged in a memory',
         body: `${username} added a memory and tagged you in it`,
-        url: '/GigList/',
+        url: '/GigList/vault.html',        // no specific item deep-link yet
         tag: 'memory-tag',
       };
     },
@@ -242,16 +247,15 @@ async function handleWebhook(notificationKey, request, env) {
 async function handleOnThisDay(env) {
   const today = new Date();
   const month = today.getMonth() + 1;
-  const day = today.getDate();
+  const day   = today.getDate();
 
-  console.log(`[cron] On This Day — checking for gigs on ${month}/${day}`);
+  console.log(`[cron] On This Day — checking for gigs on ${day}/${month}`);
 
   const allGigs = await supabaseFetch(
     env,
-   `journals?select=id,band,venue,date,user_id`
+    `journals?select=id,band,venue,date,user_id`
   );
 
-  // ADD: log total fetched so pagination truncation is visible
   console.log(`[cron] On This Day — fetched ${allGigs?.length ?? 0} total gigs from Supabase`);
 
   if (!allGigs?.length) {
@@ -259,18 +263,19 @@ async function handleOnThisDay(env) {
     return;
   }
 
-const matches = allGigs.filter((g) => {
-  if (!g.date || g.date === 'nan') return false;
-  if (!g.user_id) return false; // add this line
-  const parts = g.date.split('/');
-  if (parts.length !== 3) return false;
-  return parseInt(parts[0], 10) === day && parseInt(parts[1], 10) === month;
-});
+  const matches = allGigs.filter((g) => {
+    if (!g.date || g.date === 'nan') return false;
+    if (!g.user_id) return false;
+    const parts = g.date.split('/');
+    if (parts.length !== 3) return false;
+    return parseInt(parts[0], 10) === day && parseInt(parts[1], 10) === month;
+  });
 
-  // ADD: log the actual matches so you can see which gigs were candidates
-  console.log(`[cron] On This Day — ${matches.length} match(es):`, JSON.stringify(matches.map(g => ({ id: g.id, artist: g.artist, date: g.date, user_id: g.user_id }))));
+  console.log(`[cron] On This Day — ${matches.length} match(es):`, JSON.stringify(
+    matches.map(g => ({ id: g.id, band: g.band, date: g.date, user_id: g.user_id }))
+  ));
 
-  if (matches.length === 0) {
+  if (!matches.length) {
     console.log('[cron] On This Day — no matches today');
     return;
   }
@@ -280,49 +285,109 @@ const matches = allGigs.filter((g) => {
     return acc;
   }, {});
 
-  const userIds = Object.keys(byUser);
+  const userIds      = Object.keys(byUser);
   const subscriptions = await getSubscriptions(env, userIds);
 
   console.log(`[cron] On This Day — ${matches.length} gig(s) for ${userIds.length} user(s), ${subscriptions.length} subscription(s)`);
 
-  // ADD: log which users have subscriptions vs which don't
   const subscribedUserIds = new Set(subscriptions.map(s => s.user_id));
   const unsubscribed = userIds.filter(id => !subscribedUserIds.has(id));
   if (unsubscribed.length) {
-    console.warn(`[cron] On This Day — no subscription found for user_id(s): ${unsubscribed.join(', ')}`);
+    console.warn(`[cron] On This Day — no subscription for user_id(s): ${unsubscribed.join(', ')}`);
   }
 
-for (const sub of subscriptions) {
-  const userGigs = byUser[sub.user_id];
-  if (!userGigs) continue;
+  for (const sub of subscriptions) {
+    const userGigs = byUser[sub.user_id];
+    if (!userGigs) continue;
 
-  userGigs.sort((a, b) => parseInt(a.date.split('/')[2], 10) - parseInt(b.date.split('/')[2], 10));
-  const gig = userGigs[0];
-  const yearsAgo = today.getFullYear() - parseInt(gig.date.split('/')[2], 10);
-  const extra = userGigs.length > 1 ? ` (+${userGigs.length - 1} more)` : '';
+    // Pick the oldest matching gig; mention extras in the body
+    userGigs.sort((a, b) => parseInt(a.date.split('/')[2], 10) - parseInt(b.date.split('/')[2], 10));
+    const gig      = userGigs[0];
+    const yearsAgo = today.getFullYear() - parseInt(gig.date.split('/')[2], 10);
+    const extra    = userGigs.length > 1 ? ` (+${userGigs.length - 1} more)` : '';
 
-  const payload = {
-    title: '🎸 On this day...',
-    body: `${yearsAgo} year${yearsAgo !== 1 ? 's' : ''} ago you saw ${gig.band} at ${gig.venue}${extra}`,
-    url: '/GigList/',
-    tag: 'on-this-day',
-  };
+    const payload = {
+      title: '🎸 On this day...',
+      body:  `${yearsAgo} year${yearsAgo !== 1 ? 's' : ''} ago you saw ${gig.band} at ${gig.venue}${extra}`,
+      // Deep-link directly to the gig modal using the journal row id
+      url:   `/GigList/vault.html?open=${gig.id}`,
+      tag:   'on-this-day',
+    };
 
-    // ADD: log the payload being sent and to which endpoint
-    console.log(`[cron] On This Day — sending to user ${sub.user_id}, endpoint: ${sub.endpoint.slice(0, 60)}...`);
-    console.log(`[cron] On This Day — payload: "${payload.body}"`);
+    console.log(`[cron] On This Day — sending to user ${sub.user_id}: "${payload.body}"`);
+    console.log(`[cron] On This Day — deep-link url: ${payload.url}`);
 
     try {
       await sendPush(env, sub, payload);
-      // ADD: explicit success log
       console.log(`[cron] On This Day — push succeeded for user ${sub.user_id}`);
     } catch (err) {
-      // ADD: log the full error, not just the 410 handling
       console.error(`[cron] On This Day — push failed for user ${sub.user_id}: status=${err.statusCode} body=${err.body}`);
       if (err.statusCode === 410) await deleteStaleSubscription(env, sub.endpoint);
     }
   }
 }
+
+// ─── Cron: Weezer Wednesday ───────────────────────────────────────────────────
+// Runs every Wednesday (configured in wrangler.toml as: cron = "0 11 * * 3")
+// Sends a push to any user with a Weezer show in their journal.
+// The &ww=1 param triggers the Weezer Wednesday canvas in the app.
+// TODO: extend eligibility to users with Weezer collection items (next PR).
+
+async function handleWeezerWednesday(env) {
+  console.log('[cron] Weezer Wednesday — starting');
+
+  const weezerGigs = await supabaseFetch(
+    env,
+    `journals?select=id,band,venue,date,user_id&band=ilike.weezer`
+  );
+
+  console.log(`[cron] Weezer Wednesday — found ${weezerGigs?.length ?? 0} Weezer gig(s)`);
+
+  if (!weezerGigs?.length) {
+    console.log('[cron] Weezer Wednesday — no Weezer gigs found, skipping');
+    return;
+  }
+
+  // Group by user, pick one gig per user (rotate by ISO week number)
+  const weekNumber = Math.floor(Date.now() / (7 * 24 * 60 * 60 * 1000));
+  const byUser = weezerGigs.reduce((acc, gig) => {
+    (acc[gig.user_id] ??= []).push(gig);
+    return acc;
+  }, {});
+
+  const userIds       = Object.keys(byUser);
+  const subscriptions = await getSubscriptions(env, userIds);
+
+  console.log(`[cron] Weezer Wednesday — ${userIds.length} eligible user(s), ${subscriptions.length} subscription(s)`);
+
+  for (const sub of subscriptions) {
+    const userGigs = byUser[sub.user_id];
+    if (!userGigs) continue;
+
+    // Rotate through the user's Weezer shows week by week
+    const gig  = userGigs[weekNumber % userGigs.length];
+    const year = gig.date ? gig.date.split('/')[2] ?? gig.date.slice(0, 4) : '?';
+
+    const payload = {
+      title: '🎸 Weezer Wednesday',
+      body:  `You saw Weezer at ${gig.venue} in ${year} — relive it →`,
+      // &ww=1 tells the client to open the Weezer Wednesday canvas
+      url:   `/GigList/vault.html?open=${gig.id}&ww=1`,
+      tag:   'weezer-wednesday',
+    };
+
+    console.log(`[cron] Weezer Wednesday — sending to user ${sub.user_id}: "${payload.body}"`);
+
+    try {
+      await sendPush(env, sub, payload);
+      console.log(`[cron] Weezer Wednesday — push succeeded for user ${sub.user_id}`);
+    } catch (err) {
+      console.error(`[cron] Weezer Wednesday — push failed for user ${sub.user_id}: status=${err.statusCode} body=${err.body}`);
+      if (err.statusCode === 410) await deleteStaleSubscription(env, sub.endpoint);
+    }
+  }
+}
+
 // ─── HTTP Handler ─────────────────────────────────────────────────────────────
 
 const CORS = {
@@ -364,7 +429,6 @@ async function handleRequest(request, env) {
   }
 
   // POST /push/webhook/:type — Supabase Database Webhook entry point
-  // Also used by client-triggered notifications (event: 'CLIENT') such as memory-tag.
   const webhookMatch = url.pathname.match(/^\/push\/webhook\/([a-z-]+)$/);
   if (request.method === 'POST' && webhookMatch) {
     return handleWebhook(webhookMatch[1], request, env);
@@ -388,7 +452,14 @@ export default {
     return handleRequest(request, env);
   },
 
-  async scheduled(_event, env) {
-    await handleOnThisDay(env);
+  async scheduled(event, env) {
+    const cron = event.cron;
+    // "0 7 * * *"  → On This Day    (07:00 UTC daily)
+    // "0 11 * * 3" → Weezer Wednesday (11:00 UTC every Wednesday)
+    if (cron === '0 11 * * 3') {
+      await handleWeezerWednesday(env);
+    } else {
+      await handleOnThisDay(env);
+    }
   },
 };

@@ -1,4 +1,11 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Gig List — Service Worker
+// ─────────────────────────────────────────────────────────────────────────────
+
 const CACHE_NAME = 'gig-list-v1';
+const APP_BASE   = '/GigList/';
+const APP_ROOT   = APP_BASE + 'vault.html';
+
 const ASSETS = [
   './',
   './index.html',
@@ -11,79 +18,121 @@ const ASSETS = [
   './data/performances.csv',
   './assets/icon-192.png',
   './assets/icon-512.png',
-  './assets/badge-72.png'
+  './assets/badge-72.png',
 ];
 
+// ─── Install ──────────────────────────────────────────────────────────────────
 
-// Install Service Worker
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS);
-    })
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
   );
+  self.skipWaiting();
 });
 
+// ─── Activate ─────────────────────────────────────────────────────────────────
 
-// Fetch logic: Try network, fall back to cache
+self.addEventListener('activate', (event) => {
+  event.waitUntil(clients.claim());
+});
+
+// ─── Fetch: network-first, cache fallback ─────────────────────────────────────
+
 self.addEventListener('fetch', (event) => {
   event.respondWith(
     fetch(event.request)
-      .then((response) => {
-        return response;
-      })
-      .catch(() => {
-        return caches.match(event.request);
-      })
+      .then((response) => response)
+      .catch(() => caches.match(event.request))
   );
 });
 
-// ─── Push Notifications ───────────────────────────────────────────────────────
+// ─── Push display ─────────────────────────────────────────────────────────────
 
 self.addEventListener('push', (event) => {
   if (!event.data) return;
 
-  let data;
+  let payload;
   try {
-    data = event.data.json();
-  } catch (e) {
-    // This catches the DevTools "Test" string and prevents the crash
-    data = { title: 'Strictly GigList', body: event.data.text() };
+    payload = event.data.json();
+  } catch {
+    // DevTools "Test push" sends a plain string — handle gracefully
+    payload = { title: 'Gig List', body: event.data.text() };
   }
 
-  const { title, body, url, tag, icon } = data;
+  // Quiet hours: 10 pm – 8 am local time — suppress silently
+  const hour = new Date().getHours();
+  if (hour >= 22 || hour < 8) return;
 
-  // The current time is 4:50 PM, so this check will pass right now!
-  //const hour = new Date().getHours();
-  //if (hour >= 22 || hour < 8) return;
+  const { title = 'Gig List', body = 'New update available', icon, badge, tag, data = {} } = payload;
+
+  // Normalise the deep-link URL:
+  // If the push supplies data.url directly, use it.
+  // If it only supplies data.journalId (legacy fallback), build the url here.
+  // If neither, default to the app root.
+  if (!data.url && data.journalId) {
+    data.url = `${APP_ROOT}?open=${encodeURIComponent(data.journalId)}`;
+  }
+  if (!data.url) {
+    data.url = APP_ROOT;
+  }
 
   event.waitUntil(
-    self.registration.showNotification(title || 'Strictly GigList', {
-      body: body || 'New update available',
-      tag: tag || 'giglist',
-      // Remove the leading slash to keep it relative to the SW location
-      icon: icon || './assets/icon-192.png',
-      badge: './assets/badge-72.png',
-      data: { url: url || './' },
+    self.registration.showNotification(title, {
+      body,
+      tag:    tag    ?? 'giglist',
+      icon:   icon   ?? './assets/icon-192.png',
+      badge:  badge  ?? './assets/badge-72.png',
+      data,
       vibrate: [100, 50, 100],
     })
   );
 });
 
+// ─── Notification click — deep-link routing ───────────────────────────────────
+//
+// URL convention for data.url (set by giglist-push Cloudflare Worker):
+//   vault.html                           → open / focus the app
+//   vault.html?open=<journalId>          → open a specific gig modal
+//   vault.html?open=<journalId>&ww=1     → open gig + Weezer Wednesday canvas
+//
+// Strategy:
+//   Warm (app already open) → focus existing window + postMessage the intent.
+//     deep-link.js picks this up and calls openGigModal() at the right moment.
+//   Cold (app closed)       → openWindow with the full URL.
+//     deep-link.js reads ?open= and ?ww= params on load instead.
+
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
 
-  const url = event.notification.data?.url || '/GigList/';
+  const data       = event.notification.data ?? {};
+  const targetUrl  = new URL(data.url ?? APP_ROOT, self.location.origin).href;
+  const params     = new URL(targetUrl).searchParams;
+  const journalId  = params.get('open') ?? null;
+  const isWW       = params.get('ww') === '1';
 
   event.waitUntil(
-    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
-      for (const client of windowClients) {
-        if (client.url.includes(self.location.origin) && 'focus' in client) {
-          client.focus();
-          return client.navigate(url);
+    clients
+      .matchAll({ type: 'window', includeUncontrolled: true })
+      .then((windowClients) => {
+
+        // ── Warm: existing app window found ──────────────────────────────────
+        const appClient = windowClients.find(c =>
+          c.url.includes(self.location.origin + APP_BASE)
+        );
+
+        if (appClient) {
+          return appClient.focus().then((focused) => {
+            // Tell deep-link.js what to open — no reload needed
+            focused.postMessage({
+              type:            'GIGLIST_DEEP_LINK',
+              journalId,
+              weezerWednesday: isWW,
+            });
+          });
         }
-      }
-      if (clients.openWindow) return clients.openWindow(url);
-    })
+
+        // ── Cold: no app window — open one with URL params as fallback ───────
+        return clients.openWindow(targetUrl);
+      })
   );
 });
