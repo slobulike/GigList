@@ -59,9 +59,9 @@ self.addEventListener('push', (event) => {
     payload = { title: 'Gig List', body: event.data.text() };
   }
 
-  // Quiet hours: 10 pm – 8 am local time — suppress silently
-  const hour = new Date().getHours();
-  if (hour >= 22 || hour < 8) return;
+  // Quiet hours disabled for development — re-enable before shipping:
+  // const hour = new Date().getHours();
+  // if (hour >= 22 || hour < 8) return;
 
   const { title = 'Gig List', body = 'New update available', icon, badge, tag, data = {} } = payload;
 

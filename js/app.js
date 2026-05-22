@@ -1,8 +1,8 @@
 /**
  * GigList Core Engine
- * v5.6.1 — 2026-05-22
+ * v5.6.2 — 2026-05-22
  * -------------------------------------------------------------------
- * ✅ Clashfinder improvements - bug fix to timeline to match boxes, and added zoom functionality
+ * ✅ Improved Weezer Wednesday canvas to show setlist
  */
 
 import * as Data from './modules/data.js';
@@ -30,7 +30,7 @@ import { initBandMode } from './modules/band.js';
 import { applyFilters, buildSummaryLine, hasActiveFilters } from './modules/filters.js';
 import { initDeepLink, markAppReady } from './modules/deep-link.js';
 
-const APP_VERSION = "5.6.1";
+const APP_VERSION = "5.6.2";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
