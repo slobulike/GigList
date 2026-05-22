@@ -1,10 +1,8 @@
 /**
  * GigList Core Engine
- * v5.6.0 — 2026-05-21
+ * v5.6.1 — 2026-05-22
  * -------------------------------------------------------------------
- * ✅ Added new push notification for Weezer Wednesday by updating sw.js and push wrangler file
- * ✅ Added new Weezer Wednesday shareable canvas
- * ✅ Added deep link capability across the app for push notification
+ * ✅ Clashfinder improvements - bug fix to timeline to match boxes, and added zoom functionality
  */
 
 import * as Data from './modules/data.js';
@@ -32,7 +30,7 @@ import { initBandMode } from './modules/band.js';
 import { applyFilters, buildSummaryLine, hasActiveFilters } from './modules/filters.js';
 import { initDeepLink, markAppReady } from './modules/deep-link.js';
 
-const APP_VERSION = "5.6.0";
+const APP_VERSION = "5.6.1";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
