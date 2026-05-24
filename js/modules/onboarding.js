@@ -346,7 +346,7 @@ function _renderCompanionTagsBanner(matches, currentUser) {
                     &mdash; added by <strong class="text-slate-700">${_esc(m.owner_username)}</strong>
                 </p>
             </div>
-            <button onclick="window.viewGigDetails('${m.journal_key.replace(/'/g, "\\'")}')"
+            <button onclick="window.openCompanionPrefillModal('${m.journal_id}', '${m.owner_username.replace(/'/g, "\\'")}')"
                     class="flex-shrink-0 bg-slate-900 text-white text-[10px] font-black px-3 py-1.5 rounded-full hover:bg-slate-700 transition-all active:scale-95 uppercase tracking-widest ml-2">
                 View
             </button>

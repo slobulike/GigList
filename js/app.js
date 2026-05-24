@@ -1,8 +1,11 @@
 /**
  * GigList Core Engine
- * v5.6.2 — 2026-05-22
+ * v5.7.0 — 2026-05-24
  * -------------------------------------------------------------------
- * ✅ Improved Weezer Wednesday canvas to show setlist
+ * ✅ Fixed companion match modal to load a prefilled addgigmodal when viewing a matched show
+ * ✅ Updated clashfinder to include "lock in" button to allow users to cache their clashfinder results and avoid network issues
+ * ✅ Updated sw.js to handle no network for clashfinder
+ * ✅ Fixed bug where editor modal loaded behind gig modal
  */
 
 import * as Data from './modules/data.js';

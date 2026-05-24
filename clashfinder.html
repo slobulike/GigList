@@ -179,6 +179,7 @@
         #loading-screen p { color:#4a4a6a; font-size:11px; font-weight:800;
             text-transform:uppercase; letter-spacing:0.1em; margin-top:12px; }
     </style>
+    <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
 </head>
 <body>
 
@@ -186,13 +187,39 @@
 <div id="loading-screen">
     <div style="width:32px;height:32px;border:3px solid #2a2a40;border-top-color:#4f46e5;border-radius:50%;animation:spin 0.7s linear infinite;"></div>
     <p>Loading lineup…</p>
-    <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
 </div>
 
 <!-- Auth nudge -->
 <div id="auth-nudge">
     🔒 Sign in to save your picks across devices and archive the shows you saw.
     <a href="index.html" style="color:#a78bfa; font-weight:800; margin-left:6px;">Sign in →</a>
+</div>
+
+<!-- ── Festival-day lock-in nudge banner ── -->
+<div id="lockin-banner" style="display:none; background:#0e2010; border-bottom:1px solid #22c55e;
+     padding:10px 14px; flex-shrink:0;">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+        <div>
+            <p style="font-size:11px;font-weight:800;color:#22c55e;margin:0 0 2px;">It's festival day! 🎸</p>
+            <p style="font-size:10px;font-weight:700;color:#4a6a4a;margin:0;line-height:1.4;">
+                Lock in your picks so the clashfinder works offline at the venue.
+            </p>
+        </div>
+        <button onclick="doLockIn()"
+                style="flex-shrink:0; background:#22c55e; border:none; color:#0a0a0f;
+                       font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:0.08em;
+                       padding:8px 14px; border-radius:8px; cursor:pointer; font-family:inherit;">
+            🔒 Lock In
+        </button>
+    </div>
+</div>
+
+<!-- ── Offline mode banner ── -->
+<div id="offline-banner" style="display:none; background:#1a0e00; border-bottom:1px solid #f59e0b;
+     padding:8px 14px; flex-shrink:0;">
+    <p style="font-size:10px;font-weight:800;color:#f59e0b;margin:0;">
+        📵 Offline mode — showing your locked-in picks. Changes will be saved locally.
+    </p>
 </div>
 
 <!-- ── Header ── -->
@@ -210,6 +237,12 @@
                            font-size:9px; font-weight:800; text-transform:uppercase; letter-spacing:0.08em;
                            padding:5px 10px; border-radius:8px; cursor:pointer; font-family:inherit;">
                 + Archive
+            </button>
+            <button id="btn-lockin" onclick="doLockIn()"
+                    style="display:none; background:#0e2010; border:1px solid #22c55e; color:#22c55e;
+                           font-size:9px; font-weight:800; text-transform:uppercase; letter-spacing:0.08em;
+                           padding:5px 10px; border-radius:8px; cursor:pointer; font-family:inherit;">
+                🔒 Lock In
             </button>
             <div style="text-align:right;">
                 <p id="hdr-date" style="font-size:7px;font-weight:800;color:#4a4a6a;text-transform:uppercase;margin:0;">—</p>
@@ -330,6 +363,19 @@
     (async () => {
         sync = await initClashfinderSync(EVENT_SLUG);
 
+        // ── Offline: no snapshot available ───────────────────────────────────
+        if (sync.isOffline && sync.noSnapshot) {
+            document.getElementById('loading-screen').innerHTML = `
+                <p style="font-size:28px;margin:0 0 12px;">📵</p>
+                <p style="color:#f59e0b;font-size:13px;font-weight:800;text-align:center;line-height:1.6;">
+                    You're offline and no locked-in<br>picks were found for this event.
+                </p>
+                <p style="color:#4a4a6a;font-size:11px;font-weight:700;margin-top:8px;">
+                    Connect to the internet to load the lineup.
+                </p>`;
+            return;
+        }
+
         if (!sync.event) {
             document.getElementById('loading-screen').innerHTML =
                 '<p style="color:#ef4444;font-size:13px;font-weight:800;">Event not found.<br>Check the URL.</p>';
@@ -346,8 +392,27 @@
         document.getElementById('hdr-festival-name').textContent = ev.name;
         document.getElementById('hdr-date').textContent = formatDisplayDate(ev.festival_date);
 
-        if (!sync.isAuthed) {
-            document.getElementById('auth-nudge').style.display = 'block';
+        // ── Offline banner ────────────────────────────────────────────────────
+        if (sync.isOffline) {
+            document.getElementById('offline-banner').style.display = 'block';
+            document.getElementById('auth-nudge').style.display = 'none';
+        } else {
+            if (!sync.isAuthed) {
+                document.getElementById('auth-nudge').style.display = 'block';
+            }
+
+            // ── Lock In button + festival-day nudge ───────────────────────────
+            // Check if already locked in (snapshot exists)
+            const alreadyLocked = !!localStorage.getItem('cf_snapshot_' + EVENT_SLUG);
+            if (!alreadyLocked) {
+                // Always show the small Lock In button in the header
+                document.getElementById('btn-lockin').style.display = 'block';
+
+                // On festival day, also show the prominent banner
+                if (ev.festival_date && isFestivalDay(ev.festival_date)) {
+                    document.getElementById('lockin-banner').style.display = 'block';
+                }
+            }
         }
 
         // Build view scaffolding now we know the data
@@ -361,6 +426,33 @@
         // Hide loading screen
         document.getElementById('loading-screen').style.display = 'none';
     })();
+
+    // ── Lock In ───────────────────────────────────────────────────────────────
+    window.doLockIn = function() {
+        if (!sync) return;
+        sync.lockIn();
+        // Hide both the banner and header button
+        document.getElementById('lockin-banner').style.display = 'none';
+        document.getElementById('btn-lockin').style.display = 'none';
+        // Brief confirmation
+        const flash = document.createElement('div');
+        flash.style.cssText = `position:fixed;bottom:60px;left:50%;transform:translateX(-50%);
+            background:#22c55e;color:#0a0a0f;font-size:11px;font-weight:800;
+            padding:8px 16px;border-radius:999px;z-index:500;pointer-events:none;
+            text-transform:uppercase;letter-spacing:0.08em;`;
+        flash.textContent = '🔒 Picks locked in — you\'re ready for the festival!';
+        document.body.appendChild(flash);
+        setTimeout(() => flash.remove(), 3000);
+    };
+
+    // Returns true if the festival's ISO date (YYYY-MM-DD) is today in local time
+    function isFestivalDay(isoDate) {
+        const today = new Date();
+        const [y, m, d] = isoDate.split('-').map(Number);
+        return today.getFullYear() === y &&
+               today.getMonth() + 1 === m &&
+               today.getDate() === d;
+    }
 
     // ── Build the three view containers ──────────────────────────────────────
     function buildViewScaffolding() {

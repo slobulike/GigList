@@ -1391,3 +1391,40 @@ export const openFestivalPrefillModal = ({ date, venue, festival, bands }) => {
 
 // Expose on window so app.js can call it
 window.openFestivalPrefillModal = openFestivalPrefillModal;
+
+
+// Pre-filled add gig modal logic when clicking "View" from companion match notification
+
+export const openCompanionPrefillModal = async (journalId, taggedByUsername) => {
+    const { data: row, error } = await supabase
+        .from('journals')
+        .select('date, band, official_venue, festival, festival_lineups, notable_support')
+        .eq('id', journalId)
+        .single();
+
+    if (error || !row) {
+        window.showToast?.('Could not load show details — try again', 'error');
+        return;
+    }
+
+    editingKey = null;
+    renderEditorModal({
+        Date:               row.date,
+        Band:               row.band,
+        OfficialVenue:      row.official_venue,
+        'Festival?':        row.festival ? 'Y' : 'N',
+        'Festival Lineups': row.festival_lineups || '',
+        'Notable Support':  row.notable_support  || '',
+        'Went With':        '',
+        Comments:           '',
+        Price:              '',
+        Photos:             '',
+        'Review URL':       '',
+    });
+
+    if (taggedByUsername) {
+        _addCompanion({ name: taggedByUsername, userId: null, status: 'legacy' });
+    }
+};
+
+window.openCompanionPrefillModal = openCompanionPrefillModal;

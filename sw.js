@@ -2,7 +2,7 @@
 // Gig List — Service Worker
 // ─────────────────────────────────────────────────────────────────────────────
 
-const CACHE_NAME = 'gig-list-v1';
+const CACHE_NAME = 'gig-list-v2';
 const APP_BASE   = '/GigList/';
 const APP_ROOT   = APP_BASE + 'vault.html';
 
@@ -10,8 +10,11 @@ const ASSETS = [
   './',
   './index.html',
   './vault.html',
+  './clashfinder.html',
   './css/style.css',
   './js/app.js',
+  './js/modules/clashfinder-sync.js',
+  './js/modules/supabase.js',
   './manifest.json',
   './data/users.csv',
   './data/venues.csv',
@@ -33,15 +36,39 @@ self.addEventListener('install', (event) => {
 // ─── Activate ─────────────────────────────────────────────────────────────────
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(clients.claim());
+  // Purge old cache versions so stale assets don't linger
+  event.waitUntil(
+    caches.keys().then(keys =>
+      Promise.all(
+        keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k))
+      )
+    ).then(() => clients.claim())
+  );
 });
 
 // ─── Fetch: network-first, cache fallback ─────────────────────────────────────
+//
+// Strategy:
+//   - Always try the network first.
+//   - On failure (offline), serve from cache if available.
+//   - Cross-origin requests (CDN, Supabase API) are never cached — let them
+//     fail naturally so the app's offline fallback logic can handle it.
 
 self.addEventListener('fetch', (event) => {
+  // Only handle same-origin GET requests
+  if (event.request.method !== 'GET') return;
+  if (!event.request.url.startsWith(self.location.origin)) return;
+
   event.respondWith(
     fetch(event.request)
-      .then((response) => response)
+      .then((response) => {
+        // Opportunistically update the cache for precached assets
+        if (response.ok) {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+        }
+        return response;
+      })
       .catch(() => caches.match(event.request))
   );
 });
