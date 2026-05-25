@@ -6,13 +6,17 @@
  *
  * Layout: two-column
  *   LEFT  (420px)  — dark panel: headline, artist, venue/year, wordmark
- *   RIGHT (780px)  — Spotify artist image + setlist overlay
+ *   RIGHT (780px)  — Spotify artist image + setlist overlay (journal)
+ *                                          OR collector's card (collection)
  *
  * Public API:
  *   window.openWeezerWednesdayCanvas(journalKey)
+ *   window.openWeezerWednesdayCanvasCollection(collectionId)
  *   window.closeWeezerWednesdayCanvas()
  *
- * Called from openGigModal() in gig-modal-patch.js when weezerWednesday===true.
+ * Journal path: called from openGigModal() in gig-modal-patch.js when
+ *   weezerWednesday===true.
+ * Collection path: called from deep-link.js when source==='collection'.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
@@ -33,6 +37,7 @@ const MAX_TRACKS  = 18;         // max setlist rows to render in the right panel
 let _wwModal  = null;
 let _wwCanvas = null;
 let _wwEntry  = null;
+let _wwSource = 'journal'; // 'journal' | 'collection'
 
 // ─── MODAL SCAFFOLD ───────────────────────────────────────────────────────────
 
@@ -176,7 +181,6 @@ async function _resolveSetlist(entry) {
     if (raw) return _parseTracks(raw);
 
     // 2. Not in memory — fetch directly from Supabase
-    // Uses the same supabase client the rest of the app uses
     try {
         const { data } = await window.supabase
             .from('performances')
@@ -193,6 +197,84 @@ async function _resolveSetlist(entry) {
 
 function _parseTracks(raw) {
     return raw.split('|').map(t => t.trim()).filter(Boolean).slice(0, MAX_TRACKS);
+}
+
+// ─── COLLECTION RESOLVER ──────────────────────────────────────────────────────
+
+/**
+ * Fetch a collection item by UUID.
+ * Artist image is fetched via a second query because PostgREST implicit joins
+ * require a declared FK relationship — this avoids that dependency.
+ * Item photo (photos[0]) is used as background first; artist image is fallback.
+ * Returns a normalised entry object shaped for _renderWW, or null on failure.
+ */
+async function _resolveCollectionEntry(collectionId) {
+    try {
+        const { data, error } = await window.supabase
+            .from('collection_items')
+            .select('id, title, type, subtype, format, item_date, acquired_date, condition, band_name, artist_id, photos')
+            .eq('id', collectionId)
+            .maybeSingle();
+
+        if (error) throw error;
+        if (!data) return null;
+
+        // Generate a short-lived signed URL for the item photo.
+        // collection-photos is a private bucket — public URLs 404.
+        // 120s TTL is enough to load and render the canvas.
+        const photoPath = Array.isArray(data.photos) ? data.photos[0] : null;
+        let itemPhotoUrl = null;
+        if (photoPath) {
+            try {
+                const { data: signed } = await window.supabase.storage
+                    .from('collection-photos')
+                    .createSignedUrl(photoPath, 120);
+                itemPhotoUrl = signed?.signedUrl || null;
+            } catch (signErr) {
+                console.warn('[WeezerWednesday] signed URL failed:', signErr);
+            }
+        }
+
+        // Fetch artist spotify image — try artist_id first, fall back to band_name lookup
+        let spotifyImageUrl = null;
+        if (data.artist_id) {
+            const { data: artist } = await window.supabase
+                .from('artists')
+                .select('name, spotify_image_url')
+                .eq('id', data.artist_id)
+                .maybeSingle();
+            spotifyImageUrl = artist?.spotify_image_url || null;
+            console.log('[WeezerWednesday] artist by id:', artist?.name, '| image:', spotifyImageUrl ? 'found' : 'null');
+        }
+        if (!spotifyImageUrl && data.band_name) {
+            const { data: artist } = await window.supabase
+                .from('artists')
+                .select('spotify_image_url')
+                .ilike('name', data.band_name)
+                .maybeSingle();
+            spotifyImageUrl = artist?.spotify_image_url || null;
+            console.log('[WeezerWednesday] artist by band_name fallback:', data.band_name, '| image:', spotifyImageUrl ? 'found' : 'null');
+        }
+
+        return {
+            Band: data.band_name || 'Weezer',
+            // Background: artist Spotify image at low opacity (atmospheric only).
+            // Item photo is rendered as a framed prop in the right panel.
+            spotify_image_url: spotifyImageUrl || null,
+            _collection: {
+                title:         data.title         || null,
+                subtype:       data.subtype       || null,  // type intentionally omitted from display
+                format:        data.format        || null,
+                item_date:     data.item_date     || null,
+                acquired_date: data.acquired_date || null,
+                condition:     data.condition     || null,
+                itemPhotoUrl:  itemPhotoUrl       || null,  // signed URL for framed prop
+            },
+        };
+    } catch (err) {
+        console.warn('[WeezerWednesday] collection fetch failed:', err);
+        return null;
+    }
 }
 
 // ─── IMAGE LOADING ────────────────────────────────────────────────────────────
@@ -217,16 +299,24 @@ function _loadImage(url) {
  *  │▌        │  [Artist image, full bleed]       │
  *  │ WEEZER  │  [Dark gradient from left edge]   │
  *  │WEDNESDAY│                                   │
- *  │         │  01  My Name Is Jonas             │
- *  │ WEEZER  │  02  Undone — The Sweater Song    │
- *  │         │  03  Buddy Holly                  │
+ *  │         │  SETLIST (journal)                │
+ *  │ WEEZER  │  01  My Name Is Jonas             │
+ *  │         │  02  Undone — The Sweater Song    │
  *  │ Brixton │  ...                              │
- *  │ 2011    │  18  Only In Dreams  + N more     │
- *  │         │                                   │
- *  │ GIG LIST│                                   │
+ *  │ 2011    │                                   │
+ *  │         │  COLLECTION (collection)          │
+ *  │ GIG LIST│  Blue Album                       │
+ *  │         │  Album · Studio · Vinyl           │
+ *  │         │  RELEASED  1994                   │
+ *  │         │  ADDED     12 January 2023        │
+ *  │         │  CONDITION Mint                   │
  *  └─────────┴──────────────────────────────────┘
+ *
+ * @param {object} entry   - normalised journal or collection entry
+ * @param {Array}  tracks  - setlist track strings (journal path only)
+ * @param {string} source  - 'journal' | 'collection'
  */
-async function _renderWW(entry, tracks) {
+async function _renderWW(entry, tracks, source = 'journal') {
     if (!_wwCanvas) return;
 
     const s   = WW_SCALE;
@@ -240,7 +330,6 @@ async function _renderWW(entry, tracks) {
     // ── RIGHT PANEL: artist image ─────────────────────────────────────────────
     // Draw first so the left panel sits on top
 
-    // Base dark fill
     ctx.fillStyle = '#111';
     ctx.fillRect(SP * s, 0, (W - SP) * s, H * s);
 
@@ -256,14 +345,16 @@ async function _renderWW(entry, tracks) {
             const oy = (H - dh) / 2;
 
             ctx.save();
-            ctx.globalAlpha = 0.72;
+            // For collection, the item photo is rendered as a framed prop below.
+            // The Spotify artist image sits here as subtle atmosphere only.
+            // For journal, full atmospheric treatment at higher opacity.
+            ctx.globalAlpha = source === 'collection' ? 0.22 : 0.72;
             ctx.drawImage(bgImg, ox * s, oy * s, dw * s, dh * s);
             ctx.restore();
         }
     }
 
     // Gradient over right panel: dark from left edge, transparent to right
-    // so setlist text is always readable while image shows through on the right
     const rightGrad = ctx.createLinearGradient(SP * s, 0, W * s, 0);
     rightGrad.addColorStop(0,    'rgba(10,10,10,0.92)');
     rightGrad.addColorStop(0.35, 'rgba(10,10,10,0.65)');
@@ -271,82 +362,12 @@ async function _renderWW(entry, tracks) {
     ctx.fillStyle = rightGrad;
     ctx.fillRect(SP * s, 0, (W - SP) * s, H * s);
 
-    // ── SETLIST on right panel ────────────────────────────────────────────────
+    // ── RIGHT PANEL CONTENT ───────────────────────────────────────────────────
 
-    if (tracks.length > 0) {
-        const listX    = SP + 36;   // left edge of track text
-        const listTopY = 52;        // first track y
-        const lineH    = (H - listTopY - 48) / MAX_TRACKS;  // dynamic row height
-        const numW     = 28;        // width reserved for track number
-
-        // "SETLIST" label
-        ctx.save();
-        ctx.fillStyle    = WW_BLUE;
-        ctx.globalAlpha  = 0.7;
-        ctx.font         = `800 ${10 * s}px 'Plus Jakarta Sans', sans-serif`;
-        ctx.textAlign    = 'left';
-        ctx.textBaseline = 'top';
-        ctx.letterSpacing = `${2 * s}px`;
-        ctx.fillText('SETLIST', listX * s, listTopY * s);
-        ctx.restore();
-
-        // Thin blue rule under label
-        ctx.save();
-        ctx.fillStyle   = WW_BLUE;
-        ctx.globalAlpha = 0.25;
-        ctx.fillRect(listX * s, (listTopY + 16) * s, 200 * s, 1 * s);
-        ctx.restore();
-
-        const trackStartY = listTopY + 26;
-        const maxTrackW   = (W - listX - numW - 32) * s;   // don't bleed into image
-
-        tracks.forEach((track, i) => {
-            const y = trackStartY + i * lineH;
-
-            // Track number
-            ctx.save();
-            ctx.fillStyle    = WW_BLUE;
-            ctx.globalAlpha  = 0.55;
-            ctx.font         = `700 ${9 * s}px 'Plus Jakarta Sans', sans-serif`;
-            ctx.textAlign    = 'right';
-            ctx.textBaseline = 'middle';
-            ctx.letterSpacing = `${0.5 * s}px`;
-            ctx.fillText(String(i + 1).padStart(2, '0'), (listX + numW - 6) * s, (y + lineH / 2) * s);
-            ctx.restore();
-
-            // Track name — truncate to fit
-            ctx.save();
-            ctx.fillStyle    = 'rgba(255,255,255,0.88)';
-            ctx.font         = `600 ${11.5 * s}px 'Plus Jakarta Sans', sans-serif`;
-            ctx.textAlign    = 'left';
-            ctx.textBaseline = 'middle';
-            ctx.letterSpacing = `${0.2 * s}px`;
-
-            let trackText = track;
-            while (ctx.measureText(trackText).width > maxTrackW && trackText.length > 3) {
-                trackText = trackText.slice(0, -1);
-            }
-            if (trackText !== track) trackText = trackText.trim() + '…';
-
-            ctx.fillText(trackText, (listX + numW) * s, (y + lineH / 2) * s);
-            ctx.restore();
-        });
-
-        // "+ N more" if tracks were capped
-        // (the raw total is passed in as tracks.length after capping at MAX_TRACKS,
-        //  so we surface this via the _wwTotalTracks state if needed — handled below)
-        if (window._wwTotalTracks && window._wwTotalTracks > MAX_TRACKS) {
-            const moreY = trackStartY + MAX_TRACKS * lineH + 4;
-            ctx.save();
-            ctx.fillStyle    = WW_BLUE;
-            ctx.globalAlpha  = 0.6;
-            ctx.font         = `700 ${10 * s}px 'Plus Jakarta Sans', sans-serif`;
-            ctx.textAlign    = 'left';
-            ctx.textBaseline = 'top';
-            ctx.letterSpacing = `${1 * s}px`;
-            ctx.fillText(`+ ${window._wwTotalTracks - MAX_TRACKS} MORE`, (listX + numW) * s, moreY * s);
-            ctx.restore();
-        }
+    if (source === 'collection') {
+        await _renderCollectionPanel(ctx, entry, s, SP, W, H);
+    } else {
+        _renderSetlistPanel(ctx, tracks, s, SP, W, H);
     }
 
     // ── LEFT PANEL: solid dark background ────────────────────────────────────
@@ -375,8 +396,7 @@ async function _renderWW(entry, tracks) {
     ctx.textAlign    = 'left';
     ctx.textBaseline = 'top';
     ctx.letterSpacing = `${2 * s}px`;
-    // Wrap across two lines to fit the narrow panel
-    ctx.fillText('WEEZER', padL * s, padT * s);
+    ctx.fillText('WEEZER',    padL * s, padT * s);
     ctx.fillText('WEDNESDAY', padL * s, (padT + 32) * s);
     ctx.restore();
 
@@ -396,17 +416,14 @@ async function _renderWW(entry, tracks) {
     ctx.textBaseline = 'top';
     ctx.letterSpacing = `${1 * s}px`;
 
-    // Wrap artist name if it won't fit (e.g. future bands)
     const maxLW = (SP - padL - 16) * s;
     let artistText = artist.toUpperCase();
     const words = artistText.split(' ');
     if (words.length > 1 && ctx.measureText(artistText).width > maxLW) {
-        // Simple two-line split at midpoint
         const mid = Math.ceil(words.length / 2);
         ctx.fillText(words.slice(0, mid).join(' '), padL * s, (padT + 78) * s);
         ctx.fillText(words.slice(mid).join(' '),    padL * s, (padT + 124) * s);
     } else {
-        // Single line — scale down if still too wide
         let sz = 44;
         while (ctx.measureText(artistText).width > maxLW && sz > 20) {
             sz -= 2;
@@ -416,37 +433,38 @@ async function _renderWW(entry, tracks) {
     }
     ctx.restore();
 
-    // Venue
-    const venue = entry?.OfficialVenue || entry?.official_venue || entry?.venue || '';
-    if (venue) {
-        ctx.save();
-        ctx.fillStyle    = 'rgba(255,255,255,0.6)';
-        ctx.font         = `600 ${13 * s}px 'Plus Jakarta Sans', sans-serif`;
-        ctx.textAlign    = 'left';
-        ctx.textBaseline = 'top';
-        ctx.letterSpacing = `${0.3 * s}px`;
-        let venueText = venue;
-        while (ctx.measureText(venueText).width > maxLW && venueText.length > 4) {
-            venueText = venueText.slice(0, -1);
+    // Venue + date (journal only)
+    if (source === 'journal') {
+        const venue = entry?.OfficialVenue || entry?.official_venue || entry?.venue || '';
+        if (venue) {
+            ctx.save();
+            ctx.fillStyle    = 'rgba(255,255,255,0.6)';
+            ctx.font         = `600 ${13 * s}px 'Plus Jakarta Sans', sans-serif`;
+            ctx.textAlign    = 'left';
+            ctx.textBaseline = 'top';
+            ctx.letterSpacing = `${0.3 * s}px`;
+            let venueText = venue;
+            while (ctx.measureText(venueText).width > maxLW && venueText.length > 4) {
+                venueText = venueText.slice(0, -1);
+            }
+            if (venueText !== venue) venueText = venueText.trim() + '…';
+            ctx.fillText(venueText, padL * s, (padT + 178) * s);
+            ctx.restore();
         }
-        if (venueText !== venue) venueText = venueText.trim() + '…';
-        ctx.fillText(venueText, padL * s, (padT + 178) * s);
-        ctx.restore();
-    }
 
-    // Date — formatted
-    const rawDate = entry?.Date || entry?.date || '';
-    const dateFormatted = _formatDate(rawDate);
-    if (dateFormatted) {
-        ctx.save();
-        ctx.fillStyle    = WW_BLUE;
-        ctx.globalAlpha  = 0.85;
-        ctx.font         = `700 ${12 * s}px 'Plus Jakarta Sans', sans-serif`;
-        ctx.textAlign    = 'left';
-        ctx.textBaseline = 'top';
-        ctx.letterSpacing = `${0.5 * s}px`;
-        ctx.fillText(dateFormatted.toUpperCase(), padL * s, (padT + 200) * s);
-        ctx.restore();
+        const rawDate = entry?.Date || entry?.date || '';
+        const dateFormatted = _formatDate(rawDate);
+        if (dateFormatted) {
+            ctx.save();
+            ctx.fillStyle    = WW_BLUE;
+            ctx.globalAlpha  = 0.85;
+            ctx.font         = `700 ${12 * s}px 'Plus Jakarta Sans', sans-serif`;
+            ctx.textAlign    = 'left';
+            ctx.textBaseline = 'top';
+            ctx.letterSpacing = `${0.5 * s}px`;
+            ctx.fillText(dateFormatted.toUpperCase(), padL * s, (padT + 200) * s);
+            ctx.restore();
+        }
     }
 
     // ── Wordmark — bottom of left panel ──────────────────────────────────────
@@ -468,6 +486,293 @@ async function _renderWW(entry, tracks) {
     if (shareBtn) shareBtn.disabled = false;
 }
 
+// ─── RIGHT PANEL: SETLIST (journal) ───────────────────────────────────────────
+
+function _renderSetlistPanel(ctx, tracks, s, SP, W, H) {
+    if (tracks.length === 0) return;
+
+    const listX    = SP + 36;
+    const listTopY = 52;
+    const lineH    = (H - listTopY - 48) / MAX_TRACKS;
+    const numW     = 28;
+
+    // "SETLIST" label
+    ctx.save();
+    ctx.fillStyle    = WW_BLUE;
+    ctx.globalAlpha  = 0.7;
+    ctx.font         = `800 ${10 * s}px 'Plus Jakarta Sans', sans-serif`;
+    ctx.textAlign    = 'left';
+    ctx.textBaseline = 'top';
+    ctx.letterSpacing = `${2 * s}px`;
+    ctx.fillText('SETLIST', listX * s, listTopY * s);
+    ctx.restore();
+
+    // Thin blue rule
+    ctx.save();
+    ctx.fillStyle   = WW_BLUE;
+    ctx.globalAlpha = 0.25;
+    ctx.fillRect(listX * s, (listTopY + 16) * s, 200 * s, 1 * s);
+    ctx.restore();
+
+    const trackStartY = listTopY + 26;
+    const maxTrackW   = (W - listX - numW - 32) * s;
+
+    tracks.forEach((track, i) => {
+        const y = trackStartY + i * lineH;
+
+        // Track number
+        ctx.save();
+        ctx.fillStyle    = WW_BLUE;
+        ctx.globalAlpha  = 0.55;
+        ctx.font         = `700 ${9 * s}px 'Plus Jakarta Sans', sans-serif`;
+        ctx.textAlign    = 'right';
+        ctx.textBaseline = 'middle';
+        ctx.letterSpacing = `${0.5 * s}px`;
+        ctx.fillText(String(i + 1).padStart(2, '0'), (listX + numW - 6) * s, (y + lineH / 2) * s);
+        ctx.restore();
+
+        // Track name
+        ctx.save();
+        ctx.fillStyle    = 'rgba(255,255,255,0.88)';
+        ctx.font         = `600 ${11.5 * s}px 'Plus Jakarta Sans', sans-serif`;
+        ctx.textAlign    = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.letterSpacing = `${0.2 * s}px`;
+
+        let trackText = track;
+        while (ctx.measureText(trackText).width > maxTrackW && trackText.length > 3) {
+            trackText = trackText.slice(0, -1);
+        }
+        if (trackText !== track) trackText = trackText.trim() + '…';
+
+        ctx.fillText(trackText, (listX + numW) * s, (y + lineH / 2) * s);
+        ctx.restore();
+    });
+
+    // "+ N more" overflow indicator
+    if (window._wwTotalTracks && window._wwTotalTracks > MAX_TRACKS) {
+        const moreY = trackStartY + MAX_TRACKS * lineH + 4;
+        ctx.save();
+        ctx.fillStyle    = WW_BLUE;
+        ctx.globalAlpha  = 0.6;
+        ctx.font         = `700 ${10 * s}px 'Plus Jakarta Sans', sans-serif`;
+        ctx.textAlign    = 'left';
+        ctx.textBaseline = 'top';
+        ctx.letterSpacing = `${1 * s}px`;
+        ctx.fillText(`+ ${window._wwTotalTracks - MAX_TRACKS} MORE`, (listX + numW) * s, moreY * s);
+        ctx.restore();
+    }
+}
+
+// ─── RIGHT PANEL: COLLECTOR'S CARD (collection) ───────────────────────────────
+
+/**
+ * Renders collection metadata onto the right panel.
+ *
+ * Layout (top-to-bottom, left side of right panel):
+ *   COLLECTION label + rule
+ *   title (large Barlow Condensed)
+ *   subtype · format (subdued)
+ *   RELEASED / ADDED / CONDITION — stacked two-line rows (label above value)
+ *
+ * Item photo rendered as an angled framed prop, lower-right of the panel.
+ * All fields optional — absent values leave no gap.
+ */
+async function _renderCollectionPanel(ctx, entry, s, SP, W, H) {
+    const col = entry?._collection;
+    if (!col) return;
+
+    const listX  = SP + 36;
+    const startY = 52;
+    // Right boundary for text — leaves room for the photo prop
+    const textMaxX = SP + (W - SP) * 0.52; // text occupies left ~52% of right panel
+    const maxW     = (textMaxX - listX) * s;
+
+    // ── COLLECTION section label ────────────────────────────────────────────
+    ctx.save();
+    ctx.fillStyle    = WW_BLUE;
+    ctx.globalAlpha  = 0.7;
+    ctx.font         = `800 ${10 * s}px 'Plus Jakarta Sans', sans-serif`;
+    ctx.textAlign    = 'left';
+    ctx.textBaseline = 'top';
+    ctx.letterSpacing = `${2 * s}px`;
+    ctx.fillText('COLLECTION', listX * s, startY * s);
+    ctx.restore();
+
+    // Thin blue rule
+    ctx.save();
+    ctx.fillStyle   = WW_BLUE;
+    ctx.globalAlpha = 0.25;
+    ctx.fillRect(listX * s, (startY + 16) * s, 180 * s, 1 * s);
+    ctx.restore();
+
+    let cursorY = startY + 32;
+
+    // ── Title ─────────────────────────────────────────────────────────────────
+    if (col.title) {
+        ctx.save();
+        ctx.fillStyle    = WW_WHITE;
+        ctx.textAlign    = 'left';
+        ctx.textBaseline = 'top';
+        ctx.letterSpacing = `${1 * s}px`;
+
+        let sz = 36;
+        ctx.font = `900 ${sz * s}px 'Barlow Condensed', 'Arial Narrow', Impact, sans-serif`;
+        const titleText  = col.title.toUpperCase();
+        const titleWords = titleText.split(' ');
+
+        if (titleWords.length > 1 && ctx.measureText(titleText).width > maxW) {
+            const mid   = Math.ceil(titleWords.length / 2);
+            const line1 = titleWords.slice(0, mid).join(' ');
+            const line2 = titleWords.slice(mid).join(' ');
+            while (
+                (ctx.measureText(line1).width > maxW || ctx.measureText(line2).width > maxW)
+                && sz > 16
+            ) {
+                sz -= 2;
+                ctx.font = `900 ${sz * s}px 'Barlow Condensed', 'Arial Narrow', Impact, sans-serif`;
+            }
+            ctx.fillText(line1, listX * s, cursorY * s);
+            cursorY += sz + 5;
+            ctx.fillText(line2, listX * s, cursorY * s);
+            cursorY += sz + 14;
+        } else {
+            while (ctx.measureText(titleText).width > maxW && sz > 16) {
+                sz -= 2;
+                ctx.font = `900 ${sz * s}px 'Barlow Condensed', 'Arial Narrow', Impact, sans-serif`;
+            }
+            ctx.fillText(titleText, listX * s, cursorY * s);
+            cursorY += sz + 14;
+        }
+        ctx.restore();
+    }
+
+    // ── Subtype · format ──────────────────────────────────────────────────────
+    const typeParts = [col.subtype, col.format]
+        .filter(Boolean)
+        .map(v => v.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '));
+    if (typeParts.length > 0) {
+        ctx.save();
+        ctx.fillStyle    = 'rgba(255,255,255,0.5)';
+        ctx.font         = `600 ${12 * s}px 'Plus Jakarta Sans', sans-serif`;
+        ctx.textAlign    = 'left';
+        ctx.textBaseline = 'top';
+        ctx.letterSpacing = `${0.3 * s}px`;
+        let typeText = typeParts.join(' · ');
+        while (ctx.measureText(typeText).width > maxW && typeText.length > 4) {
+            typeText = typeText.slice(0, -1);
+        }
+        if (typeText !== typeParts.join(' · ')) typeText = typeText.trim() + '…';
+        ctx.fillText(typeText, listX * s, cursorY * s);
+        ctx.restore();
+        cursorY += 20;
+    }
+
+    // ── Metadata rows — stacked two-line (LABEL above value) ─────────────────
+    // Stacked layout avoids any overlap regardless of label or value width.
+    const metaRows = [
+        { label: 'RELEASED',  value: _formatDateLoose(col.item_date) },
+        { label: 'ADDED',     value: _formatDateLoose(col.acquired_date) },
+        { label: 'CONDITION', value: col.condition },
+    ];
+
+    cursorY += 10;
+
+    const labelFont = `700 ${8 * s}px 'Plus Jakarta Sans', sans-serif`;
+    const valueFont = `600 ${13 * s}px 'Plus Jakarta Sans', sans-serif`;
+
+    metaRows.forEach(({ label, value }) => {
+        if (!value) return;
+
+        // Label line
+        ctx.save();
+        ctx.fillStyle    = WW_BLUE;
+        ctx.globalAlpha  = 0.75;
+        ctx.font         = labelFont;
+        ctx.textAlign    = 'left';
+        ctx.textBaseline = 'top';
+        ctx.letterSpacing = `${1.5 * s}px`;
+        ctx.fillText(label, listX * s, cursorY * s);
+        ctx.restore();
+
+        cursorY += 11;
+
+        // Value line (indented 2px for visual separation from label)
+        ctx.save();
+        ctx.fillStyle    = 'rgba(255,255,255,0.88)';
+        ctx.font         = valueFont;
+        ctx.textAlign    = 'left';
+        ctx.textBaseline = 'top';
+        ctx.letterSpacing = `${0.2 * s}px`;
+        let valueText = value;
+        while (ctx.measureText(valueText).width > maxW && valueText.length > 3) {
+            valueText = valueText.slice(0, -1);
+        }
+        if (valueText !== value) valueText = valueText.trim() + '…';
+        ctx.fillText(valueText, (listX + 2) * s, cursorY * s);
+        ctx.restore();
+
+        cursorY += 22; // gap before next row
+    });
+
+    // ── Framed item photo prop ────────────────────────────────────────────────
+    // Drawn last so it sits on top of the gradient and text area.
+    // Positioned lower-right of the right panel, tilted ~4° clockwise.
+    if (col.itemPhotoUrl) {
+        const photoImg = await _loadImage(col.itemPhotoUrl);
+        if (photoImg) {
+            // Polaroid: thin border on top/sides, thick on bottom
+            const borderSide   = 10;  // top + left + right border
+            const borderBottom = 40;  // thick polaroid bottom border
+            const photoSize    = 300; // inner photo square
+            const frameW       = photoSize + borderSide * 2;
+            const frameH       = photoSize + borderSide + borderBottom;
+            const angle        = 4 * Math.PI / 180;
+
+            const iw = photoImg.naturalWidth, ih = photoImg.naturalHeight;
+            const fitScale = Math.max(photoSize / iw, photoSize / ih);
+            const pw = iw * fitScale, ph = ih * fitScale;
+
+            // Anchor frame centre lower-right of the panel
+            const cx = (W - 220) * s;
+            const cy = (H - 200) * s;
+
+            ctx.save();
+            ctx.translate(cx, cy);
+            ctx.rotate(angle);
+
+            // Drop shadow
+            ctx.shadowColor   = 'rgba(0,0,0,0.65)';
+            ctx.shadowBlur    = 28 * s;
+            ctx.shadowOffsetX = 5 * s;
+            ctx.shadowOffsetY = 10 * s;
+
+            // White polaroid frame
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(-(frameW / 2) * s, -(frameH / 2) * s, frameW * s, frameH * s);
+
+            ctx.shadowColor = 'transparent';
+
+            // Photo inside top/side borders
+            const photoOffsetX = (-frameW / 2 + borderSide) * s;
+            const photoOffsetY = (-frameH / 2 + borderSide) * s;
+
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(photoOffsetX, photoOffsetY, photoSize * s, photoSize * s);
+            ctx.clip();
+            ctx.drawImage(
+                photoImg,
+                photoOffsetX + (photoSize - pw) / 2 * s,
+                photoOffsetY + (photoSize - ph) / 2 * s,
+                pw * s, ph * s
+            );
+            ctx.restore(); // remove clip
+            ctx.restore(); // remove rotation + translate
+        }
+    }
+}
+
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 
 function _extractYear(dateStr) {
@@ -477,6 +782,10 @@ function _extractYear(dateStr) {
     return dateStr.length >= 4 ? dateStr.slice(0, 4) : '';
 }
 
+/**
+ * Formats DD/MM/YYYY or ISO date strings to "1 January 2024".
+ * Used for journal dates where the format is known.
+ */
 function _formatDate(dateStr) {
     if (!dateStr || dateStr === 'nan') return '';
     let d;
@@ -490,25 +799,42 @@ function _formatDate(dateStr) {
     return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 }
 
+/**
+ * Loose date formatter for collection fields (item_date, acquired_date).
+ * Handles partial values gracefully:
+ *   "1994"       → "1994"
+ *   "1994-05"    → "May 1994"
+ *   "1994-05-10" → "10 May 1994"
+ *   anything unparseable → returned as-is
+ */
+function _formatDateLoose(dateStr) {
+    if (!dateStr || dateStr === 'nan') return '';
+    const str = dateStr.trim();
+
+    // Year only
+    if (/^\d{4}$/.test(str)) return str;
+
+    // Year-month
+    if (/^\d{4}-\d{2}$/.test(str)) {
+        const d = new Date(str + '-01T12:00:00');
+        if (!isNaN(d)) return d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+    }
+
+    // Full ISO or other parseable
+    const d = new Date(str.length === 10 ? str + 'T12:00:00' : str);
+    if (!isNaN(d)) return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+
+    // Unparseable — return as-is rather than silently drop
+    return str;
+}
+
 function _slug(str) {
     return (str || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
-// ─── PUBLIC API ───────────────────────────────────────────────────────────────
+// ─── SHARED OPEN SETUP ────────────────────────────────────────────────────────
 
-window.openWeezerWednesdayCanvas = async (journalKey) => {
-    const entry = (window.journalData || []).find(g =>
-        (g['Journal Key'] || g.journal_key) === journalKey
-    );
-
-    if (!entry) {
-        console.warn('[WeezerWednesday] journal entry not found for key:', journalKey);
-        return;
-    }
-
-    _wwEntry = entry;
-    window._wwTotalTracks = 0;
-
+function _openCanvas() {
     _ensureWWModal();
 
     const spinner  = document.getElementById('ww-spinner');
@@ -521,13 +847,53 @@ window.openWeezerWednesdayCanvas = async (journalKey) => {
     const modal = document.getElementById('ww-modal');
     modal.style.display = 'flex';
     requestAnimationFrame(() => requestAnimationFrame(() => modal.classList.add('visible')));
+}
 
-    // Resolve setlist — may fetch from Supabase if not in performanceData
+// ─── PUBLIC API ───────────────────────────────────────────────────────────────
+
+/** Journal path — called from gig-modal-patch.js when weezerWednesday===true */
+window.openWeezerWednesdayCanvas = async (journalKey) => {
+    const entry = (window.journalData || []).find(g =>
+        (g['Journal Key'] || g.journal_key) === journalKey
+    );
+
+    if (!entry) {
+        console.warn('[WeezerWednesday] journal entry not found for key:', journalKey);
+        return;
+    }
+
+    _wwEntry  = entry;
+    _wwSource = 'journal';
+    window._wwTotalTracks = 0;
+
+    _openCanvas();
+
     const allTracks = await _resolveSetlist(entry);
     window._wwTotalTracks = allTracks.length;
     const tracks = allTracks.slice(0, MAX_TRACKS);
 
-    await _renderWW(entry, tracks);
+    await _renderWW(entry, tracks, 'journal');
+};
+
+/** Collection path — called from deep-link.js when source==='collection' */
+window.openWeezerWednesdayCanvasCollection = async (collectionId) => {
+    // Show modal + spinner immediately while we fetch
+    _openCanvas();
+
+    const entry = await _resolveCollectionEntry(collectionId);
+
+    if (!entry) {
+        console.warn('[WeezerWednesday] collection entry not found for id:', collectionId);
+        // Hide spinner so user isn't left staring at it
+        const spinner = document.getElementById('ww-spinner');
+        if (spinner) spinner.classList.add('hidden');
+        return;
+    }
+
+    _wwEntry  = entry;
+    _wwSource = 'collection';
+
+    await _renderWW(entry, [], 'collection');
 };
 
 window.closeWeezerWednesdayCanvas = () => {
@@ -540,9 +906,18 @@ window.closeWeezerWednesdayCanvas = () => {
 window._wwDownload = () => {
     if (!_wwCanvas) return;
     const artist = _wwEntry?.Band || _wwEntry?.band || 'weezer';
-    const year   = _extractYear(_wwEntry?.Date || _wwEntry?.date || '');
-    const fname  = `giglist-weezer-wednesday-${_slug(artist)}-${year || new Date().getFullYear()}.png`;
-    const link   = document.createElement('a');
+
+    let identifier;
+    if (_wwSource === 'collection') {
+        const title = _wwEntry?._collection?.title || artist;
+        identifier  = _slug(title);
+    } else {
+        const year  = _extractYear(_wwEntry?.Date || _wwEntry?.date || '');
+        identifier  = `${_slug(artist)}-${year || new Date().getFullYear()}`;
+    }
+
+    const fname = `giglist-weezer-wednesday-${identifier}.png`;
+    const link  = document.createElement('a');
     link.download = fname;
     link.href     = _wwCanvas.toDataURL('image/png');
     link.click();
@@ -553,10 +928,20 @@ window._wwShare = async () => {
     try {
         const blob = await new Promise(resolve => _wwCanvas.toBlob(resolve, 'image/png'));
         if (!blob) return;
+
         const artist = _wwEntry?.Band || _wwEntry?.band || 'weezer';
-        const year   = _extractYear(_wwEntry?.Date || _wwEntry?.date || '');
-        const fname  = `giglist-weezer-wednesday-${_slug(artist)}-${year || new Date().getFullYear()}.png`;
-        const file   = new File([blob], fname, { type: 'image/png' });
+        let identifier;
+        if (_wwSource === 'collection') {
+            const title = _wwEntry?._collection?.title || artist;
+            identifier  = _slug(title);
+        } else {
+            const year  = _extractYear(_wwEntry?.Date || _wwEntry?.date || '');
+            identifier  = `${_slug(artist)}-${year || new Date().getFullYear()}`;
+        }
+
+        const fname = `giglist-weezer-wednesday-${identifier}.png`;
+        const file  = new File([blob], fname, { type: 'image/png' });
+
         if (navigator.canShare({ files: [file] })) {
             await navigator.share({ files: [file], title: 'Weezer Wednesday 🎸 — Gig List' });
         } else {

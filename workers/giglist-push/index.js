@@ -21,9 +21,10 @@ import { buildPushHTTPRequest } from '@pushforge/builder';
 //     Return the notification content.
 //
 // URL convention for data.url:
-//   /GigList/vault.html                        — open the app, no specific gig
-//   /GigList/vault.html?open=<journalId>       — open a specific gig modal
-//   /GigList/vault.html?open=<journalId>&ww=1  — open gig + Weezer Wednesday canvas
+//   /GigList/vault.html                                        — open the app
+//   /GigList/vault.html?open=<journalId>                       — open a gig modal
+//   /GigList/vault.html?open=<journalId>&ww=1                  — gig + WW canvas
+//   /GigList/vault.html?open=<collectionId>&ww=1&source=collection — collection WW canvas
 //
 //   sw.js reads data.url on notificationclick and routes accordingly.
 //   deep-link.js handles the URL param / postMessage on the client side.
@@ -45,7 +46,7 @@ const NOTIFICATIONS = {
       return {
         title: '🎸 New buddy request',
         body: `${username} wants to be your gig buddy!`,
-        url: '/GigList/vault.html',        // no specific gig to open
+        url: '/GigList/vault.html',
         tag: 'buddy-request',
       };
     },
@@ -65,7 +66,7 @@ const NOTIFICATIONS = {
       return {
         title: '🎉 Buddy request accepted!',
         body: `${username} accepted your request — check out their gig history!`,
-        url: '/GigList/vault.html',        // no specific gig to open
+        url: '/GigList/vault.html',
         tag: 'buddy-accepted',
       };
     },
@@ -80,7 +81,7 @@ const NOTIFICATIONS = {
       return {
         title: '📼 You were tagged in a memory',
         body: `${username} added a memory and tagged you in it`,
-        url: '/GigList/vault.html',        // no specific item deep-link yet
+        url: '/GigList/vault.html',
         tag: 'memory-tag',
       };
     },
@@ -225,19 +226,13 @@ async function handleWebhook(notificationKey, request, env) {
       definition.getRecipientIds(record, oldRecord, env),
       definition.buildPayload(record, oldRecord, env),
     ]);
-
-    if (!recipientIds?.length) {
-      console.log(`[webhook] ${notificationKey} — no recipients, skipping`);
-      return new Response('ok');
-    }
-
     const result = await dispatchToUsers(env, recipientIds, payload);
-    console.log(`[webhook] ${notificationKey} — sent ${result.sent}/${result.total}`);
+    console.log(`[webhook] ${notificationKey} — dispatched: ${JSON.stringify(result)}`);
     return new Response(JSON.stringify(result), {
       headers: { 'Content-Type': 'application/json' },
     });
   } catch (err) {
-    console.error(`[webhook] ${notificationKey} error:`, err);
+    console.error(`[webhook] ${notificationKey} — error:`, err);
     return new Response('Internal error', { status: 500 });
   }
 }
@@ -285,7 +280,7 @@ async function handleOnThisDay(env) {
     return acc;
   }, {});
 
-  const userIds      = Object.keys(byUser);
+  const userIds       = Object.keys(byUser);
   const subscriptions = await getSubscriptions(env, userIds);
 
   console.log(`[cron] On This Day — ${matches.length} gig(s) for ${userIds.length} user(s), ${subscriptions.length} subscription(s)`);
@@ -300,7 +295,6 @@ async function handleOnThisDay(env) {
     const userGigs = byUser[sub.user_id];
     if (!userGigs) continue;
 
-    // Pick the oldest matching gig; mention extras in the body
     userGigs.sort((a, b) => parseInt(a.date.split('/')[2], 10) - parseInt(b.date.split('/')[2], 10));
     const gig      = userGigs[0];
     const yearsAgo = today.getFullYear() - parseInt(gig.date.split('/')[2], 10);
@@ -309,7 +303,6 @@ async function handleOnThisDay(env) {
     const payload = {
       title: '🎸 On this day...',
       body:  `${yearsAgo} year${yearsAgo !== 1 ? 's' : ''} ago you saw ${gig.band} at ${gig.venue}${extra}`,
-      // Deep-link directly to the gig modal using the journal row id
       url:   `/GigList/vault.html?open=${gig.id}`,
       tag:   'on-this-day',
     };
@@ -328,61 +321,217 @@ async function handleOnThisDay(env) {
 }
 
 // ─── Cron: Weezer Wednesday ───────────────────────────────────────────────────
-// Runs every Wednesday (configured in wrangler.toml as: cron = "0 11 * * 3")
-// Sends a push to any user with a Weezer show in their journal.
-// The &ww=1 param triggers the Weezer Wednesday canvas in the app.
-// TODO: extend eligibility to users with Weezer collection items (next PR).
+// Runs every Wednesday at 11:00 UTC (wrangler.toml: "0 11 * * 3").
+//
+// Selection strategy — alternates each week between two source pools:
+//   Even ISO week → gig week   (journals)
+//   Odd  ISO week → collection week (collection_items)
+//
+// If the preferred pool is empty or all items are in cooldown, falls back to
+// the other pool. If both pools are exhausted for a user, that user is skipped.
+//
+// Recency guard — stored in Cloudflare KV (binding: WW_HISTORY):
+//   Key:   ww:{userId}:gig        Value: JSON { id, shownAt }
+//   Key:   ww:{userId}:collection Value: JSON { id, shownAt }
+//
+//   An item shown within the last COOLDOWN_MS is excluded from selection.
+//   This prevents a user with 1 collection item and 10 gigs seeing that
+//   same item every collection week — it will be skipped until the cooldown
+//   expires, then fall back to gigs until it clears.
+//
+// wrangler.toml additions required:
+//   [[kv_namespaces]]
+//   binding = "WW_HISTORY"
+//   id      = "<your-kv-namespace-id>"
+
+const COOLDOWN_MS = 4 * 7 * 24 * 60 * 60 * 1000; // 4 weeks
+
+// Returns the ISO week number for a given Date.
+function isoWeekNumber(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+}
+
+// Read last-shown record from KV. Returns { id, shownAt } or null.
+async function wwKvGet(env, userId, source) {
+  if (!env.WW_HISTORY) return null;
+  try {
+    const raw = await env.WW_HISTORY.get(`ww:${userId}:${source}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+// Write last-shown record to KV (fire-and-forget on failure — non-critical).
+async function wwKvSet(env, userId, source, id) {
+  if (!env.WW_HISTORY) return;
+  try {
+    await env.WW_HISTORY.put(
+      `ww:${userId}:${source}`,
+      JSON.stringify({ id, shownAt: Date.now() }),
+      { expirationTtl: Math.ceil(COOLDOWN_MS / 1000) * 2 } // auto-expire after 2× cooldown
+    );
+  } catch (err) {
+    console.warn(`[cron] WW KV write failed for ${userId}/${source}:`, err.message);
+  }
+}
+
+// Pick an item from a pool, excluding anything shown within COOLDOWN_MS.
+// Returns the chosen item or null if the pool is empty / all on cooldown.
+function wwPickItem(pool, lastShown) {
+  if (!pool?.length) return null;
+
+  const now = Date.now();
+  const eligible = pool.filter(item => {
+    if (!lastShown) return true;
+    if (item.id !== lastShown.id) return true;                    // different item — always eligible
+    return (now - lastShown.shownAt) >= COOLDOWN_MS;             // same item — only if cooled down
+  });
+
+  if (!eligible.length) return null;
+
+  // Stable pseudo-random pick within the eligible pool, rotating weekly.
+  // Using week number so the same item isn't always picked if multiple are eligible.
+  const weekNumber = Math.floor(Date.now() / (7 * 24 * 60 * 60 * 1000));
+  return eligible[weekNumber % eligible.length];
+}
 
 async function handleWeezerWednesday(env) {
   console.log('[cron] Weezer Wednesday — starting');
 
+  const today     = new Date();
+  const weekNum   = isoWeekNumber(today);
+  const gigWeek   = weekNum % 2 === 0; // even = gig week, odd = collection week
+  console.log(`[cron] Weezer Wednesday — ISO week ${weekNum}, preferred source: ${gigWeek ? 'gig' : 'collection'}`);
+
+  // ── Fetch all Weezer gigs ──────────────────────────────────────────────────
   const weezerGigs = await supabaseFetch(
     env,
     `journals?select=id,band,venue,date,user_id&band=ilike.weezer`
   );
+  console.log(`[cron] Weezer Wednesday — ${weezerGigs?.length ?? 0} Weezer gig(s) found`);
 
-  console.log(`[cron] Weezer Wednesday — found ${weezerGigs?.length ?? 0} Weezer gig(s)`);
+  // ── Fetch Weezer artist id, then collection items ─────────────────────────
+  // Supabase REST doesn't support join filters, so we look up the artist id
+  // first and then query collection_items directly.
+  let weezerCollectionItems = [];
+  const weezerArtists = await supabaseFetch(
+    env,
+    `artists?select=id&name=ilike.weezer`
+  );
+  const weezerArtistId = weezerArtists?.[0]?.id ?? null;
 
-  if (!weezerGigs?.length) {
-    console.log('[cron] Weezer Wednesday — no Weezer gigs found, skipping');
-    return;
+  if (weezerArtistId) {
+    const items = await supabaseFetch(
+      env,
+      `collection_items?select=id,title,type,user_id&artist_id=eq.${weezerArtistId}`
+    );
+    weezerCollectionItems = items ?? [];
+    console.log(`[cron] Weezer Wednesday — ${weezerCollectionItems.length} Weezer collection item(s) found`);
+  } else {
+    console.warn('[cron] Weezer Wednesday — Weezer artist not found in artists table, collection pool empty');
   }
 
-  // Group by user, pick one gig per user (rotate by ISO week number)
-  const weekNumber = Math.floor(Date.now() / (7 * 24 * 60 * 60 * 1000));
-  const byUser = weezerGigs.reduce((acc, gig) => {
-    (acc[gig.user_id] ??= []).push(gig);
+  // ── Group both pools by user ───────────────────────────────────────────────
+  const gigsByUser = (weezerGigs ?? []).reduce((acc, g) => {
+    (acc[g.user_id] ??= []).push(g);
     return acc;
   }, {});
 
-  const userIds       = Object.keys(byUser);
-  const subscriptions = await getSubscriptions(env, userIds);
+  const collectionByUser = weezerCollectionItems.reduce((acc, item) => {
+    (acc[item.user_id] ??= []).push(item);
+    return acc;
+  }, {});
 
-  console.log(`[cron] Weezer Wednesday — ${userIds.length} eligible user(s), ${subscriptions.length} subscription(s)`);
+  // ── Get subscriptions for any user who has at least one pool ──────────────
+  const eligibleUserIds = [...new Set([
+    ...Object.keys(gigsByUser),
+    ...Object.keys(collectionByUser),
+  ])];
 
+  if (!eligibleUserIds.length) {
+    console.log('[cron] Weezer Wednesday — no eligible users, skipping');
+    return;
+  }
+
+  const subscriptions = await getSubscriptions(env, eligibleUserIds);
+  console.log(`[cron] Weezer Wednesday — ${eligibleUserIds.length} eligible user(s), ${subscriptions.length} subscription(s)`);
+
+  // ── Per-user dispatch ─────────────────────────────────────────────────────
   for (const sub of subscriptions) {
-    const userGigs = byUser[sub.user_id];
-    if (!userGigs) continue;
+    const userId    = sub.user_id;
+    const userGigs  = gigsByUser[userId] ?? [];
+    const userItems = collectionByUser[userId] ?? [];
 
-    // Rotate through the user's Weezer shows week by week
-    const gig  = userGigs[weekNumber % userGigs.length];
-    const year = gig.date ? gig.date.split('/')[2] ?? gig.date.slice(0, 4) : '?';
+    // Read KV history for both pools in parallel
+    const [gigHistory, collectionHistory] = await Promise.all([
+      wwKvGet(env, userId, 'gig'),
+      wwKvGet(env, userId, 'collection'),
+    ]);
 
-    const payload = {
-      title: '🎸 Weezer Wednesday',
-      body:  `You saw Weezer at ${gig.venue} in ${year} — relive it →`,
-      // &ww=1 tells the client to open the Weezer Wednesday canvas
-      url:   `/GigList/vault.html?open=${gig.id}&ww=1`,
-      tag:   'weezer-wednesday',
-    };
+    // Attempt preferred source first, then fall back
+    let chosen = null;
+    let chosenSource = null;
 
-    console.log(`[cron] Weezer Wednesday — sending to user ${sub.user_id}: "${payload.body}"`);
+    const primarySource   = gigWeek ? 'gig' : 'collection';
+    const secondarySource = gigWeek ? 'collection' : 'gig';
+    const primaryPool     = gigWeek ? userGigs : userItems;
+    const secondaryPool   = gigWeek ? userItems : userGigs;
+    const primaryHistory  = gigWeek ? gigHistory : collectionHistory;
+    const secondaryHistory = gigWeek ? collectionHistory : gigHistory;
+
+    chosen = wwPickItem(primaryPool, primaryHistory);
+    if (chosen) {
+      chosenSource = primarySource;
+    } else {
+      console.log(`[cron] WW user ${userId} — preferred pool (${primarySource}) empty/on cooldown, trying fallback`);
+      chosen = wwPickItem(secondaryPool, secondaryHistory);
+      if (chosen) {
+        chosenSource = secondarySource;
+      }
+    }
+
+    if (!chosen) {
+      console.log(`[cron] WW user ${userId} — both pools exhausted or on cooldown, skipping`);
+      continue;
+    }
+
+    // ── Build payload ─────────────────────────────────────────────────────
+    let payload;
+
+    if (chosenSource === 'gig') {
+      const year = chosen.date
+        ? (chosen.date.split('/')[2] ?? chosen.date.slice(0, 4))
+        : '?';
+      payload = {
+        title: '🎸 Weezer Wednesday',
+        body:  `You saw Weezer at ${chosen.venue} in ${year} — relive it →`,
+        url:   `/GigList/vault.html?open=${chosen.id}&ww=1`,
+        tag:   'weezer-wednesday',
+      };
+    } else {
+      // Collection item — title is the best body copy we have
+      const label = chosen.title || 'a Weezer item in your collection';
+      payload = {
+        title: '🎸 Weezer Wednesday',
+        body:  `You've got "${label}" in your collection — check it out →`,
+        url:   `/GigList/vault.html?open=${chosen.id}&ww=1&source=collection`,
+        tag:   'weezer-wednesday',
+      };
+    }
+
+    console.log(`[cron] WW user ${userId} — source=${chosenSource} id=${chosen.id} url=${payload.url}`);
 
     try {
       await sendPush(env, sub, payload);
-      console.log(`[cron] Weezer Wednesday — push succeeded for user ${sub.user_id}`);
+      console.log(`[cron] WW user ${userId} — push succeeded`);
+      // Write back to KV only after a successful push
+      await wwKvSet(env, userId, chosenSource, chosen.id);
     } catch (err) {
-      console.error(`[cron] Weezer Wednesday — push failed for user ${sub.user_id}: status=${err.statusCode} body=${err.body}`);
+      console.error(`[cron] WW user ${userId} — push failed: status=${err.statusCode} body=${err.body}`);
       if (err.statusCode === 410) await deleteStaleSubscription(env, sub.endpoint);
     }
   }
@@ -428,6 +577,27 @@ async function handleRequest(request, env) {
     });
   }
 
+  // POST /push/cron/weezer-wednesday — manual trigger for testing
+  // Runs the full cron handler immediately, identical to the scheduled version.
+  if (request.method === 'POST' && url.pathname === '/push/cron/weezer-wednesday') {
+    const auth = request.headers.get('Authorization');
+    if (auth !== `Bearer ${env.INTERNAL_SECRET}`) {
+      return new Response('Unauthorized', { status: 401 });
+    }
+    try {
+      await handleWeezerWednesday(env);
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...CORS, 'Content-Type': 'application/json' },
+      });
+    } catch (err) {
+      console.error('[manual] weezer-wednesday error:', err);
+      return new Response(JSON.stringify({ ok: false, error: err.message }), {
+        status: 500,
+        headers: { ...CORS, 'Content-Type': 'application/json' },
+      });
+    }
+  }
+
   // POST /push/webhook/:type — Supabase Database Webhook entry point
   const webhookMatch = url.pathname.match(/^\/push\/webhook\/([a-z-]+)$/);
   if (request.method === 'POST' && webhookMatch) {
@@ -454,7 +624,7 @@ export default {
 
   async scheduled(event, env) {
     const cron = event.cron;
-    // "0 7 * * *"  → On This Day    (07:00 UTC daily)
+    // "0 7 * * *"  → On This Day      (07:00 UTC daily)
     // "0 11 * * 3" → Weezer Wednesday (11:00 UTC every Wednesday)
     if (cron === '0 11 * * 3') {
       await handleWeezerWednesday(env);
