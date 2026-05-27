@@ -105,14 +105,15 @@ function _flush({ id, weezerWednesday, source }) {
 
 function _handleUrlParams() {
     const params   = new URLSearchParams(window.location.search);
-    const id       = params.get('open');
+    const rawId    = params.get('open');
     const isWW     = params.get('ww') === '1';
     const source   = params.get('source') === 'collection' ? 'collection' : 'journal';
 
-    if (!id) return;
+    if (!rawId) return;
 
-    // Clean the params from the URL bar without triggering a reload.
-    // This prevents the modal re-opening on manual refresh.
+    // Journal IDs are numeric; collection IDs are UUIDs (contain hyphens)
+    const id = /^\d+$/.test(rawId) ? Number(rawId) : rawId;
+
     const cleanUrl = window.location.pathname;
     history.replaceState(null, '', cleanUrl);
 

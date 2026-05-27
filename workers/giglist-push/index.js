@@ -119,10 +119,11 @@ async function getUsername(env, userId) {
 
 async function getSubscriptions(env, userIds) {
   if (!userIds?.length) return [];
-  const quoted = userIds.map(id => `"${id}"`).join(',');
+  const clean = userIds.filter(id => id != null && id !== 'null');
+  if (!clean.length) return [];
   const rows = await supabaseFetch(
     env,
-    `push_subscriptions?user_id=in.(${quoted})`
+    `push_subscriptions?user_id=in.(${clean.join(',')})`
   );
   return rows ?? [];
 }
@@ -415,8 +416,6 @@ async function handleWeezerWednesday(env) {
   console.log(`[cron] Weezer Wednesday — ${weezerGigs?.length ?? 0} Weezer gig(s) found`);
 
   // ── Fetch Weezer artist id, then collection items ─────────────────────────
-  // Supabase REST doesn't support join filters, so we look up the artist id
-  // first and then query collection_items directly.
   let weezerCollectionItems = [];
   const weezerArtists = await supabaseFetch(
     env,
@@ -450,7 +449,7 @@ async function handleWeezerWednesday(env) {
   const eligibleUserIds = [...new Set([
     ...Object.keys(gigsByUser),
     ...Object.keys(collectionByUser),
-  ])];
+  ])].filter(id => id != null && id !== 'null');
 
   if (!eligibleUserIds.length) {
     console.log('[cron] Weezer Wednesday — no eligible users, skipping');
@@ -476,11 +475,11 @@ async function handleWeezerWednesday(env) {
     let chosen = null;
     let chosenSource = null;
 
-    const primarySource   = gigWeek ? 'gig' : 'collection';
-    const secondarySource = gigWeek ? 'collection' : 'gig';
-    const primaryPool     = gigWeek ? userGigs : userItems;
-    const secondaryPool   = gigWeek ? userItems : userGigs;
-    const primaryHistory  = gigWeek ? gigHistory : collectionHistory;
+    const primarySource    = gigWeek ? 'gig' : 'collection';
+    const secondarySource  = gigWeek ? 'collection' : 'gig';
+    const primaryPool      = gigWeek ? userGigs : userItems;
+    const secondaryPool    = gigWeek ? userItems : userGigs;
+    const primaryHistory   = gigWeek ? gigHistory : collectionHistory;
     const secondaryHistory = gigWeek ? collectionHistory : gigHistory;
 
     chosen = wwPickItem(primaryPool, primaryHistory);
@@ -513,7 +512,6 @@ async function handleWeezerWednesday(env) {
         tag:   'weezer-wednesday',
       };
     } else {
-      // Collection item — title is the best body copy we have
       const label = chosen.title || 'a Weezer item in your collection';
       payload = {
         title: '🎸 Weezer Wednesday',
@@ -528,7 +526,6 @@ async function handleWeezerWednesday(env) {
     try {
       await sendPush(env, sub, payload);
       console.log(`[cron] WW user ${userId} — push succeeded`);
-      // Write back to KV only after a successful push
       await wwKvSet(env, userId, chosenSource, chosen.id);
     } catch (err) {
       console.error(`[cron] WW user ${userId} — push failed: status=${err.statusCode} body=${err.body}`);

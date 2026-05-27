@@ -1,11 +1,8 @@
 /**
  * GigList Core Engine
- * v5.7.1 — 2026-05-25
+ * v5.7.2 — 2026-05-27
  * -------------------------------------------------------------------
- * ✅ Added collection items to Weezer Wednesday feature, now a collection item or journal entry will send a push and load a shareable canvas
- * ✅ deep-link.js — source param routing for both URL and postMessage paths
- * ✅ weezer-wednesday.js — collection canvas with polaroid photo prop, stacked metadata, artist background, title-casing fixed
- * ✅ index.js — alternate-week selection, KV recency guard, collection payload with ?source=collection, manual HTTP trigger
+ * ✅ Fixes to Weezer Wednesday deep link from push notification
  */
 
 import * as Data from './modules/data.js';
@@ -33,7 +30,7 @@ import { initBandMode } from './modules/band.js';
 import { applyFilters, buildSummaryLine, hasActiveFilters } from './modules/filters.js';
 import { initDeepLink, markAppReady } from './modules/deep-link.js';
 
-const APP_VERSION = "5.7.1";
+const APP_VERSION = "5.7.2";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
