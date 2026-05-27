@@ -76,6 +76,12 @@ function _resolveDeepLink(id, weezerWednesday = false, source = 'journal') {
 }
 
 function _flush({ id, weezerWednesday, source }) {
+        console.log('[deep-link] _flush called', { id, weezerWednesday, source });
+        console.log('[deep-link] switchView:', typeof window.switchView);
+        console.log('[deep-link] openGigModal:', typeof window.openGigModal);
+        console.log('[deep-link] openWeezerWednesdayCanvas:', typeof window.openWeezerWednesdayCanvas);
+        console.log('[deep-link] openWeezerWednesdayCanvasCollection:', typeof window.openWeezerWednesdayCanvasCollection);
+        console.log('[deep-link] _appReady:', _appReady);
     // Switch to the Gigs tab so the modal has a natural backdrop.
     // Collection WW canvas is full-screen so this still makes sense as a base.
     if (typeof window.switchView === 'function') {
@@ -139,6 +145,7 @@ export function initDeepLink() {
     // PATH A: check URL params immediately
     _handleUrlParams();
 
-    // PATH B: listen for SW postMessages going forward
-    navigator.serviceWorker?.addEventListener('message', _handleServiceWorkerMessage);
+    // PATH B: listen for SW messages via BroadcastChannel (replaces SW postMessage)
+    const bc = new BroadcastChannel('giglist-deep-link');
+    bc.onmessage = (event) => _handleServiceWorkerMessage(event);
 }

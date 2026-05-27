@@ -1,8 +1,8 @@
 /**
  * GigList Core Engine
- * v5.7.2 — 2026-05-27
+ * v5.7.3 — 2026-05-27
  * -------------------------------------------------------------------
- * ✅ Fixes to Weezer Wednesday deep link from push notification
+ * ✅ More fixes to Weezer Wednesday deep link from push notification (test now working!)
  */
 
 import * as Data from './modules/data.js';
@@ -30,7 +30,7 @@ import { initBandMode } from './modules/band.js';
 import { applyFilters, buildSummaryLine, hasActiveFilters } from './modules/filters.js';
 import { initDeepLink, markAppReady } from './modules/deep-link.js';
 
-const APP_VERSION = "5.7.2";
+const APP_VERSION = "5.7.3";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 

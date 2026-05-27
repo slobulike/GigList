@@ -123,7 +123,7 @@ self.addEventListener('push', (event) => {
 //   vault.html?open=<journalId>&ww=1     → open gig + Weezer Wednesday canvas
 //
 // Strategy:
-//   Warm (app already open) → focus existing window + postMessage the intent.
+//   Warm (app already open) → focus existing window + BroadcastChannel the intent.
 //     deep-link.js picks this up and calls openGigModal() at the right moment.
 //   Cold (app closed)       → openWindow with the full URL.
 //     deep-link.js reads ?open= and ?ww= params on load instead.
@@ -131,34 +131,47 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
 
-  const data       = event.notification.data ?? {};
-  const targetUrl  = new URL(data.url ?? APP_ROOT, self.location.origin).href;
-  const params     = new URL(targetUrl).searchParams;
-  const journalId  = params.get('open') ?? null;
-  const isWW       = params.get('ww') === '1';
+  const data      = event.notification.data ?? {};
+  const targetUrl = new URL(data.url ?? APP_ROOT, self.location.origin).href;
+  const params    = new URL(targetUrl).searchParams;
+  const journalId = params.get('open') ?? null;
+  const isWW      = params.get('ww') === '1';
+  const source    = params.get('source') === 'collection' ? 'collection' : 'journal';
+
+  console.log('[SW] notificationclick fired');
+  console.log('[SW] data.url raw:', data.url);
+  console.log('[SW] targetUrl:', targetUrl);
+  console.log('[SW] journalId:', journalId, '| isWW:', isWW, '| source:', source);
 
   event.waitUntil(
     clients
       .matchAll({ type: 'window', includeUncontrolled: true })
       .then((windowClients) => {
+        console.log('[SW] windowClients found:', windowClients.length);
+        windowClients.forEach((c, i) => console.log(`[SW]   client[${i}]:`, c.url));
 
-        // ── Warm: existing app window found ──────────────────────────────────
         const appClient = windowClients.find(c =>
           c.url.includes(self.location.origin + APP_BASE)
         );
+        console.log('[SW] appClient matched:', !!appClient, appClient?.url ?? 'none');
 
         if (appClient) {
-          return appClient.focus().then((focused) => {
-            // Tell deep-link.js what to open — no reload needed
-            focused.postMessage({
+          console.log('[SW] warm path — focusing and sending BroadcastChannel message');
+          return appClient.focus().then(() => {
+            const bc = new BroadcastChannel('giglist-deep-link');
+            bc.postMessage({
               type:            'GIGLIST_DEEP_LINK',
               journalId,
               weezerWednesday: isWW,
+              source,
             });
+            bc.close();
+            console.log('[SW] BroadcastChannel message sent');
           });
         }
 
         // ── Cold: no app window — open one with URL params as fallback ───────
+        console.log('[SW] cold path — calling openWindow:', targetUrl);
         return clients.openWindow(targetUrl);
       })
   );

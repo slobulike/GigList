@@ -17,8 +17,9 @@ import { buildPushHTTPRequest } from '@pushforge/builder';
 //     Optional guard — return false to skip silently. Defaults to true if omitted.
 //   getRecipientIds(record, oldRecord, env) → Promise<string[]>
 //     Return the user IDs who should receive the notification.
-//   buildPayload(record, oldRecord, env) → Promise<{ title, body, url, tag }>
-//     Return the notification content.
+//   buildPayload(record, oldRecord, env) → Promise<{ title, body, tag, data: { url } }>
+//     Return the notification content. The deep-link URL must be nested under
+//     data.url so sw.js reads it correctly from event.notification.data.url.
 //
 // URL convention for data.url:
 //   /GigList/vault.html                                        — open the app
@@ -46,8 +47,8 @@ const NOTIFICATIONS = {
       return {
         title: '🎸 New buddy request',
         body: `${username} wants to be your gig buddy!`,
-        url: '/GigList/vault.html',
         tag: 'buddy-request',
+        data: { url: '/GigList/vault.html' },
       };
     },
   },
@@ -66,8 +67,8 @@ const NOTIFICATIONS = {
       return {
         title: '🎉 Buddy request accepted!',
         body: `${username} accepted your request — check out their gig history!`,
-        url: '/GigList/vault.html',
         tag: 'buddy-accepted',
+        data: { url: '/GigList/vault.html' },
       };
     },
   },
@@ -81,8 +82,8 @@ const NOTIFICATIONS = {
       return {
         title: '📼 You were tagged in a memory',
         body: `${username} added a memory and tagged you in it`,
-        url: '/GigList/vault.html',
         tag: 'memory-tag',
+        data: { url: '/GigList/vault.html' },
       };
     },
   },
@@ -304,8 +305,8 @@ async function handleOnThisDay(env) {
     const payload = {
       title: '🎸 On this day...',
       body:  `${yearsAgo} year${yearsAgo !== 1 ? 's' : ''} ago you saw ${gig.band} at ${gig.venue}${extra}`,
-      url:   `/GigList/vault.html?open=${gig.id}`,
       tag:   'on-this-day',
+      data:  { url: `/GigList/vault.html?open=${gig.id}` },
     };
 
     console.log(`[cron] On This Day — sending to user ${sub.user_id}: "${payload.body}"`);
@@ -508,20 +509,20 @@ async function handleWeezerWednesday(env) {
       payload = {
         title: '🎸 Weezer Wednesday',
         body:  `You saw Weezer at ${chosen.venue} in ${year} — relive it →`,
-        url:   `/GigList/vault.html?open=${chosen.id}&ww=1`,
         tag:   'weezer-wednesday',
+        data:  { url: `/GigList/vault.html?open=${chosen.id}&ww=1` },
       };
     } else {
       const label = chosen.title || 'a Weezer item in your collection';
       payload = {
         title: '🎸 Weezer Wednesday',
         body:  `You've got "${label}" in your collection — check it out →`,
-        url:   `/GigList/vault.html?open=${chosen.id}&ww=1&source=collection`,
         tag:   'weezer-wednesday',
+        data:  { url: `/GigList/vault.html?open=${chosen.id}&ww=1&source=collection` },
       };
     }
 
-    console.log(`[cron] WW user ${userId} — source=${chosenSource} id=${chosen.id} url=${payload.url}`);
+    console.log(`[cron] WW user ${userId} — source=${chosenSource} id=${chosen.id} url=${payload.data.url}`);
 
     try {
       await sendPush(env, sub, payload);
