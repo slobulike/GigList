@@ -672,76 +672,90 @@ const _hydrateArtistSpotify = (bandName) => {
                     if (saveBtn) saveBtn.textContent = 'Searching setlist.fm...';
 
                     try {
-                        // Step 1: Get MBID
-                        const searchUrl = `${WORKER_URL}/?endpoint=artist-search&name=${encodeURIComponent(band)}`;
-                        const artistRes = await fetch(searchUrl);
-                        const artistData = await artistRes.json();
-                        const mbid = artistData.artist?.[0]?.mbid;
-
-                        if (!mbid) {
-                            // No MBID found — queue for admin review, but don't
-                            // return early; fall through to UI update below.
-                            await _submitPendingVenue({ session, journalKey, band, dateStr, venue });
+                        // Future shows will never exist on setlist.fm yet — skip the
+                        // lookup entirely. The venue was confirmed by the user at entry
+                        // time so no pending review is needed either.
+                        const showDate = new Date(y, m - 1, d);
+                        if (showDate > new Date()) {
+                            console.log('Future show — skipping setlist.fm lookup.');
                         } else {
-                            // Step 1b: Write mbid back to artists table (non-blocking)
-                            supabase
-                                .from('artists')
-                                .update({ mbid })
-                                .eq('name', band)
-                                .is('mbid', null)
-                                .then(() => console.log(`Artist mbid updated for ${band}`))
-                                .catch(e => console.warn('Artist mbid update failed:', e));
+                            // Check once whether this venue is already in our venues table.
+                            // If it is, the user picked it from the dropdown and it needs no
+                            // admin review — skip all pending_venues inserts regardless of
+                            // what setlist.fm says.
+                            const { data: knownVenue } = await supabase
+                                .from('venues')
+                                .select('id')
+                                .ilike('name', venue)
+                                .maybeSingle();
+                            const venueIsKnown = !!knownVenue;
 
-                            // Step 1c: Hydrate Spotify data (non-blocking)
-                            _hydrateArtistSpotify(band);
+                            // Step 1: Get MBID
+                            const searchUrl = `${WORKER_URL}/?endpoint=artist-search&name=${encodeURIComponent(band)}`;
+                            const artistRes = await fetch(searchUrl);
+                            const artistData = await artistRes.json();
+                            const mbid = artistData.artist?.[0]?.mbid;
 
-                            // Step 2: Polite delay before second API call
-                            console.log("MBID found. Waiting for API cooldown...");
-                            await new Promise(resolve => setTimeout(resolve, 1100));
+                            if (!mbid) {
+                                // No MBID found — queue for admin review if venue is unknown
+                                if (!venueIsKnown) await _submitPendingVenue({ session, journalKey, band, dateStr, venue });
+                            } else {
+                                // Step 1b: Write mbid back to artists table (non-blocking)
+                                supabase
+                                    .from('artists')
+                                    .update({ mbid })
+                                    .eq('name', band)
+                                    .is('mbid', null)
+                                    .then(() => console.log(`Artist mbid updated for ${band}`))
+                                    .catch(e => console.warn('Artist mbid update failed:', e));
 
-                            // Step 3: Date-filtered setlist lookup via find-show
-                            // workerDate is DD-MM-YYYY — the format find-show passes
-                            // to setlist.fm's `date` parameter.
-                            const workerDate = dateStr.replace(/\//g, '-');
-                            const setlistUrl = `${WORKER_URL}/?endpoint=find-show&mbid=${mbid}&eventDate=${workerDate}`;
-                            const setlistRes = await fetch(setlistUrl);
+                                // Step 1c: Hydrate Spotify data (non-blocking)
+                                _hydrateArtistSpotify(band);
 
-                            if (setlistRes.status === 429) {
-                                throw new Error("Setlist.fm rate limit reached. Please wait a moment and try again.");
-                            }
+                                // Step 2: Polite delay before second API call
+                                console.log("MBID found. Waiting for API cooldown...");
+                                await new Promise(resolve => setTimeout(resolve, 1100));
 
-                            if (setlistRes.status === 404) {
-                                // setlist.fm has no record of this show — queue for review
-                                await _submitPendingVenue({ session, journalKey, band, dateStr, venue });
-                            } else if (setlistRes.ok) {
-                                const data = await setlistRes.json();
-                                // find-show returns results filtered by date so just take [0]
-                                const matchingSetlist = (data.setlist || [])[0];
+                                // Step 3: Date-filtered setlist lookup via find-show
+                                const workerDate = dateStr.replace(/\//g, '-');
+                                const setlistUrl = `${WORKER_URL}/?endpoint=find-show&mbid=${mbid}&eventDate=${workerDate}`;
+                                const setlistRes = await fetch(setlistUrl);
 
-                                if (matchingSetlist) {
-                                    const grouped = groupByShow([matchingSetlist]);
-                                    const perfRows = [];
-                                    const venueRows = [];
-                                    for (const show of grouped.values()) {
-                                        perfRows.push(...show.performances);
-                                        venueRows.push(buildVenueRow(show.venueRaw));
+                                if (setlistRes.status === 429) {
+                                    throw new Error("Setlist.fm rate limit reached. Please wait a moment and try again.");
+                                }
+
+                                if (setlistRes.status === 404) {
+                                    if (!venueIsKnown) await _submitPendingVenue({ session, journalKey, band, dateStr, venue });
+                                } else if (setlistRes.ok) {
+                                    const data = await setlistRes.json();
+                                    const matchingSetlist = (data.setlist || [])[0];
+
+                                    if (matchingSetlist) {
+                                        const grouped = groupByShow([matchingSetlist]);
+                                        const perfRows = [];
+                                        const venueRows = [];
+                                        for (const show of grouped.values()) {
+                                            perfRows.push(...show.performances);
+                                            venueRows.push(buildVenueRow(show.venueRaw));
+                                        }
+                                        await Promise.all([upsertVenues(venueRows), upsertPerformances(perfRows)]);
+                                    } else {
+                                        if (!venueIsKnown) await _submitPendingVenue({ session, journalKey, band, dateStr, venue });
                                     }
-                                    await Promise.all([upsertVenues(venueRows), upsertPerformances(perfRows)]);
-                                } else {
-                                    await _submitPendingVenue({ session, journalKey, band, dateStr, venue });
                                 }
                             }
                         }
                     } catch (err) {
-                            console.error('Final Save Error:', err);
-                            _showError(err.message || 'Could not save show.');
-                        } finally {
-                            window.hideSpinner?.();
-                            if (saveBtn) {
-                                saveBtn.disabled = false;
-                                saveBtn.textContent = 'Save';
-                            }
+                        console.error('Final Save Error:', err);
+                        _showError(err.message || 'Could not save show.');
+                    } finally {
+                        window.hideSpinner?.();
+                        if (saveBtn) {
+                            saveBtn.disabled = false;
+                            saveBtn.textContent = 'Save';
                         }
+                    }
                 }
             } catch (lookupErr) {
                 console.warn('Setlist lookup background process failed:', lookupErr);
@@ -895,10 +909,17 @@ window.exportCSV      = exportCSV;
 window.deleteGig = async () => {
     if (!editingKey) return;
 
-    // Toast-based confirmation
+    // Capture key immediately — closeEditorModal() sets editingKey = null,
+    // so any await gap (including the confirmation prompt below) would
+    // otherwise cause the Supabase delete to run with a null key.
+    const keyToDelete = editingKey;
+
+    // Confirmation overlay — rendered as a fixed layer on document.body so it
+    // always appears above the editor modal regardless of stacking context.
     const confirmed = await new Promise(resolve => {
-        const container = document.getElementById('toast-container');
-        if (!container) { resolve(window.confirm('Remove this show permanently?')); return; }
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:10000;background:rgba(15,23,42,0.45)';
+
         const toast = document.createElement('div');
         toast.className = 'pointer-events-auto flex items-center gap-3 bg-white border border-slate-200 shadow-xl px-5 py-3 rounded-2xl text-sm font-bold text-slate-700 max-w-xs';
         const yesId = 'del-yes-' + Date.now();
@@ -907,9 +928,11 @@ window.deleteGig = async () => {
             '<span class="flex-1">Remove this show permanently?</span>' +
             '<button id="' + yesId + '" class="bg-red-500 text-white px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-red-600 transition-colors">Remove</button>' +
             '<button id="' + noId  + '" class="bg-slate-100 text-slate-600 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-colors">Cancel</button>';
-        container.appendChild(toast);
-        document.getElementById(yesId).onclick = () => { toast.remove(); resolve(true); };
-        document.getElementById(noId).onclick  = () => { toast.remove(); resolve(false); };
+
+        overlay.appendChild(toast);
+        document.body.appendChild(overlay);
+        document.getElementById(yesId).onclick = () => { overlay.remove(); resolve(true); };
+        document.getElementById(noId).onclick  = () => { overlay.remove(); resolve(false); };
     });
 
     if (!confirmed) return;
@@ -936,14 +959,14 @@ window.deleteGig = async () => {
             .from('journals')
             .delete()
             .is('user_id', null)
-            .eq('journal_key', editingKey);
+            .eq('journal_key', keyToDelete);
         dbError = error;
     } else {
         const { error } = await supabase
             .from('journals')
             .delete()
             .eq('user_id', session.user.id)
-            .eq('journal_key', editingKey);
+            .eq('journal_key', keyToDelete);
         dbError = error;
     }
 
@@ -954,7 +977,7 @@ window.deleteGig = async () => {
 
     // Remove from in-memory data
     window.journalData = (window.journalData || []).filter(
-        g => g['Journal Key'] !== editingKey
+        g => g['Journal Key'] !== keyToDelete
     );
 
     closeEditorModal();

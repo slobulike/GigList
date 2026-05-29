@@ -1031,6 +1031,18 @@ export const openGigModal = (key, journalData, performanceData) => {
         ? `https://open.spotify.com/artist/${entry.SpotifyArtistId}`
         : `https://open.spotify.com/search/${encodeURIComponent(entry.Band)}`;
 
+// --- SPOTIFY PLAYLIST ---
+const headlineSet = sets.find(s => (s.Artist || '').toLowerCase() === entry.Band.toLowerCase());
+const hasSetlistData = headlineSet?.Setlist &&
+    headlineSet.Setlist !== 'NOT_FOUND' &&
+    headlineSet.Setlist.trim().length > 0;
+const isAdmin = window.currentUser?.is_admin === true;
+const gigIsPast = (() => {
+    const [dd, mm, yy] = entry.Date.split('/');
+    return new Date(`${yy}-${mm}-${dd}`) <= new Date();
+})();
+
+
     // --- EXTERNAL LINKS ---
     // Photos album URL (user-supplied)
     const photosUrl = (entry.Photos || '').trim();
@@ -1158,6 +1170,13 @@ export const openGigModal = (key, journalData, performanceData) => {
                            class="bg-emerald-500 hover:bg-emerald-600 text-white text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
                             <i data-lucide="music-2" class="w-3.5 h-3.5" aria-hidden="true"></i> SPOTIFY
                         </a>
+                        ${isAdmin && (hasSetlistData && gigIsPast || !gigIsPast) ? `
+                            <button id="${gigIsPast ? 'relive' : 'gig-ready'}-btn-${entry['Journal Key']?.replace(/[^a-z0-9]/gi,'_')}"
+                                    onclick="window.${gigIsPast ? 'createRelivePlaylist' : 'createGigReadyPlaylist'}('${entry['Journal Key']?.replace(/'/g, "\\'")}', '${entry.Band.replace(/'/g, "\\'")}', '${entry.Date}', '${entry.OfficialVenue?.replace(/'/g, "\\'")}')"
+                                    class="${gigIsPast ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-green-500 hover:bg-green-600'} text-white text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
+                                <i data-lucide="${gigIsPast ? 'list-music' : 'zap'}" class="w-3.5 h-3.5" aria-hidden="true"></i>
+                                ${gigIsPast ? 'RELIVE' : 'GET READY'}
+                            </button>` : ''}
                         <button onclick="window.shareGig(window.currentEditingGig)"
                                 class="bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 text-slate-500 text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
                             <i data-lucide="share-2" class="w-3.5 h-3.5" aria-hidden="true"></i> SHARE
