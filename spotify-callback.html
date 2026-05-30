@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Connecting Spotify…</title>
+    <style>
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #0f172a;
+            font-family: system-ui, sans-serif;
+            color: #fff;
+        }
+        .card {
+            text-align: center;
+            padding: 2.5rem;
+            max-width: 360px;
+        }
+        .icon { font-size: 3rem; margin-bottom: 1rem; }
+        .title {
+            font-size: 1.1rem;
+            font-weight: 800;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            margin-bottom: 0.5rem;
+        }
+        .sub {
+            font-size: 0.8rem;
+            opacity: 0.5;
+            margin-bottom: 1.5rem;
+        }
+        .spinner {
+            width: 28px; height: 28px;
+            border: 3px solid rgba(255,255,255,0.15);
+            border-top-color: #22c55e;
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+            margin: 0 auto;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .error { color: #f87171; }
+    </style>
+</head>
+<body>
+<div class="card">
+    <div class="icon" id="icon">🎵</div>
+    <div class="title" id="title">Connecting Spotify…</div>
+    <div class="sub" id="sub">This window will close automatically.</div>
+    <div class="spinner" id="spinner"></div>
+</div>
+
+<script>
+    const WORKER = 'https://giglist-spotify.richard-lipscombe.workers.dev';
+
+    async function run() {
+        const params      = new URLSearchParams(window.location.search);
+        const code        = params.get('code');
+        const userId      = params.get('state');   // we set state = userId in /auth-url
+        const error       = params.get('error');   // e.g. 'access_denied'
+        const redirectUri = window.location.origin + window.location.pathname;
+
+        if (error) {
+            showError(error === 'access_denied'
+                ? 'Spotify access was denied.'
+                : `Spotify error: ${error}`);
+            notifyOpener({ ok: false, error });
+            return;
+        }
+
+        if (!code || !userId) {
+            showError('Missing code or user ID.');
+            notifyOpener({ ok: false, error: 'missing_params' });
+            return;
+        }
+
+        try {
+            const res = await fetch(`${WORKER}/token-exchange`, {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ code, userId, redirectUri }),
+            });
+
+            const data = await res.json();
+
+            if (!res.ok || !data.ok) {
+                throw new Error(data.error || 'Token exchange failed');
+            }
+
+            showSuccess();
+            notifyOpener({ ok: true });
+
+        } catch (err) {
+            showError(err.message);
+            notifyOpener({ ok: false, error: err.message });
+        }
+    }
+
+    function showSuccess() {
+        document.getElementById('spinner').style.display = 'none';
+        document.getElementById('icon').textContent = '✅';
+        document.getElementById('title').textContent = 'Spotify Connected!';
+        document.getElementById('sub').textContent = 'Closing this window…';
+        setTimeout(() => window.close(), 1200);
+    }
+
+    function showError(msg) {
+        document.getElementById('spinner').style.display = 'none';
+        document.getElementById('icon').textContent = '❌';
+        document.getElementById('title').innerHTML = `<span class="error">Connection failed</span>`;
+        document.getElementById('sub').textContent = msg;
+    }
+
+    function notifyOpener(payload) {
+        if (window.opener && !window.opener.closed) {
+            window.opener.postMessage(
+                { type: 'SPOTIFY_AUTH', ...payload },
+                window.location.origin
+            );
+        }
+    }
+
+    run();
+</script>
+</body>
+</html>

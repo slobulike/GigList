@@ -1,8 +1,8 @@
 /**
  * GigList Core Engine
- * v6.0.1 — 2026-05-30
+ * v6.0.2 — 2026-05-30
  * -------------------------------------------------------------------
- * ✅ Fixed future show "Get Gig Ready" playlist creation so that shows where performance is null are saved correctly
+ * ✅ Foundations for Spotify OAuth flow
  */
 
 import * as Data from './modules/data.js';
@@ -31,7 +31,7 @@ import { applyFilters, buildSummaryLine, hasActiveFilters } from './modules/filt
 import { initDeepLink, markAppReady } from './modules/deep-link.js';
 import { initPlaylistButton } from './modules/spotify.js';
 
-const APP_VERSION = "6.0.1";
+const APP_VERSION = "6.0.2";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
