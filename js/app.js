@@ -1,10 +1,8 @@
 /**
  * GigList Core Engine
- * v6.0.0 — 2026-05-29
+ * v6.0.1 — 2026-05-30
  * -------------------------------------------------------------------
- * ✅ Added new spotify playlist generation feature (currently admin only) - from any gig modal you can now create a spotify playlist based on the
- * setlist of the show.
- * ✅ Relive The Show for past shows and Get Gig Ready for future shows (based on most recent setlist fm show)
+ * ✅ Fixed future show "Get Gig Ready" playlist creation so that shows where performance is null are saved correctly
  */
 
 import * as Data from './modules/data.js';
@@ -31,8 +29,9 @@ import { initProfile } from './modules/profile.js';
 import { initBandMode } from './modules/band.js';
 import { applyFilters, buildSummaryLine, hasActiveFilters } from './modules/filters.js';
 import { initDeepLink, markAppReady } from './modules/deep-link.js';
+import { initPlaylistButton } from './modules/spotify.js';
 
-const APP_VERSION = "6.0.0";
+const APP_VERSION = "6.0.1";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
@@ -132,319 +131,6 @@ window.activeView = window.activeView || 'list';
 window.renderMap = UI.renderMap;
 window.currentSort = { column: 'Date', ascending: false };
 
-// ─── SPOTIFY PLAYLIST ───
-window.createRelivePlaylist = async (journalKey, artistName, gigDate, venueName) => {
-    const btnId = `relive-btn-${journalKey.replace(/[^a-z0-9]/gi, '_')}`;
-    const btn = document.getElementById(btnId);
-
-    const toReadyState = (url) => {
-        const el = document.getElementById(btnId);
-        if (el) {
-            el.outerHTML = `
-                <a id="${btnId}" href="${url}" target="_blank" rel="noopener"
-                   class="bg-indigo-500 hover:bg-indigo-600 text-white text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
-                    <i data-lucide="check-circle" class="w-3.5 h-3.5" aria-hidden="true"></i> OPEN PLAYLIST
-                </a>`;
-            if (window.lucide) lucide.createIcons();
-        }
-    };
-
-    // Check cache first
-    const entry = (window.journalData || []).find(g => g['Journal Key'] === journalKey);
-    if (!entry) return;
-
-    const { data: existing } = await supabase
-        .from('spotify_playlists')
-        .select('playlist_url')
-        .eq('journal_id', entry.id)
-        .eq('user_id', currentUser.id)
-        .eq('setlist_source', 'own_setlist')
-        .maybeSingle();
-
-    if (existing?.playlist_url) {
-        toReadyState(existing.playlist_url);
-        window.open(existing.playlist_url, '_blank');
-        return;
-    }
-
-    // Loading state
-    if (btn) {
-        btn.innerHTML = '<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin" aria-hidden="true"></i> CREATING…';
-        btn.disabled = true;
-        if (window.lucide) lucide.createIcons();
-    }
-
-    const performance = (window.performanceData || []).find(p =>
-        p['Journal Key'] === journalKey &&
-        (p.Artist || '').toLowerCase() === artistName.toLowerCase()
-    );
-
-    if (!performance?.Setlist) {
-        window.showToast('No setlist data found for this show.', 'error');
-        if (btn) {
-            btn.innerHTML = '<i data-lucide="list-music" class="w-3.5 h-3.5" aria-hidden="true"></i> RELIVE';
-            btn.disabled = false;
-            if (window.lucide) lucide.createIcons();
-        }
-        return;
-    }
-
-    try {
-        const response = await fetch('https://giglist-spotify.richard-lipscombe.workers.dev', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                setlist: performance.Setlist,
-                artistName,
-                gigDate,
-                venueName,
-                mode: 'relive',
-            }),
-        });
-
-        const result = await response.json();
-        if (!result.playlistUrl) throw new Error(result.error || 'No playlist URL returned');
-
-        // Persist to DB
-        const { error } = await supabase.from('spotify_playlists').insert({
-            journal_id: entry.id,
-            performance_id: performance.id,
-            user_id: currentUser.id,
-            playlist_url: result.playlistUrl,
-            playlist_id: result.playlistId,
-            setlist_source: 'own_setlist',
-        });
-        if (error) console.warn('Failed to persist playlist:', error);
-
-        toReadyState(result.playlistUrl);
-        window.showToast('Playlist created — relive the show! 🎶', 'success');
-
-        if (result.notFound?.length) {
-            console.info(`[GigList] ${result.notFound.length} tracks not found on Spotify:`, result.notFound);
-        }
-
-    } catch (err) {
-        console.error('[GigList] createRelivePlaylist failed:', err);
-        if (btn) {
-            btn.innerHTML = '<i data-lucide="list-music" class="w-3.5 h-3.5" aria-hidden="true"></i> RELIVE';
-            btn.disabled = false;
-            if (window.lucide) lucide.createIcons();
-        }
-        window.showToast('Could not create playlist. Please try again.', 'error');
-    }
-};
-window.initReliveButton = async (journalKey) => {
-    if (!window.currentUser?.is_admin) return;
-
-    const entry = (window.journalData || []).find(g => g['Journal Key'] === journalKey);
-    if (!entry) return;
-
-    const { data: existing } = await supabase
-        .from('spotify_playlists')
-        .select('playlist_url')
-        .eq('journal_id', entry.id)
-        .eq('user_id', currentUser.id)
-        .eq('setlist_source', 'own_setlist')
-        .maybeSingle();
-
-    if (!existing?.playlist_url) return;
-
-    const btnId = `relive-btn-${journalKey.replace(/[^a-z0-9]/gi, '_')}`;
-    const btn = document.getElementById(btnId);
-    if (!btn) return;
-
-    btn.outerHTML = `
-        <a id="${btnId}" href="${existing.playlist_url}" target="_blank" rel="noopener"
-           class="bg-indigo-500 hover:bg-indigo-600 text-white text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
-            <i data-lucide="check-circle" class="w-3.5 h-3.5" aria-hidden="true"></i> OPEN PLAYLIST
-        </a>`;
-    if (window.lucide) lucide.createIcons();
-};
-
-// ─── SPOTIFY GET GIG READY ───
-window.createGigReadyPlaylist = async (journalKey, artistName, gigDate, venueName) => {
-    const btnId = `gig-ready-btn-${journalKey.replace(/[^a-z0-9]/gi, '_')}`;
-
-    const toReadyState = (url) => {
-        const el = document.getElementById(btnId);
-        if (el) {
-            el.outerHTML = `
-                <a id="${btnId}" href="${url}" target="_blank" rel="noopener"
-                   class="bg-green-500 hover:bg-green-600 text-white text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
-                    <i data-lucide="check-circle" class="w-3.5 h-3.5" aria-hidden="true"></i> OPEN PLAYLIST
-                </a>`;
-            if (window.lucide) lucide.createIcons();
-        }
-    };
-
-    const toIdleState = () => {
-        const el = document.getElementById(btnId);
-        if (el) {
-            el.innerHTML = '<i data-lucide="zap" class="w-3.5 h-3.5" aria-hidden="true"></i> GET READY';
-            el.disabled = false;
-            if (window.lucide) lucide.createIcons();
-        }
-    };
-
-    const entry = (window.journalData || []).find(g => g['Journal Key'] === journalKey);
-    if (!entry) return;
-
-    // Check cache
-    const { data: existing } = await supabase
-        .from('spotify_playlists')
-        .select('playlist_url')
-        .eq('journal_id', entry.id)
-        .eq('user_id', currentUser.id)
-        .eq('setlist_source', 'recent_setlist')
-        .maybeSingle();
-
-    if (existing?.playlist_url) {
-        toReadyState(existing.playlist_url);
-        window.open(existing.playlist_url, '_blank');
-        return;
-    }
-
-    // Loading state
-    const btn = document.getElementById(btnId);
-    if (btn) {
-        btn.innerHTML = '<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin" aria-hidden="true"></i> PREPARING…';
-        btn.disabled = true;
-        if (window.lucide) lucide.createIcons();
-    }
-
-    // Resolve MBID from artists table
-    const { data: artistRow } = await supabase
-        .from('artists')
-        .select('mbid')
-        .ilike('name', artistName)
-        .maybeSingle();
-
-    const mbid = artistRow?.mbid;
-
-    if (!mbid) {
-        window.showToast('No MusicBrainz ID found for this artist.', 'error');
-        toIdleState();
-        return;
-    }
-
-    try {
-        // Fetch the most recent setlist from setlist.fm
-        const proxyUrl = `https://setlistfm-proxy.richard-lipscombe.workers.dev` +
-            `/?endpoint=artist-setlists&mbid=${encodeURIComponent(mbid)}&page=1`;
-
-        const slRes = await fetch(proxyUrl);
-        if (!slRes.ok) throw new Error(`setlist.fm proxy returned ${slRes.status}`);
-
-        const slData = await slRes.json();
-        const setlists = slData.setlist || [];
-
-        // Find the most recent setlist that has at least one song
-        const recentSetlist = setlists.find(sl =>
-            sl.sets?.set?.some(s => s.song?.length > 0)
-        );
-
-        if (!recentSetlist) {
-            window.showToast('No recent setlist found for this artist.', 'error');
-            toIdleState();
-            return;
-        }
-
-        // Flatten all sets/encores into a single song list, filter out medleys/tapes
-        const songs = recentSetlist.sets.set
-            .flatMap(s => s.song || [])
-            .filter(s => s.name && !s.tape)   // exclude taped/pre-show music
-            .map(s => s.name);
-
-        if (songs.length === 0) {
-            window.showToast('No playable tracks in the recent setlist.', 'error');
-            toIdleState();
-            return;
-        }
-
-        // Pipe-delimited string — same format parseSetlist() in the Worker expects
-        const setlistString = songs.join(' | ');
-
-        // Create Spotify playlist via Worker
-        const response = await fetch('https://giglist-spotify.richard-lipscombe.workers.dev', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                setlist: setlistString,
-                artistName,
-                gigDate,
-                venueName,
-                mode: 'gig_ready',
-            }),
-        });
-
-        const result = await response.json();
-        if (!result.playlistUrl) throw new Error(result.error || 'No playlist URL returned');
-
-        // Resolve performance row for the FK (may be null for future shows with no perf yet)
-        const performance = (window.performanceData || []).find(p =>
-            p['Journal Key'] === journalKey &&
-            (p.Artist || '').toLowerCase() === artistName.toLowerCase()
-        );
-
-        const { error: dbError } = await supabase.from('spotify_playlists').insert({
-            journal_id:      entry.id,
-            performance_id:  performance?.id || null,
-            user_id:         currentUser.id,
-            playlist_url:    result.playlistUrl,
-            playlist_id:     result.playlistId,
-            setlist_source:  'recent_setlist',
-        });
-        if (dbError) console.warn('[GigList] Failed to persist gig-ready playlist:', dbError);
-
-        toReadyState(result.playlistUrl);
-        window.showToast('Playlist ready — time to get gig ready! 🎸', 'success');
-
-        if (result.notFound?.length) {
-            console.info(`[GigList] ${result.notFound.length} tracks not found on Spotify:`, result.notFound);
-        }
-
-    } catch (err) {
-        console.error('[GigList] createGigReadyPlaylist failed:', err);
-        toIdleState();
-        window.showToast('Could not create playlist. Please try again.', 'error');
-    }
-};
-
-window.initGigReadyButton = async (journalKey) => {
-    if (!window.currentUser?.is_admin) return;
-
-    const entry = (window.journalData || []).find(g => g['Journal Key'] === journalKey);
-    if (!entry) return;
-
-    const { data: existing } = await supabase
-        .from('spotify_playlists')
-        .select('playlist_url')
-        .eq('journal_id', entry.id)
-        .eq('user_id', currentUser.id)
-        .eq('setlist_source', 'recent_setlist')
-        .maybeSingle();
-
-    if (!existing?.playlist_url) return;
-
-    const btnId = `gig-ready-btn-${journalKey.replace(/[^a-z0-9]/gi, '_')}`;
-    const btn = document.getElementById(btnId);
-    if (!btn) return;
-
-    btn.outerHTML = `
-        <a id="${btnId}" href="${existing.playlist_url}" target="_blank" rel="noopener"
-           class="bg-green-500 hover:bg-green-600 text-white text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
-            <i data-lucide="check-circle" class="w-3.5 h-3.5" aria-hidden="true"></i> OPEN PLAYLIST
-        </a>`;
-    if (window.lucide) lucide.createIcons();
-};
-
-window.initPlaylistButton = async (journalKey, gigIsPast) => {
-    if (gigIsPast) {
-        await window.initReliveButton(journalKey);
-    } else {
-        await window.initGigReadyButton(journalKey);
-    }
-};
 
 // Games modules are dormant — kept in place for future revival
 // window.switchGame and window.startNewPuzzle removed from global scope
@@ -1154,12 +840,13 @@ window.viewGigDetails = async (key) => {
 
     const entry = (window.journalData || []).find(g => g['Journal Key'] === key);
     const gigIsPast = entry ? new Date(entry.Date.split('/').reverse().join('-')) < new Date() : true;
-    setTimeout(() => window.initPlaylistButton(key, gigIsPast), 100);
 
     if (currentUser?.isAuthUser && !window.isBandMode) {
         setTimeout(() => window.loadGigAttendees(key, entry?.id), 100);
         if (entry) setTimeout(() => initArchiveButton(entry), 150);
     }
+
+    setTimeout(() => initPlaylistButton(key, gigIsPast), 100);
 
     window.track('gig_modal_open', {
         band:  entry?.Band,
