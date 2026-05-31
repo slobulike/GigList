@@ -1,8 +1,8 @@
 /**
  * GigList Core Engine
- * v6.0.2 — 2026-05-30
+ * v6.0.4 — 2026-05-31
  * -------------------------------------------------------------------
- * ✅ Foundations for Spotify OAuth flow
+ * ✅ Bug fix to Spotify button not showing correct state
  */
 
 import * as Data from './modules/data.js';
@@ -31,7 +31,7 @@ import { applyFilters, buildSummaryLine, hasActiveFilters } from './modules/filt
 import { initDeepLink, markAppReady } from './modules/deep-link.js';
 import { initPlaylistButton } from './modules/spotify.js';
 
-const APP_VERSION = "6.0.2";
+const APP_VERSION = "6.0.4";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 

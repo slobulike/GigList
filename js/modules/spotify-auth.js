@@ -147,6 +147,9 @@ export const renderConnectPrompt = (btnId, userId, onSuccess) => {
         try {
             await connectSpotify(userId);
             window.showToast('Spotify connected! 🎧', 'success');
+            // Restore the original btn id so createGigReadyPlaylist can find and replace the element
+            const connectEl = document.getElementById(promptId);
+            if (connectEl) connectEl.id = btnId;
             onSuccess();
         } catch (err) {
             window.showToast(err.message, 'error');

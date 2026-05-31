@@ -1170,7 +1170,7 @@ const gigIsPast = (() => {
                            class="bg-emerald-500 hover:bg-emerald-600 text-white text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
                             <i data-lucide="music-2" class="w-3.5 h-3.5" aria-hidden="true"></i> SPOTIFY
                         </a>
-                        ${isAdmin && (hasSetlistData && gigIsPast || !gigIsPast) ? `
+                        ${window.currentUser?.isAuthUser && (hasSetlistData && gigIsPast || !gigIsPast) ? `
                             <button id="${gigIsPast ? 'relive' : 'gig-ready'}-btn-${entry['Journal Key']?.replace(/[^a-z0-9]/gi,'_')}"
                                     onclick="window.${gigIsPast ? 'createRelivePlaylist' : 'createGigReadyPlaylist'}('${entry['Journal Key']?.replace(/'/g, "\\'")}', '${entry.Band.replace(/'/g, "\\'")}', '${entry.Date}', '${entry.OfficialVenue?.replace(/'/g, "\\'")}')"
                                     class="${gigIsPast ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-green-500 hover:bg-green-600'} text-white text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
