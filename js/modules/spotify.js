@@ -7,6 +7,11 @@
  */
 
 import { supabase } from './supabase.js';
+import {
+    checkSpotifyConnection,
+    isSpotifyConnected,
+    renderConnectPrompt,
+} from './spotify-auth.js';
 
 const SPOTIFY_WORKER  = 'https://giglist-spotify.richard-lipscombe.workers.dev';
 const SETLISTFM_PROXY = 'https://setlistfm-proxy.richard-lipscombe.workers.dev';
@@ -41,6 +46,15 @@ window.createRelivePlaylist = async (journalKey, artistName, gigDate, venueName)
 
     const entry = (window.journalData || []).find(g => g['Journal Key'] === journalKey);
     if (!entry) return;
+
+    // Check Spotify connection before doing anything else
+    const connected = await checkSpotifyConnection(window.currentUser.id);
+    if (!connected) {
+        renderConnectPrompt(btnId, window.currentUser.id, () =>
+            window.createRelivePlaylist(journalKey, artistName, gigDate, venueName)
+        );
+        return;
+    }
 
     const { data: existing } = await supabase
         .from('spotify_playlists')
@@ -82,11 +96,12 @@ window.createRelivePlaylist = async (journalKey, artistName, gigDate, venueName)
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                setlist: performance.Setlist,
+                setlist:    performance.Setlist,
                 artistName,
                 gigDate,
                 venueName,
-                mode: 'relive',
+                mode:       'relive',
+                userId:     window.currentUser.id,
             }),
         });
 
@@ -152,7 +167,6 @@ window.initReliveButton = async (journalKey) => {
 // ─── GET GIG READY ────────────────────────────────────────────────────────────
 
 // Renders the OPEN PLAYLIST + refresh button pair for a given URL.
-// Used by both createGigReadyPlaylist and initGigReadyButton.
 const renderGigReadyReadyState = (btnId, url, journalKey, artistName, gigDate, venueName) => {
     const el = document.getElementById(btnId);
     if (!el) return;
@@ -186,16 +200,23 @@ window.createGigReadyPlaylist = async (journalKey, artistName, gigDate, venueNam
     const entry = (window.journalData || []).find(g => g['Journal Key'] === journalKey);
     if (!entry) return;
 
-    // ── Cache check: synchronous, no await. If we already know the URL from
-    //    this session (created earlier or loaded on a previous modal open),
-    //    restore the button state immediately without touching the network.
+    // ── Cache check: synchronous, no await. Restores button state immediately.
     const cached = window._gigReadyPlaylists[entry.id];
     if (cached) {
         renderGigReadyReadyState(btnId, cached, journalKey, artistName, gigDate, venueName);
         return;
     }
 
-    // ── DB check: first time this modal has opened after a page refresh.
+    // ── Spotify connection check
+    const connected = await checkSpotifyConnection(window.currentUser.id);
+    if (!connected) {
+        renderConnectPrompt(btnId, window.currentUser.id, () =>
+            window.createGigReadyPlaylist(journalKey, artistName, gigDate, venueName)
+        );
+        return;
+    }
+
+    // ── DB check: first open after a page refresh
     const { data: existing } = await supabase
         .from('spotify_playlists')
         .select('playlist_url')
@@ -210,7 +231,7 @@ window.createGigReadyPlaylist = async (journalKey, artistName, gigDate, venueNam
         return;
     }
 
-    // ── No existing playlist — proceed to create one.
+    // ── No existing playlist — create one
     const btn = document.getElementById(btnId);
     if (btn) {
         btn.innerHTML = '<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin" aria-hidden="true"></i> PREPARING…';
@@ -225,7 +246,6 @@ window.createGigReadyPlaylist = async (journalKey, artistName, gigDate, venueNam
         .maybeSingle();
 
     const mbid = artistRow?.mbid;
-
     if (!mbid) {
         window.showToast('No MusicBrainz ID found for this artist.', 'error');
         toIdleState();
@@ -241,7 +261,7 @@ window.createGigReadyPlaylist = async (journalKey, artistName, gigDate, venueNam
         const slData = await slRes.json();
         const setlists = slData.setlist || [];
 
-        // Require at least 3 playable tracks to skip TV/promo appearances.
+        // Require at least 3 playable tracks to skip TV/promo appearances
         const MIN_SONGS = 3;
         const recentSetlist = setlists.find(sl => {
             const count = (sl.sets?.set || [])
@@ -270,7 +290,8 @@ window.createGigReadyPlaylist = async (journalKey, artistName, gigDate, venueNam
                 artistName,
                 gigDate,
                 venueName,
-                mode: 'gig_ready',
+                mode:   'gig_ready',
+                userId: window.currentUser.id,
             }),
         });
 
@@ -284,7 +305,7 @@ window.createGigReadyPlaylist = async (journalKey, artistName, gigDate, venueNam
 
         const { error: dbError } = await supabase.from('spotify_playlists').insert({
             journal_id:     entry.id,
-            performance_id: performance?.id || null,   // ← likely null for upcoming shows
+            performance_id: performance?.id || null,
             user_id:        window.currentUser.id,
             playlist_url:   result.playlistUrl,
             playlist_id:    result.playlistId,
@@ -295,7 +316,7 @@ window.createGigReadyPlaylist = async (journalKey, artistName, gigDate, venueNam
             window.showToast('Playlist created but could not be saved. Try refreshing.', 'warning');
         }
 
-        // Populate cache so future modal opens within this session are instant.
+        // Populate cache so future modal opens are instant
         window._gigReadyPlaylists[entry.id] = result.playlistUrl;
 
         renderGigReadyReadyState(btnId, result.playlistUrl, journalKey, artistName, gigDate, venueName);
@@ -313,24 +334,31 @@ window.createGigReadyPlaylist = async (journalKey, artistName, gigDate, venueNam
 };
 
 window.initGigReadyButton = async (journalKey) => {
-    if (!window.currentUser?.is_admin) return;
-
     const entry = (window.journalData || []).find(g => g['Journal Key'] === journalKey);
     if (!entry) return;
 
-    const btnId = `gig-ready-btn-${journalKey.replace(/[^a-z0-9]/gi, '_')}`;
+    const btnId      = `gig-ready-btn-${journalKey.replace(/[^a-z0-9]/gi, '_')}`;
     const artistName = entry.Band;
     const gigDate    = entry.Date;
     const venueName  = entry.OfficialVenue;
 
-    // ── Cache hit: synchronous render, nothing can interleave.
+    // ── Cache hit: synchronous render, nothing can interleave
     const cached = window._gigReadyPlaylists[entry.id];
     if (cached) {
         renderGigReadyReadyState(btnId, cached, journalKey, artistName, gigDate, venueName);
         return;
     }
 
-    // ── Cache miss: query Supabase (first open after page refresh).
+    // ── Check Spotify connection first
+    const connected = await checkSpotifyConnection(window.currentUser.id);
+    if (!connected) {
+        renderConnectPrompt(btnId, window.currentUser.id, () =>
+            window.createGigReadyPlaylist(journalKey, artistName, gigDate, venueName)
+        );
+        return;
+    }
+
+    // ── Cache miss: query Supabase (first open after page refresh)
     const { data: existing } = await supabase
         .from('spotify_playlists')
         .select('playlist_url')
@@ -341,12 +369,8 @@ window.initGigReadyButton = async (journalKey) => {
 
     if (!existing?.playlist_url) return;
 
-    // Populate cache for the remainder of this session.
+    // Populate cache for the remainder of this session
     window._gigReadyPlaylists[entry.id] = existing.playlist_url;
-
-    const btn = document.getElementById(btnId);
-    if (!btn) return;
-
     renderGigReadyReadyState(btnId, existing.playlist_url, journalKey, artistName, gigDate, venueName);
 };
 
@@ -371,7 +395,7 @@ window.refreshGigReadyPlaylist = async (journalKey, artistName, gigDate, venueNa
         return;
     }
 
-    // Clear session cache so the next createGigReadyPlaylist call goes to the network.
+    // Clear session cache so the next call hits the network for a fresh setlist
     delete window._gigReadyPlaylists[entry.id];
 
     const el = document.getElementById(btnId);
