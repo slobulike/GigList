@@ -310,7 +310,7 @@ async function handleOnThisDay(env) {
     };
 
     console.log(`[cron] On This Day — sending to user ${sub.user_id}: "${payload.body}"`);
-    console.log(`[cron] On This Day — deep-link url: ${payload.url}`);
+    console.log(`[cron] On This Day — deep-link url: ${payload.data.url}`);
 
     try {
       await sendPush(env, sub, payload);

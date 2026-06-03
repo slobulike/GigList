@@ -139,13 +139,29 @@ function _handleServiceWorkerMessage(event) {
     _resolveDeepLink(id, isWW, source);
 }
 
+// ── PATH B listener — registered immediately at module parse time ─────────────
+//
+// navigator.serviceWorker.addEventListener('message') is attached as soon as
+// this module is imported — before initDeepLink() or markAppReady() are called.
+// This closes the race window where sw.js fires client.postMessage() before
+// app.js has called initDeepLink(), which was the failure mode with the
+// previous BroadcastChannel approach (the channel only existed after initDeepLink
+// ran, so any message sent before that moment was silently dropped).
+//
+// The intent is still safely queued via _resolveDeepLink → _pendingLink and
+// flushed when markAppReady() is called, so warm-path taps work even if the
+// app was backgrounded and data hasn't fully reloaded yet.
+
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', _handleServiceWorkerMessage);
+}
+
 // ── Public init — call once from app.js ───────────────────────────────────────
 
 export function initDeepLink() {
-    // PATH A: check URL params immediately
+    // PATH A: check URL params immediately (cold start / shared link)
     _handleUrlParams();
 
-    // PATH B: listen for SW messages via BroadcastChannel (replaces SW postMessage)
-    const bc = new BroadcastChannel('giglist-deep-link');
-    bc.onmessage = (event) => _handleServiceWorkerMessage(event);
+    // PATH B listener is already attached above at module parse time — nothing
+    // more to do here for the warm path.
 }

@@ -1,8 +1,8 @@
 /**
  * GigList Core Engine
- * v6.1.0 — 2026-06-03
+ * v6.1.1 — 2026-06-03
  * -------------------------------------------------------------------
- * ✅ Introduction of tips registry and tips hub
+ * ✅ Another attempt to get deeplinks for weezer wednesdays working
  */
 
 import * as Data from './modules/data.js';

@@ -156,17 +156,20 @@ self.addEventListener('notificationclick', (event) => {
         console.log('[SW] appClient matched:', !!appClient, appClient?.url ?? 'none');
 
         if (appClient) {
-          console.log('[SW] warm path — focusing and sending BroadcastChannel message');
+          console.log('[SW] warm path — focusing and sending postMessage to client');
           return appClient.focus().then(() => {
-            const bc = new BroadcastChannel('giglist-deep-link');
-            bc.postMessage({
+            // postMessage to the specific client is more reliable than
+            // BroadcastChannel, which requires the listener to already be
+            // registered at the moment the message is sent. client.postMessage()
+            // is delivered to the window's message queue regardless of whether
+            // the navigator.serviceWorker listener is attached yet.
+            appClient.postMessage({
               type:            'GIGLIST_DEEP_LINK',
               journalId,
               weezerWednesday: isWW,
               source,
             });
-            bc.close();
-            console.log('[SW] BroadcastChannel message sent');
+            console.log('[SW] postMessage sent to client');
           });
         }
 
