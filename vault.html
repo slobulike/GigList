@@ -740,43 +740,44 @@
                         <p class="text-[9px] font-black uppercase tracking-widest text-slate-400">Favourite Show</p>
                         <p id="profile-fav-show" class="text-sm font-black text-slate-800 truncate">--</p>
                     </div>
+                </div>
             </div>
 
-            <!-- Edit mode — hidden until Edit tapped -->
-            <div id="profile-identity-edit" class="hidden space-y-3">
-                <div>
-                    <label for="profile-edit-band" class="block text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1.5">Favourite Band</label>
-                    <input type="text" id="profile-edit-band"
-                           placeholder="Most-seen, or your all-time favourite…"
-                           class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all">
+                <!-- Edit mode — hidden until Edit tapped -->
+                <div id="profile-identity-edit" class="hidden space-y-3">
+                    <div>
+                        <label for="profile-edit-band" class="block text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1.5">Favourite Band</label>
+                        <input type="text" id="profile-edit-band"
+                               placeholder="Most-seen, or your all-time favourite…"
+                               class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all">
+                    </div>
+                    <div>
+                        <label for="profile-edit-venue" class="block text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1.5">Favourite Venue</label>
+                        <input type="text" id="profile-edit-venue"
+                               placeholder="The one you keep coming back to…"
+                               class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all">
+                    </div>
+                    <div>
+                        <label for="profile-edit-song" class="block text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1.5">Favourite Live Song</label>
+                        <input type="text" id="profile-edit-song"
+                               placeholder="That song that always destroys you live…"
+                               class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all">
+                    </div>
+                    <div>
+                        <label for="profile-edit-show" class="block text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1.5">Favourite Show</label>
+                        <input type="text" id="profile-edit-show"
+                               placeholder="Search your gig history…"
+                               autocomplete="off"
+                               class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all">
+                        <ul id="profile-edit-show-list"
+                            role="listbox"
+                            class="hidden bg-white border border-slate-200 rounded-2xl shadow-xl mt-1 overflow-hidden max-h-48 overflow-y-auto"></ul>
+                    </div>
+                    <button onclick="window.saveIdentity()"
+                            class="w-full py-3 text-sm font-black text-white bg-indigo-600 hover:bg-indigo-700 rounded-2xl transition-all active:scale-95 uppercase tracking-widest">
+                        Save
+                    </button>
                 </div>
-                <div>
-                    <label for="profile-edit-venue" class="block text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1.5">Favourite Venue</label>
-                    <input type="text" id="profile-edit-venue"
-                           placeholder="The one you keep coming back to…"
-                           class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all">
-                </div>
-                <div>
-                    <label for="profile-edit-song" class="block text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1.5">Favourite Live Song</label>
-                    <input type="text" id="profile-edit-song"
-                           placeholder="That song that always destroys you live…"
-                           class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all">
-                </div>
-                <div>
-                    <label for="profile-edit-show" class="block text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1.5">Favourite Show</label>
-                    <input type="text" id="profile-edit-show"
-                           placeholder="Search your gig history…"
-                           autocomplete="off"
-                           class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all">
-                    <ul id="profile-edit-show-list"
-                        role="listbox"
-                        class="hidden bg-white border border-slate-200 rounded-2xl shadow-xl mt-1 overflow-hidden max-h-48 overflow-y-auto"></ul>
-                </div>
-                <button onclick="window.saveIdentity()"
-                        class="w-full py-3 text-sm font-black text-white bg-indigo-600 hover:bg-indigo-700 rounded-2xl transition-all active:scale-95 uppercase tracking-widest">
-                    Save
-                </button>
-            </div>
             </div>
 
             <!-- ── Stats strip ── -->
@@ -889,100 +890,99 @@
                     </div>
                 </div>
 
-            <!-- Push Notifications -->
-            <div class="bg-white rounded-[2rem] border border-slate-100 shadow-sm px-5 py-4" data-push-row>
-                <div class="flex items-center justify-between gap-4">
-                    <div>
-                        <p class="text-sm font-black text-slate-800">Push Notifications</p>
-                        <p id="push-toggle-label" class="text-[10px] text-slate-400 mt-0.5 leading-relaxed">Get notified about gig buddies and memories.</p>
-                        <p id="push-ios-hint" class="hidden text-[10px] text-amber-500 mt-0.5 leading-relaxed">
-                            Add GigList to your home screen to enable on iOS
+                <!-- Push Notifications -->
+                <div class="bg-white rounded-[2rem] border border-slate-100 shadow-sm px-5 py-4" data-push-row>
+                    <div class="flex items-center justify-between gap-4">
+                        <div>
+                            <p class="text-sm font-black text-slate-800">Push Notifications</p>
+                            <p id="push-toggle-label" class="text-[10px] text-slate-400 mt-0.5 leading-relaxed">Get notified about gig buddies and memories.</p>
+                            <p id="push-ios-hint" class="hidden text-[10px] text-amber-500 mt-0.5 leading-relaxed">
+                                Add GigList to your home screen to enable on iOS
+                            </p>
+                        </div>
+                        <button
+                                id="push-toggle-btn"
+                                role="switch"
+                                aria-checked="false"
+                                class="relative flex-shrink-0 w-12 h-6 rounded-full transition-colors duration-200 bg-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
+                            <span data-knob class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 translate-x-0"></span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Setlist.fm sync -->
+                <!-- NOTE: #setlistIdInput, #sync-progress, #sync-status IDs are referenced by onboarding flow — do not rename -->
+                <div class="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-5">
+                    <label for="setlistIdInput" class="block text-[10px] font-black uppercase text-indigo-500 mb-3 tracking-widest">Sync Setlist.fm</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="setlistIdInput"
+                               placeholder="Your setlist.fm username"
+                               autocomplete="off"
+                               autocapitalize="off"
+                               spellcheck="false"
+                               class="flex-1 bg-slate-50 px-4 py-3 rounded-xl text-sm font-bold border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800">
+                        <button onclick="window.syncSetlistFm()"
+                                aria-label="Run Sync"
+                                class="bg-indigo-600 text-white px-4 py-3 rounded-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200">
+                            <i data-lucide="refresh-cw" class="w-5 h-5"></i>
+                        </button>
+                    </div>
+                    <div class="hidden mt-3 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                        <div id="sync-progress" class="h-full bg-indigo-500 rounded-full transition-all duration-500" style="width:0%"></div>
+                    </div>
+                    <p id="sync-status" class="text-[10px] text-slate-400 mt-3 italic leading-relaxed">This will pull your full history, venues, and setlists.</p>
+
+                    <div id="no-setlist-help-profile" class="hidden space-y-3 mt-3">
+                        <p class="text-sm text-slate-600 leading-relaxed">
+                            No setlist.fm account? Search your email for ticket confirmations to find the shows you've been to, then add them manually.
+                        </p>
+                        <div>
+                            <p class="text-xs font-black text-slate-500 uppercase tracking-widest mb-1.5">Try searching:</p>
+                            <code class="block bg-slate-100 text-slate-700 font-mono text-xs px-3 py-2 rounded-xl leading-relaxed">
+                                from:(TicketWeb OR Ticketmaster OR "See Tickets" OR Dice OR "Gigs &amp; Tours") "confirmation"
+                            </code>
+                        </div>
+                        <button onclick="window.openAddGigModal()"
+                                class="w-full mt-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-black rounded-2xl transition-all active:scale-95 uppercase tracking-widest">
+                            Add your first gig now →
+                        </button>
+                    </div>
+
+                    <button id="btn-no-setlist-account-profile"
+                            onclick="window.showNoSetlistTip()"
+                            class="mt-2 text-[10px] font-black text-slate-400 hover:text-indigo-500 transition-colors uppercase tracking-widest">
+                        I don't have a setlist.fm account &rarr;
+                    </button>
+                </div>
+
+                <!-- Export -->
+                <div class="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-5">
+                    <p class="text-[10px] font-black uppercase text-indigo-500 mb-3 tracking-widest">Export Your Archive</p>
+                    <button onclick="window.exportCSV()"
+                            class="w-full flex items-center justify-center gap-2 bg-slate-50 border border-slate-200 hover:border-indigo-400 hover:text-indigo-600 text-slate-600 font-black text-sm py-3 rounded-2xl transition-all active:scale-[0.98]">
+                        <i data-lucide="download" class="w-4 h-4" aria-hidden="true"></i>
+                        Download CSV
+                    </button>
+                    <p class="text-[10px] text-slate-400 mt-3 italic leading-relaxed">Your data, always yours.</p>
+                </div>
+
+                <!-- Sign out -->
+                <button onclick="window.signOut()"
+                        class="w-full py-4 text-red-400 font-bold text-sm hover:text-red-600 transition-colors flex items-center justify-center gap-2">
+                    <i data-lucide="log-out" class="w-4 h-4" aria-hidden="true"></i>
+                    Sign Out
+                </button>
+
+                <div class="pt-4 border-t border-slate-100 flex justify-between items-center opacity-40">
+                    <p class="text-[9px] font-black uppercase tracking-widest text-slate-500">GigList</p>
+                    <div class="flex items-center gap-1.5">
+                        <span class="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
+                        <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest">
+                            BUILD <span id="app-version-display">--</span>
                         </p>
                     </div>
-                    <button
-                            id="push-toggle-btn"
-                            role="switch"
-                            aria-checked="false"
-                            class="relative flex-shrink-0 w-12 h-6 rounded-full transition-colors duration-200 bg-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
-                        <span data-knob class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 translate-x-0"></span>
-                    </button>
                 </div>
             </div>
-
-            <!-- Setlist.fm sync -->
-            <!-- NOTE: #setlistIdInput, #sync-progress, #sync-status IDs are referenced by onboarding flow — do not rename -->
-            <div class="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-5">
-                <label for="setlistIdInput" class="block text-[10px] font-black uppercase text-indigo-500 mb-3 tracking-widest">Sync Setlist.fm</label>
-                <div class="flex gap-2">
-                    <input type="text" id="setlistIdInput"
-                           placeholder="Your setlist.fm username"
-                           autocomplete="off"
-                           autocapitalize="off"
-                           spellcheck="false"
-                           class="flex-1 bg-slate-50 px-4 py-3 rounded-xl text-sm font-bold border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800">
-                    <button onclick="window.syncSetlistFm()"
-                            aria-label="Run Sync"
-                            class="bg-indigo-600 text-white px-4 py-3 rounded-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200">
-                        <i data-lucide="refresh-cw" class="w-5 h-5"></i>
-                    </button>
-                </div>
-                <div class="hidden mt-3 h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                    <div id="sync-progress" class="h-full bg-indigo-500 rounded-full transition-all duration-500" style="width:0%"></div>
-                </div>
-                <p id="sync-status" class="text-[10px] text-slate-400 mt-3 italic leading-relaxed">This will pull your full history, venues, and setlists.</p>
-
-                <div id="no-setlist-help-profile" class="hidden space-y-3 mt-3">
-                    <p class="text-sm text-slate-600 leading-relaxed">
-                        No setlist.fm account? Search your email for ticket confirmations to find the shows you've been to, then add them manually.
-                    </p>
-                    <div>
-                        <p class="text-xs font-black text-slate-500 uppercase tracking-widest mb-1.5">Try searching:</p>
-                        <code class="block bg-slate-100 text-slate-700 font-mono text-xs px-3 py-2 rounded-xl leading-relaxed">
-                            from:(TicketWeb OR Ticketmaster OR "See Tickets" OR Dice OR "Gigs &amp; Tours") "confirmation"
-                        </code>
-                    </div>
-                    <button onclick="window.openAddGigModal()"
-                            class="w-full mt-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-black rounded-2xl transition-all active:scale-95 uppercase tracking-widest">
-                        Add your first gig now →
-                    </button>
-                </div>
-
-                <button id="btn-no-setlist-account-profile"
-                        onclick="window.showNoSetlistTip()"
-                        class="mt-2 text-[10px] font-black text-slate-400 hover:text-indigo-500 transition-colors uppercase tracking-widest">
-                    I don't have a setlist.fm account &rarr;
-                </button>
-            </div>
-
-            <!-- Export -->
-            <div class="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-5">
-                <p class="text-[10px] font-black uppercase text-indigo-500 mb-3 tracking-widest">Export Your Archive</p>
-                <button onclick="window.exportCSV()"
-                        class="w-full flex items-center justify-center gap-2 bg-slate-50 border border-slate-200 hover:border-indigo-400 hover:text-indigo-600 text-slate-600 font-black text-sm py-3 rounded-2xl transition-all active:scale-[0.98]">
-                    <i data-lucide="download" class="w-4 h-4" aria-hidden="true"></i>
-                    Download CSV
-                </button>
-                <p class="text-[10px] text-slate-400 mt-3 italic leading-relaxed">Your data, always yours.</p>
-            </div>
-
-            <!-- Sign out -->
-            <button onclick="window.signOut()"
-                    class="w-full py-4 text-red-400 font-bold text-sm hover:text-red-600 transition-colors flex items-center justify-center gap-2">
-                <i data-lucide="log-out" class="w-4 h-4" aria-hidden="true"></i>
-                Sign Out
-            </button>
-
-            <div class="pt-4 border-t border-slate-100 flex justify-between items-center opacity-40">
-                <p class="text-[9px] font-black uppercase tracking-widest text-slate-500">GigList</p>
-                <div class="flex items-center gap-1.5">
-                    <span class="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
-                    <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest">
-                        BUILD <span id="app-version-display">--</span>
-                    </p>
-                </div>
-            </div>
-        </div>
-        </div>
     </section>
 
     <!-- ── BAND MODE: SHOWS VIEW ──────────────────────────────────────────────── -->

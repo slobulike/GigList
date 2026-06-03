@@ -1,8 +1,8 @@
 /**
  * GigList Core Engine
- * v6.0.4 — 2026-05-31
+ * v6.0.5 — 2026-06-03
  * -------------------------------------------------------------------
- * ✅ Bug fix to Spotify button not showing correct state
+ * ✅ Bug fix to edit musical identity
  */
 
 import * as Data from './modules/data.js';
