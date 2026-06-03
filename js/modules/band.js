@@ -381,7 +381,7 @@ function _renderStoryStats() {
         {
             label: 'Shows Archived',
             value: data.length,
-            sub:   'total on GigList',
+            sub:  'in the Band Page archive',
         },
         {
             label: 'Fan Attendance',

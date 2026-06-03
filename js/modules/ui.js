@@ -1347,144 +1347,125 @@ const gigIsPast = (() => {
                 if (window.lucide) lucide.createIcons();
             };
 
-// ─── ARCHIVE REQUEST BUTTON ───────────────────────────────────────────────────
+// ─── BAND PAGE REQUEST BUTTON ─────────────────────────────────────────────────
 
 /**
  * Called by openGigModal after the modal HTML is in the DOM.
- * Checks whether the band is already archived, has a pending request, or
+ * Checks whether the band already has a Band Page, has a pending request, or
  * is new — and renders the appropriate button/link into the placeholder span.
+ *
+ * band_page_requests table schema (add if not exists):
+ *   id          uuid primary key default gen_random_uuid()
+ *   user_id     uuid references profiles(id)
+ *   band_name   text not null
+ *   mbid        text
+ *   created_at  timestamptz default now()
+ *   unique(user_id, band_name)
  */
 export async function initArchiveButton(entry) {
     // Only show for authenticated personal users, not in band/friend mode
     if (!window.currentUser?.isAuthUser || window.currentUser?.Type !== 'Personal') return;
 
-    const bandName   = entry.Band || entry.band || '';
-    const safeKey    = (entry['Journal Key'] || '').replace(/[^a-z0-9]/gi, '_');
-    const wrap       = document.getElementById(`modal-archive-btn-wrap-${safeKey}`);
+    const bandName = entry.Band || entry.band || '';
+    const safeKey  = (entry['Journal Key'] || '').replace(/[^a-z0-9]/gi, '_');
+    const wrap     = document.getElementById(`modal-archive-btn-wrap-${safeKey}`);
     if (!wrap) return;
 
     const status = await getArchiveStatus(bandName);
 
     if (status === 'archived') {
-        // Link through to the existing band archive
+        // Link through to the existing Band Page
         const bandParam = encodeURIComponent(bandName);
         wrap.innerHTML = `
             <a href="vault.html?band=${bandParam}"
                class="bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 text-slate-500 text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
-                <i data-lucide="archive" class="w-3.5 h-3.5" aria-hidden="true"></i> VIEW ARCHIVE
+                <i data-lucide="users" class="w-3.5 h-3.5" aria-hidden="true"></i> VIEW BAND PAGE
             </a>`;
     } else if (status === 'pending') {
         wrap.innerHTML = `
             <span class="bg-amber-50 text-amber-600 text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 border border-amber-200">
-                <i data-lucide="clock" class="w-3.5 h-3.5" aria-hidden="true"></i> REQUEST PENDING
+                <i data-lucide="clock" class="w-3.5 h-3.5" aria-hidden="true"></i> REQUESTED ✓
             </span>`;
     } else {
         // Not archived and no pending request — show the request button
         wrap.innerHTML = `
-            <button onclick="window.openArchiveRequest('${bandName.replace(/'/g, "\'")}')"
-                    class="bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 text-slate-500 text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
-                <i data-lucide="plus-circle" class="w-3.5 h-3.5" aria-hidden="true"></i> ADD TO ARCHIVE
-            </button>`;
+            <div class="flex flex-col items-start gap-0.5">
+                <button id="band-page-request-btn-${safeKey}"
+                        onclick="window.requestBandPage('${bandName.replace(/'/g, "\\'")}', '${safeKey}')"
+                        class="bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 text-slate-500 text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95"
+                        data-tip="request_band_page">
+                    <i data-lucide="plus-circle" class="w-3.5 h-3.5" aria-hidden="true"></i> REQUEST BAND PAGE
+                </button>
+                <p class="text-[8px] text-slate-400 font-bold px-1">Get stats, history &amp; fans for this artist</p>
+            </div>`;
     }
     if (window.lucide) lucide.createIcons();
 }
 
 /**
- * Opens the archive request flow inline in the gig modal.
- * Searches setlist.fm for the artist, presents candidates, and on confirm
- * submits to band_requests.
+ * Single-tap Band Page request flow per spec §1.4.
+ * Replaces the old multi-step setlist.fm search UI.
+ * Writes directly to band_page_requests; the setlist.fm MBID lookup
+ * is deferred to the admin review step so the user isn't blocked.
  */
-window.openArchiveRequest = async function(bandName) {
-    // Find or create the request UI container below the action row
-    let container = document.getElementById('archive-request-container');
-    if (!container) {
-        const modalBody = document.querySelector('.flex-grow.overflow-y-auto');
-        if (!modalBody) return;
-        container = document.createElement('div');
-        container.id = 'archive-request-container';
-        container.className = 'mb-6 bg-indigo-50 border border-indigo-100 rounded-[1.5rem] p-5 space-y-3';
-        modalBody.prepend(container);
-    }
+window.requestBandPage = async function(bandName, safeKey) {
+    const btn = document.getElementById(`band-page-request-btn-${safeKey}`);
+    if (!btn) return;
 
-    container.innerHTML = `
-        <p class="text-[10px] font-black uppercase text-indigo-500 tracking-widest">Request Archive</p>
-        <div class="flex gap-2">
-            <input id="archive-search-input"
-                   type="text"
-                   value="${bandName.replace(/"/g, '&quot;')}"
-                   placeholder="Artist name…"
-                   class="flex-1 bg-white border border-indigo-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-400">
-            <button onclick="window.runArchiveSearch()"
-                    class="bg-indigo-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase hover:bg-indigo-700 transition-colors">
-                Search
-            </button>
-        </div>
-        <div id="archive-search-results" class="space-y-2 text-sm"></div>`;
-
-    document.getElementById('archive-search-input')?.focus();
-    if (window.lucide) lucide.createIcons();
-};
-
-window.runArchiveSearch = async function() {
-    const input   = document.getElementById('archive-search-input');
-    const results = document.getElementById('archive-search-results');
-    if (!input || !results) return;
-
-    const name = input.value.trim();
-    if (!name) return;
-
-    results.innerHTML = '<p class="text-[10px] text-slate-400 italic">Searching setlist.fm…</p>';
+    // Immediate disabled + spinner feedback
+    btn.disabled = true;
+    btn.innerHTML = `
+        <svg class="w-3.5 h-3.5 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
+        </svg>
+        Requesting…`;
 
     try {
-        const candidates = await searchArtists(name);
+        const userId = window.currentUser?.id;
+        if (!userId) throw new Error('Not signed in');
 
-        if (!candidates.length) {
-            results.innerHTML = '<p class="text-[10px] text-red-400 italic">No artists found — try a different spelling.</p>';
-            return;
+        const { error } = await supabase
+            .from('band_page_requests')
+            .insert({ user_id: userId, band_name: bandName });
+
+        // Unique constraint violation (23505) = already requested — treat as success
+        if (error && error.code !== '23505') throw error;
+
+        // Success: relabel button and show sub-label
+        const wrap = btn.closest('[id^="modal-archive-btn-wrap-"]');
+        if (wrap) {
+            wrap.innerHTML = `
+                <div class="flex flex-col items-start gap-0.5">
+                    <span class="bg-emerald-50 text-emerald-600 text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 border border-emerald-100">
+                        <i data-lucide="check-circle" class="w-3.5 h-3.5" aria-hidden="true"></i> REQUESTED ✓
+                    </span>
+                    <p class="text-[8px] text-slate-400 font-bold px-1">We'll notify you when the ${bandName} page goes live</p>
+                </div>`;
+            if (window.lucide) lucide.createIcons();
         }
 
-        results.innerHTML = candidates.map(c => `
-            <div class="flex items-center justify-between gap-3 bg-white rounded-2xl px-4 py-3 border border-slate-100">
-                <div class="flex-1 min-w-0">
-                    <p class="text-sm font-black text-slate-800 truncate">${c.name}</p>
-                    ${c.disambiguation ? `<p class="text-[10px] text-slate-400">${c.disambiguation}</p>` : ''}
-                </div>
-                <button onclick="window.confirmArchiveRequest('${c.name.replace(/'/g, "\'")}', '${c.mbid}')"
-                        class="flex-shrink-0 bg-indigo-600 text-white text-[10px] font-black px-3 py-1.5 rounded-full hover:bg-indigo-700 transition-all active:scale-95 uppercase tracking-widest">
-                    Request
-                </button>
-            </div>`).join('');
+        window.showToast?.(`Request received! We'll notify you when the ${bandName} page goes live.`, 'success');
+
+        if (typeof window.track === 'function') {
+            window.track('band_page_requested', { artist: bandName });
+        }
+
     } catch (err) {
-        results.innerHTML = `<p class="text-[10px] text-red-400 italic">Search failed: ${err.message}</p>`;
+        console.error('ui.js: band page request failed', err);
+        // Re-enable button on error
+        btn.disabled = false;
+        btn.innerHTML = `
+            <i data-lucide="plus-circle" class="w-3.5 h-3.5" aria-hidden="true"></i> REQUEST BAND PAGE`;
+        if (window.lucide) lucide.createIcons();
+        window.showToast?.('Something went wrong — please try again.', 'error');
     }
 };
 
-window.confirmArchiveRequest = async function(artistName, mbid) {
-    const results = document.getElementById('archive-search-results');
-    if (results) results.innerHTML = '<p class="text-[10px] text-slate-400 italic">Submitting request…</p>';
-
-    const { ok, error } = await submitArchiveRequest(artistName, mbid);
-
-    if (!ok) {
-        if (results) results.innerHTML = `<p class="text-[10px] text-red-400 italic">Failed: ${error}</p>`;
-        return;
-    }
-
-    const container = document.getElementById('archive-request-container');
-    if (container) {
-        container.innerHTML = `
-            <div class="flex items-center gap-3">
-                <i data-lucide="check-circle" class="w-5 h-5 text-emerald-500 flex-shrink-0"></i>
-                <div>
-                    <p class="text-sm font-black text-slate-800">Request sent for ${artistName}</p>
-                    <p class="text-[10px] text-slate-400 mt-0.5">We'll review it and add the archive soon.</p>
-                </div>
-            </div>`;
-        if (window.lucide) lucide.createIcons();
-    }
-
-    window.showToast?.('Archive request submitted!', 'success');
-    if (typeof window.track === 'function') {
-        window.track('archive_requested', { artist: artistName, mbid });
-    }
+// ── LEGACY EXPORT — keep window.openArchiveRequest as a no-op redirect so any
+// stale references (bookmarks, cached SW) don't throw. Remove in a future cleanup.
+window.openArchiveRequest = function(bandName) {
+    console.warn('openArchiveRequest() is deprecated — use requestBandPage()');
+    const safeKey = bandName.replace(/[^a-z0-9]/gi, '_');
+    window.requestBandPage?.(bandName, safeKey);
 };

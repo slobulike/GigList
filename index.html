@@ -443,7 +443,7 @@
         </button>
 
         <button class="btn-secondary" onclick="window.enterApp('screen-bands-splash')">
-            Browse Band Archives
+            Browse Band Pages
         </button>
 
         <p class="btn-sub" style="margin-top:16px">No account needed to browse · Free to join</p>
@@ -523,7 +523,7 @@
                     No account yet? Sign up →
                 </button>
                 <button onclick="window.enterApp('screen-bands-splash')" style="font-size:10px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.08em;background:none;border:none;cursor:pointer;">
-                    Maybe later — browse band archives
+                    Maybe later — browse band pages
                 </button>
             </div>
         </div>
@@ -531,7 +531,7 @@
         <!-- ── Screen: Band picker ────────────── -->
         <div id="screen-bands-splash" class="hidden space-y-4 fade-in">
             <div style="text-align:center;margin-bottom:4px;">
-                <p style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:22px;text-transform:uppercase;color:#0f172a;letter-spacing:0.02em;">Band Archives</p>
+                <p style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:22px;text-transform:uppercase;color:#0f172a;letter-spacing:0.02em;">Band Pages</p>
                 <p style="font-size:11px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.08em;margin-top:2px;">No sign-in required</p>
             </div>
             <div id="band-list" class="space-y-3" role="list" aria-live="polite">
@@ -747,7 +747,7 @@
         const { data, error } = await supabase.from('bands').select('*').order('rank');
 
         if (error || !data?.length) {
-            container.innerHTML = '<p style="text-align:center;color:#94a3b8;font-weight:700;padding:40px 0;">No band archives found.</p>';
+            container.innerHTML = '<p style="text-align:center;color:#94a3b8;font-weight:700;padding:40px 0;">No band pages found.</p>';
             return;
         }
 
@@ -756,10 +756,10 @@
             const btn = document.createElement('button');
             btn.className = "w-full";
             btn.style.cssText = "width:100%;padding:20px 24px;background:#fff;border:1.5px solid #f1f5f9;border-radius:24px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;transition:all 0.2s;box-shadow:0 1px 4px rgba(0,0,0,0.05);text-align:left;";
-            btn.setAttribute('aria-label', `Browse ${band.name} archive`);
+            btn.setAttribute('aria-label', `Browse ${band.name} page`);
             btn.innerHTML = `
                 <div>
-                    <span style="display:block;font-size:10px;color:#94a3b8;font-weight:800;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:3px;">Band Archive</span>
+                    <span style="display:block;font-size:10px;color:#94a3b8;font-weight:800;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:3px;">Band Page</span>
                     <span style="display:block;font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:22px;color:#0f172a;letter-spacing:-0.3px;">${band.name}</span>
                 </div>
                 <div style="width:40px;height:40px;background:#f1f5f9;border-radius:14px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">

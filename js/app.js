@@ -1,8 +1,8 @@
 /**
  * GigList Core Engine
- * v6.0.5 — 2026-06-03
+ * v6.1.0 — 2026-06-03
  * -------------------------------------------------------------------
- * ✅ Bug fix to edit musical identity
+ * ✅ Introduction of tips registry and tips hub
  */
 
 import * as Data from './modules/data.js';
@@ -31,7 +31,7 @@ import { applyFilters, buildSummaryLine, hasActiveFilters } from './modules/filt
 import { initDeepLink, markAppReady } from './modules/deep-link.js';
 import { initPlaylistButton } from './modules/spotify.js';
 
-const APP_VERSION = "6.0.4";
+const APP_VERSION = "6.1.0";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 

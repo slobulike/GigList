@@ -91,17 +91,24 @@ window.createRelivePlaylist = async (journalKey, artistName, gigDate, venueName)
         return;
     }
 
+    const { data: artistRow } = await supabase
+        .from('artists')
+        .select('spotify_id')
+        .ilike('name', artistName)
+        .maybeSingle();
+
     try {
         const response = await fetch(SPOTIFY_WORKER, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                setlist:    performance.Setlist,
+                setlist:          performance.Setlist,
                 artistName,
+                artistSpotifyId:  artistRow?.spotify_id || null,
                 gigDate,
                 venueName,
-                mode:       'relive',
-                userId:     window.currentUser.id,
+                mode:             'relive',
+                userId:           window.currentUser.id,
             }),
         });
 
@@ -241,7 +248,7 @@ window.createGigReadyPlaylist = async (journalKey, artistName, gigDate, venueNam
 
     const { data: artistRow } = await supabase
         .from('artists')
-        .select('mbid')
+        .select('mbid, spotify_id')
         .ilike('name', artistName)
         .maybeSingle();
 
@@ -286,12 +293,13 @@ window.createGigReadyPlaylist = async (journalKey, artistName, gigDate, venueNam
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                setlist: songs.join(' | '),
+                setlist:         songs.join(' | '),
                 artistName,
+                artistSpotifyId: artistRow?.spotify_id || null,
                 gigDate,
                 venueName,
-                mode:   'gig_ready',
-                userId: window.currentUser.id,
+                mode:            'gig_ready',
+                userId:          window.currentUser.id,
             }),
         });
 

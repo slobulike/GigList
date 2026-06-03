@@ -17,6 +17,8 @@
 import { supabase } from './supabase.js';
 import { renderBadges, renderBadgeStrip, buildBadgeDefs, deriveFanType } from './achievements.js';
 import { initPushUI } from './push.js';
+import { initTips, syncSeenState, getSeenCount, getTotalCount } from './tips-registry.js';
+import { initTipsHub } from './tips-hub.js';
 
 // ─── MODULE STATE ─────────────────────────────────────────────────────────────
 
@@ -31,12 +33,19 @@ let _profileUserId = null;  // null = own, uuid = viewing a buddy
  */
 export async function initProfile(currentUser) {
     _currentUser = currentUser;
+
+    // Initialise tips seen state — must run before _renderOwnProfile
+        // so getSeenCount() is correct when the strip label renders.
+        if (currentUser?.id) {
+            initTips(currentUser.id);
+            syncSeenState(); // fire-and-forget background Supabase sync
+        }
+
     _populateHeaderAvatar(currentUser);
     _initPrivacyToggle(currentUser);
-    // initPushUI involves serviceWorker.ready + a Supabase query — fire without
-    // awaiting so it doesn't block initProfile returning or the Promise.all in app.js
     initPushUI(supabase);
 }
+
 
 // ─── HEADER AVATAR ────────────────────────────────────────────────────────────
 
@@ -156,6 +165,10 @@ async function _renderOwnProfile() {
     const backBtn = document.getElementById('profile-back-btn');
     if (backBtn) backBtn.classList.add('hidden');
 
+    // Tips Hub strip — visible for own profile; drawer starts hidden
+        document.getElementById('profile-tips-hub-strip')?.classList.remove('hidden');
+            document.getElementById('view-profile-tips-hub')?.classList.add('hidden');
+
     // Avatar edit button — visible for own profile
     document.getElementById('profile-avatar-edit-btn')?.classList.remove('hidden');
 
@@ -225,7 +238,19 @@ async function _renderOwnProfile() {
     _renderAchievements(window.journalData || []);
 
     // ── Buddy strip ──
-    renderBuddyStrip(window._following || []);
+        renderBuddyStrip(window._following || []);
+
+// ── Tips Hub strip label ──
+    _updateTipsStripLabel();
+
+    window.addEventListener('giglist:tipSeen', () => {
+            const hubContainer = document.getElementById('tips-hub-container');
+            if (hubContainer) {
+                initTipsHub(hubContainer, {
+                    accountCreatedAt: _currentUser?.created_at || null,
+                });
+            }
+        }, { once: false });
 }
 
 // ─── BUDDY PROFILE (read-only) ────────────────────────────────────────────────
@@ -237,6 +262,10 @@ async function _renderBuddyProfile(userId) {
         backBtn.classList.remove('hidden');
         backBtn.classList.add('flex');
     }
+    // Tips Hub — hidden for buddy profile
+        document.getElementById('profile-tips-hub-strip')?.classList.add('hidden');
+        document.getElementById('view-profile-tips-hub')?.classList.add('hidden');
+
 
     // Avatar edit button — hidden for buddy profile
     document.getElementById('profile-avatar-edit-btn')?.classList.add('hidden');
@@ -633,6 +662,71 @@ window.closeAchievements = () => {
     document.getElementById('view-profile-achievements')?.classList.add('hidden');
     document.getElementById('profile-badge-strip')?.closest('.bg-white')?.classList.remove('hidden');
 };
+
+// ── Tips Hub ──────────────────────────────────────────────────
+
+function _updateTipsStripLabel() {
+    const seen  = getSeenCount();
+    const total = getTotalCount();
+
+    const progressEl = document.getElementById('tips-hub-strip-progress');
+    if (progressEl) progressEl.textContent = `${seen} of ${total} features discovered`;
+
+    const countEl = document.getElementById('tips-hub-strip-count');
+    if (countEl) countEl.textContent = `${seen}/${total} ·`;
+}
+
+window.openTipsHub = () => {
+    document.getElementById('profile-tips-hub-strip')?.classList.add('hidden');
+
+    const drawer = document.getElementById('view-profile-tips-hub');
+    drawer?.classList.remove('hidden');
+
+    const container = document.getElementById('tips-hub-container');
+    if (container) {
+        initTipsHub(container, {
+            accountCreatedAt: _currentUser?.created_at || null,
+            onCtaNavigate: (url) => {
+                window.closeTipsHub();
+                // Parse the deep-link and use switchView / openProfile
+                // rather than a hard page reload
+                setTimeout(() => _navigateTipLink(url), 80);
+            },
+        });
+    }
+
+    // Re-init Lucide icons inside the drawer
+    if (window.lucide) lucide.createIcons();
+    // Do NOT call window.scrollTo here — let the user stay where they are
+};
+
+window.closeTipsHub = () => {
+    document.getElementById('view-profile-tips-hub')?.classList.add('hidden');
+    document.getElementById('profile-tips-hub-strip')?.classList.remove('hidden');
+    _updateTipsStripLabel();
+};
+
+/**
+ * Translate a hubDeepLink value into the correct in-app navigation call.
+ * Handles vault.html#data, vault.html#feed, vault.html#collection, vault.html (home),
+ * vault.html#profile — all without a full page reload.
+ */
+function _navigateTipLink(url) {
+    if (!url) return;
+    // Strip leading path so we only look at the hash/fragment
+    const hash = url.includes('#') ? url.split('#')[1] : null;
+    switch (hash) {
+        case 'data':       window.switchView('data');       break;
+        case 'feed':       window.switchView('feed');       break;
+        case 'collection': window.switchView('collection'); break;
+        case 'profile':    window.switchView('profile');    break;
+        case 'social':     window.switchView('social');     break;
+        default:
+            // vault.html with no hash → home tab
+            window.switchView('home');
+            break;
+    }
+}
 
 window.openBuddyList = () => {
     document.getElementById('profile-buddy-strip')?.closest('.bg-white')?.classList.add('hidden');

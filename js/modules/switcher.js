@@ -113,16 +113,16 @@ function _buildSwitcherPanel() {
                     class="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-colors"
                     aria-expanded="${bandsExpanded}" aria-controls="switcher-band-list">
                 <span class="w-5 flex-shrink-0"></span>
-                <span class="flex-1 text-sm font-black text-slate-900">Band Archives</span>
+                <span class="flex-1 text-sm font-black text-slate-900">Band Pages</span>
                 <i data-lucide="chevron-${bandsExpanded ? 'up' : 'down'}" class="w-4 h-4 text-slate-400 pointer-events-none" aria-hidden="true"></i>
             </button>
             <div id="switcher-band-list" class="${bandsExpanded ? '' : 'hidden'} bg-slate-50/50">
                 ${bands.map(b => row(
-                    b.name, 'Band Archive',
+                    b.name, 'Band Page',
                     currentBand === b.name,
                     `window._switchToBand('${b.name.replace(/'/g, "\\'")}')`
                 )).join('')}
-                ${bands.length === 0 ? '<p class="px-4 py-3 text-xs text-slate-400">No band archives yet.</p>' : ''}
+                ${bands.length === 0 ? '<p class="px-4 py-3 text-xs text-slate-400">No band pages yet.</p>' : ''}
             </div>
         </div>
 
