@@ -76,27 +76,38 @@ export const connectSpotify = (userId) => new Promise(async (resolve, reject) =>
         return reject(new Error('Popup was blocked. Please allow popups for this site and try again.'));
     }
 
-    // Listen for the postMessage sent by spotify-callback.html
-    const onMessage = (event) => {
-        if (event.origin !== window.location.origin) return;
-        if (event.data?.type !== 'SPOTIFY_AUTH') return;
+    // BroadcastChannel handles mobile (new tab); postMessage handles desktop (popup)
+    let bc;
+    try {
+        bc = new BroadcastChannel('spotify-auth');
+        bc.onmessage = (event) => handleAuthMessage(event.data);
+    } catch (e) {
+        bc = null;
+    }
 
+    function handleAuthMessage(data) {
+        if (data?.type !== 'SPOTIFY_AUTH') return;
         cleanup();
-
-        if (event.data.ok) {
+        if (data.ok) {
             _connected = true;
             resolve();
         } else {
-            const msg = event.data.error === 'access_denied'
+            const msg = data.error === 'access_denied'
                 ? 'Spotify access was denied.'
-                : (event.data.error || 'Spotify connection failed.');
+                : (data.error || 'Spotify connection failed.');
             reject(new Error(msg));
         }
+    }
+
+    const onMessage = (event) => {
+        if (event.origin !== window.location.origin) return;
+        handleAuthMessage(event.data);
     };
 
-    // Detect the user manually closing the popup before completing auth
+    // Only cancel on popup close for desktop — on mobile the "popup" is a tab
+    // and we rely on BroadcastChannel, so closure isn't a cancellation signal.
     const pollClosed = setInterval(() => {
-        if (popup.closed) {
+        if (popup.closed && !bc) {
             cleanup();
             reject(new Error('Spotify login was cancelled.'));
         }
@@ -105,10 +116,10 @@ export const connectSpotify = (userId) => new Promise(async (resolve, reject) =>
     function cleanup() {
         clearInterval(pollClosed);
         window.removeEventListener('message', onMessage);
+        if (bc) { bc.close(); bc = null; }
     }
 
     window.addEventListener('message', onMessage);
-});
 
 // ─── CONNECT BUTTON RENDERER ──────────────────────────────────────────────────
 

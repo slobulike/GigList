@@ -1,8 +1,8 @@
 /**
  * GigList Core Engine
- * v6.1.1 — 2026-06-03
+ * v6.1.2 — 2026-06-03
  * -------------------------------------------------------------------
- * ✅ Another attempt to get deeplinks for weezer wednesdays working
+ * ✅ Spotify connect fix
  */
 
 import * as Data from './modules/data.js';
@@ -31,7 +31,7 @@ import { applyFilters, buildSummaryLine, hasActiveFilters } from './modules/filt
 import { initDeepLink, markAppReady } from './modules/deep-link.js';
 import { initPlaylistButton } from './modules/spotify.js';
 
-const APP_VERSION = "6.1.0";
+const APP_VERSION = "6.1.2";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 

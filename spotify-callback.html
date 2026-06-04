@@ -115,13 +115,23 @@
     }
 
     function notifyOpener(payload) {
-        if (window.opener && !window.opener.closed) {
-            window.opener.postMessage(
-                { type: 'SPOTIFY_AUTH', ...payload },
-                window.location.origin
-            );
-        }
+    // Primary: BroadcastChannel works across tabs on mobile (no opener needed)
+    try {
+        const bc = new BroadcastChannel('spotify-auth');
+        bc.postMessage({ type: 'SPOTIFY_AUTH', ...payload });
+        bc.close();
+    } catch (e) {
+        // BroadcastChannel not supported (very rare) — fall back to postMessage
     }
+
+    // Fallback: desktop popup still has an opener, keep it working
+    if (window.opener && !window.opener.closed) {
+        window.opener.postMessage(
+            { type: 'SPOTIFY_AUTH', ...payload },
+            window.location.origin
+        );
+    }
+}
 
     run();
 </script>
