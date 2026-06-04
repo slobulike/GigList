@@ -121,6 +121,8 @@ export const connectSpotify = (userId) => new Promise(async (resolve, reject) =>
 
     window.addEventListener('message', onMessage);
 
+}); // closes connectSpotify Promise
+
 // ─── CONNECT BUTTON RENDERER ──────────────────────────────────────────────────
 
 /**
@@ -132,6 +134,7 @@ export const connectSpotify = (userId) => new Promise(async (resolve, reject) =>
  * @param {string}   userId     - Supabase user ID
  * @param {Function} onSuccess  - callback fired after successful connection
  */
+
 export const renderConnectPrompt = (btnId, userId, onSuccess) => {
     const el = document.getElementById(btnId);
     if (!el) return;
