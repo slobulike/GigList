@@ -181,6 +181,9 @@
 
             </div>
         </div>
+        <!-- ── Tip explore card ──────────────────────────────────────── -->
+        <div id="tip-explore-container"></div>
+
     </section>
 
     <section id="view-data" class="view-section hidden space-y-6" role="region" aria-labelledby="data-centre-title" aria-hidden="true">
@@ -704,6 +707,10 @@
             </div>
 
             <!-- Display mode -->
+            <!-- Music identity empty-state prompt -->
+            <div id="music-identity-prompt"></div>
+
+            <!-- Display mode -->
             <div id="profile-identity-display" class="space-y-3">
                 <div class="flex items-center gap-3">
                     <div class="w-8 h-8 bg-indigo-50 rounded-xl flex items-center justify-center flex-shrink-0">
@@ -825,6 +832,52 @@
                 </div>
 
             </div>
+
+        <!-- ── Tips Hub strip card ──────────────────────────── -->
+        <div id="profile-tips-hub-strip"
+             class="bg-white rounded-2xl border border-slate-100 shadow-sm mb-3 overflow-hidden">
+            <!-- Top row: title + VIEW ALL -->
+            <div class="flex items-center justify-between px-4 pt-3.5 pb-2">
+                <div>
+                    <p class="text-sm font-black text-slate-800">What GigList Can Do</p>
+                    <p id="tips-hub-strip-progress" class="text-[11px] text-slate-400 mt-0.5">
+                        Loading…
+                    </p>
+                </div>
+                <button onclick="window.openTipsHub()"
+                        class="flex items-center gap-1.5 text-indigo-600 text-[11px] font-black tracking-wide hover:opacity-70 active:opacity-50 transition-opacity"
+                        aria-label="View all feature tips">
+                    <span id="tips-hub-strip-count"></span> VIEW ALL
+                    <i data-lucide="chevron-right" class="w-3.5 h-3.5"></i>
+                </button>
+            </div>
+
+            <!-- Category circles row -->
+            <div id="tips-hub-strip-circles"
+                 class="flex items-start gap-4 px-4 pb-4 pt-1 overflow-x-auto scrollbar-hide">
+                <!-- Injected by _updateTipsStripLabel() -->
+            </div>
+
+        </div>
+
+        <!-- ── Tips Hub full drawer ─────────────────────────── -->
+        <div id="view-profile-tips-hub"
+             class="hidden mt-3 bg-white rounded-[2rem] border border-slate-100 shadow-sm p-5">
+            <!-- Drawer header — matches Achievements pattern -->
+            <div class="flex items-center gap-3 mb-5 pb-4 border-b border-slate-100">
+                <button onclick="window.closeTipsHub()"
+                        class="w-8 h-8 flex items-center justify-center rounded-xl bg-slate-100 hover:bg-slate-200 transition-colors"
+                        aria-label="Back to profile">
+                    <i data-lucide="arrow-left" class="w-4 h-4 text-slate-600"></i>
+                </button>
+                <p class="text-[10px] font-black uppercase text-indigo-500 tracking-widest">
+                    What GigList Can Do
+                </p>
+            </div>
+            <!-- Hub renders here -->
+            <div id="tips-hub-container"></div>
+        </div>
+
             <!-- ── Buddy strip ── -->
             <div class="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-5">
                 <div id="profile-buddy-strip">

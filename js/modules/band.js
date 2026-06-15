@@ -41,6 +41,7 @@ export async function initBandMode(currentUser, journalData, performanceData) {
     // Expose tab switcher globally (called by band nav onclick in vault.html)
     window.switchBandView  = switchBandView;
     window.bandShowsSearch = bandShowsSearch;
+    window.isReadOnly = !_currentUser?.is_admin;
 
     // Load buddy status for the authed viewer (non-blocking)
     if (_currentUser?.isAuthUser) {

@@ -1005,12 +1005,16 @@ window.saveCollectionItem = async () => {
         }
 
         closeCollectionEditor();
-        if (window.showToast) window.showToast(
-            _editingId ? 'Item updated ✓' : 'Added to collection ✓',
-            'success'
-        );
-        // Refresh collection view
-        if (window._refreshCollection) window._refreshCollection();
+                if (window.showToast) window.showToast(
+                    _editingId ? 'Item updated ✓' : 'Added to collection ✓',
+                    'success'
+                );
+                // Dispatch nudge trigger for new items only (not edits)
+                if (!_editingId) {
+                    window.dispatchEvent(new CustomEvent('giglist:collectionItemSaved'));
+                }
+                // Refresh collection view
+                if (window._refreshCollection) window._refreshCollection();
 
     } catch (err) {
         console.error('[ColEditor] save failed:', err);

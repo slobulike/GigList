@@ -250,6 +250,10 @@ export const openAddGigModal = () => {
 };
 
 export const openEditGigModal = (key) => {
+    // In band mode, only admins may edit — non-admin viewers should never
+    // reach this path (the edit button should be hidden), but guard here too.
+    if (window.isBandMode && !window.currentUser?.is_admin) return;
+
     const entry = (window.journalData || []).find(
         g => (g['Journal Key'] || '').toString().trim() === key?.toString().trim()
     );
@@ -808,9 +812,11 @@ const _hydrateArtistSpotify = (bandName) => {
        window.filteredResults = [...window.journalData];
 
        closeEditorModal();
-       if (window.showToast) window.showToast('Show Saved ✓', 'success');
-       window.hideSpinner?.();           // ← hide here on success
-       if (window.refreshUI) window.refreshUI();
+              if (window.showToast) window.showToast('Show Saved ✓', 'success');
+              window.hideSpinner?.();           // ← hide here on success
+              // Dispatch gig saved event for tip nudge triggers
+              window.dispatchEvent(new CustomEvent('giglist:gigSaved'));
+              if (window.refreshUI) window.refreshUI();
 
     } catch (err) {
         console.error('Final Save Error:', err);

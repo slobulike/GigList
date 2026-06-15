@@ -1,8 +1,9 @@
 /**
  * GigList Core Engine
- * v6.1.2 — 2026-06-03
+ * v7.0.0 — 2026-06-15
  * -------------------------------------------------------------------
- * ✅ Spotify connect fix
+ * ✅ Tips registry, tips nudges and tips hub added
+ * ✅ Bug fix to disable edit button in Band Mode gig modal
  */
 
 import * as Data from './modules/data.js';
@@ -30,8 +31,13 @@ import { initBandMode } from './modules/band.js';
 import { applyFilters, buildSummaryLine, hasActiveFilters } from './modules/filters.js';
 import { initDeepLink, markAppReady } from './modules/deep-link.js';
 import { initPlaylistButton } from './modules/spotify.js';
+import { teardownModalTips } from './modules/modal-tips.js';
+import { checkNudgeTrigger, initExploreCard } from './modules/tip-nudges.js';
 
-const APP_VERSION = "6.1.2";
+// Expose on window so profile.js can call it without a direct import
+window.checkNudgeTrigger = checkNudgeTrigger;
+
+const APP_VERSION = "7.0.0";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
@@ -338,6 +344,31 @@ export async function initApp() {
     initEventListeners();
     initEditor();
 
+    // ── Tip nudge triggers ────────────────────────────────────────────────────
+    // Listen for gig save events dispatched by editor.js.
+    // Each event checks gig counts and artist repeat thresholds.
+    window.addEventListener('giglist:gigSaved', () => {
+        const journal = window.journalData || [];
+        const count   = journal.length;
+        if (count === 1) checkNudgeTrigger('first_gig_saved');
+        if (count === 5) checkNudgeTrigger('fifth_gig_saved');
+
+        // same_artist_3x — check if the most-recently-saved gig tips the artist to 3
+        const latest = journal[journal.length - 1];
+        if (latest) {
+            const artist      = (latest.Band || latest.Artist || '').toLowerCase();
+            const artistCount = journal.filter(g =>
+                (g.Band || g.Artist || '').toLowerCase() === artist
+            ).length;
+            if (artistCount === 3) checkNudgeTrigger('same_artist_3x');
+        }
+    });
+
+    // Collection item added
+    window.addEventListener('giglist:collectionItemSaved', () => {
+        checkNudgeTrigger('collection_item_added');
+    });
+
     // Register deep-link listeners (URL params + SW postMessage)
     initDeepLink();
 
@@ -502,6 +533,15 @@ function refreshUI() {
     UI.updateTicker(results);
     UI.renderOTDBanner(results);
     UI.renderCarousel(results);
+
+    // ── Tip explore card ──────────────────────────────────────────────────────
+    // Shown on home screen below carousel for new/low-engagement users.
+    if (currentUser?.Type === 'Personal' && !window.isBandMode) {
+        const exploreContainer = document.getElementById('tip-explore-container');
+        if (exploreContainer) {
+            initExploreCard(exploreContainer, currentUser?.created_at || null);
+        }
+    }
     UI.renderTable(sortedResults);
 
     const companionContainer = document.getElementById('companionChartContainer');
@@ -885,6 +925,10 @@ window.openGigModal = async (keyOrId, options = {}) => {
 };
 
 window.closeModal = () => {
+    // ── Layer B: clean up modal tips before closing ──
+    const modalContent = document.getElementById('modal-content');
+    if (modalContent) teardownModalTips(modalContent);
+
     const modal = document.getElementById('modal');
     if (modal) {
         if (modal.contains(document.activeElement)) document.activeElement.blur();

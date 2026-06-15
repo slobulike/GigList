@@ -17,7 +17,7 @@
 import { supabase } from './supabase.js';
 import { renderBadges, renderBadgeStrip, buildBadgeDefs, deriveFanType } from './achievements.js';
 import { initPushUI } from './push.js';
-import { initTips, syncSeenState, getSeenCount, getTotalCount } from './tips-registry.js';
+import { initTips, syncSeenState, getSeenCount, getTotalCount, TIP_GROUPS, getGroupProgress } from './tips-registry.js';
 import { initTipsHub } from './tips-hub.js';
 
 // ─── MODULE STATE ─────────────────────────────────────────────────────────────
@@ -243,14 +243,53 @@ async function _renderOwnProfile() {
 // ── Tips Hub strip label ──
     _updateTipsStripLabel();
 
-    window.addEventListener('giglist:tipSeen', () => {
-            const hubContainer = document.getElementById('tips-hub-container');
-            if (hubContainer) {
-                initTipsHub(hubContainer, {
-                    accountCreatedAt: _currentUser?.created_at || null,
-                });
-            }
-        }, { once: false });
+    _renderMusicIdentityPrompt();
+
+    // ── Achievement close nudge ──
+    _checkAchievementCloseNudge(window.journalData || []);
+}
+
+// ─── MUSIC IDENTITY PROMPT ───────────────────────────────────────────────────
+
+function _renderMusicIdentityPrompt() {
+    const promptContainer = document.getElementById('music-identity-prompt');
+    if (!promptContainer) return;
+
+    const p = _currentUser;
+    const hasIdentity = p?.favourite_band || p?.favourite_venue || p?.favourite_song || p?.favourite_show_key;
+
+    if (hasIdentity) {
+        promptContainer.innerHTML = '';
+        return;
+    }
+
+    promptContainer.innerHTML = `
+        <div class="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 mb-3">
+            <p class="text-sm font-bold text-indigo-900 mb-1">Your music identity is blank</p>
+            <p class="text-xs text-indigo-600 mb-3">Tell us what shaped you. It takes 30 seconds.</p>
+            <button onclick="window.toggleIdentityEdit()"
+                    class="text-[11px] font-black text-indigo-600 flex items-center gap-1 hover:opacity-70 transition-opacity">
+                Fill it in
+                <i data-lucide="arrow-right" class="w-3 h-3" aria-hidden="true"></i>
+            </button>
+        </div>`;
+    if (window.lucide) lucide.createIcons({ scope: promptContainer });
+}
+
+// ─── ACHIEVEMENT CLOSE NUDGE ─────────────────────────────────────────────────
+
+function _checkAchievementCloseNudge(gigs) {
+    try {
+        const { groups } = buildBadgeDefs(gigs);
+        const isClose = Object.values(groups).some(badgeGroup =>
+            badgeGroup.some(b => !b.earned && b.goal && b.current > 0 && (b.goal - b.current) <= 5)
+        );
+        if (isClose && window.checkNudgeTrigger) {
+            window.checkNudgeTrigger('achievement_close');
+        }
+    } catch (e) {
+        // Non-fatal — nudge is best-effort
+    }
 }
 
 // ─── BUDDY PROFILE (read-only) ────────────────────────────────────────────────
@@ -512,9 +551,6 @@ function _renderStats(gigs) {
     _setText('profile-stat-years',      String(years));
     _setText('profile-stat-first-show', firstShow);
 }
-
-// ─── ACHIEVEMENTS ─────────────────────────────────────────────────────────────
-
 // ─── ACHIEVEMENTS ─────────────────────────────────────────────────────────────
 
 function _renderAchievements(gigs) {
@@ -665,6 +701,26 @@ window.closeAchievements = () => {
 
 // ── Tips Hub ──────────────────────────────────────────────────
 
+const TIP_GROUP_ICONS = {
+    your_shows:   'mic',
+    your_history: 'bar-chart-2',
+    your_feed:    'sparkles',
+    achievements: 'trophy',
+    buddies:      'users',
+    collection:   'disc',
+    band_pages:   'search',
+};
+
+const TIP_GROUP_SHORT_LABELS = {
+    your_shows:   'Shows',
+    your_history: 'History',
+    your_feed:    'Feed',
+    achievements: 'Badges',
+    buddies:      'Buddies',
+    collection:   'Collection',
+    band_pages:   'Band Pages',
+};
+
 function _updateTipsStripLabel() {
     const seen  = getSeenCount();
     const total = getTotalCount();
@@ -674,6 +730,36 @@ function _updateTipsStripLabel() {
 
     const countEl = document.getElementById('tips-hub-strip-count');
     if (countEl) countEl.textContent = `${seen}/${total} ·`;
+
+    const circlesEl = document.getElementById('tips-hub-strip-circles');
+    if (!circlesEl) return;
+
+    const progress = getGroupProgress();
+
+    circlesEl.innerHTML = TIP_GROUPS.map(group => {
+        const gp       = progress[group.id] ?? { total: 0, seen: 0 };
+        const complete = gp.total > 0 && gp.seen === gp.total;
+        const icon     = TIP_GROUP_ICONS[group.id] ?? 'star';
+        const label    = TIP_GROUP_SHORT_LABELS[group.id] ?? group.label;
+
+        const ringClass  = complete ? 'border-2 border-amber-400 bg-white' : 'border-2 border-slate-200 bg-white';
+        const iconClass  = complete ? 'text-indigo-500' : 'text-slate-300';
+        const labelClass = complete ? 'text-slate-600'  : 'text-slate-300';
+
+        return `
+                    <div class="flex flex-col items-center gap-1.5 cursor-pointer flex-shrink-0"
+                         onclick="window.openTipsHub()"
+                         role="button"
+                         aria-label="${label}: ${gp.seen} of ${gp.total} tips discovered">
+                      <div class="w-14 h-14 rounded-full flex items-center justify-center ${ringClass}">
+                        <i data-lucide="${icon}" class="w-6 h-6 ${iconClass}"></i>
+                      </div>
+                      <span class="text-[10px] font-medium text-center leading-tight ${labelClass}"
+                            style="max-width:52px">${label}</span>
+                    </div>`;
+    }).join('');
+
+    if (window.lucide) lucide.createIcons({ scope: circlesEl });
 }
 
 window.openTipsHub = () => {
@@ -686,18 +772,15 @@ window.openTipsHub = () => {
     if (container) {
         initTipsHub(container, {
             accountCreatedAt: _currentUser?.created_at || null,
+            hideHeader: true,
             onCtaNavigate: (url) => {
                 window.closeTipsHub();
-                // Parse the deep-link and use switchView / openProfile
-                // rather than a hard page reload
                 setTimeout(() => _navigateTipLink(url), 80);
             },
         });
     }
 
-    // Re-init Lucide icons inside the drawer
     if (window.lucide) lucide.createIcons();
-    // Do NOT call window.scrollTo here — let the user stay where they are
 };
 
 window.closeTipsHub = () => {

@@ -23,6 +23,7 @@
 import { supabase } from './supabase.js';
 import { updateRank } from './ui.js';
 import './collection-collage.js';
+import { renderEmptyStateTips } from './tip-nudges.js';
 
 // ─── STATE ────────────────────────────────────────────────────────────────────
 
@@ -563,11 +564,16 @@ function _renderCollectionTab() {
     const presentSubtypes = SUBTYPE_ORDER.filter(s => artefacts.some(i => i.subtype === s));
 
     const emptyState = _items.length === 0 ? `
-        <div class="text-center py-16 space-y-3">
-            <div class="text-5xl">📦</div>
-            <p class="text-sm font-black text-slate-700">Your collection starts here</p>
-            <p class="text-[11px] text-slate-400 leading-relaxed max-w-xs mx-auto">Add your first item — a CD, a record, a poster, a memory. Just a photo is enough.</p>
-        </div>` : '';
+            <div class="text-center py-16 space-y-3">
+                <div class="text-5xl">📦</div>
+                <p class="text-sm font-black text-slate-700">Your collection starts here</p>
+                <p class="text-[11px] text-slate-400 leading-relaxed max-w-xs mx-auto">Add your first item — a CD, a record, a poster, a memory. Just a photo is enough.</p>
+            </div>
+            ${renderEmptyStateTips([
+                'collection_what',
+                'collection_memory',
+                'collection_band_filter',
+            ])}` : '';
 
     container.innerHTML = `
         ${_renderStatsBar(searched)}

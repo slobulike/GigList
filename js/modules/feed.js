@@ -53,6 +53,8 @@
 import { parseDate, slugify, slugifyArtist } from './utils.js';
 import { supabase } from './supabase.js';
 import { startNewPuzzle } from './games.js';
+import { buildTipDiscoveryCards, renderTipDiscoveryCard } from './tip-nudges.js';
+import { renderEmptyStateTips } from './tip-nudges.js';
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
@@ -827,7 +829,7 @@ function buddyAvatarPill(buddy) {
 
 function renderEmptyState(container) {
     container.innerHTML = `
-        <div class="flex flex-col items-center justify-center py-20 text-center space-y-4">
+        <div class="flex flex-col items-center justify-center py-16 text-center space-y-4">
             <div class="w-16 h-16 bg-slate-100 rounded-[1.5rem] flex items-center justify-center">
                 <i data-lucide="music-2" class="w-8 h-8 text-slate-300" aria-hidden="true"></i>
             </div>
@@ -837,7 +839,12 @@ function renderEmptyState(container) {
                     Add some shows and come back — your feed will fill up fast.
                 </p>
             </div>
-        </div>`;
+        </div>
+        ${renderEmptyStateTips([
+            'feed_on_this_day',
+            'push_notifications',
+            'feed_band_deep_cut',
+        ])}`;
     if (window.lucide) lucide.createIcons();
 }
 
@@ -856,6 +863,9 @@ const SOCIAL_TYPES = new Set([
 // ─── CARD TEMPLATE ────────────────────────────────────────────────────────────
 
 function renderCard(card, index) {
+    // tip_discovery cards have their own renderer
+    if (card.type === 'tip_discovery') return renderTipDiscoveryCard(card);
+
     const safeKey   = (card.journalKey || `card-${index}`).replace(/[^a-z0-9]/gi, '_');
     const hasDetail = EXPANDABLE_TYPES.has(card.type);
     const isSocial  = SOCIAL_TYPES.has(card.type);
@@ -1273,7 +1283,15 @@ export async function init(journalData, performanceData, _ignored = []) {
     const gigCards   = buildCards(journalData, performanceData);
     const colCards   = buildCollectionCards(collectionItems, journalData);
     const buddyCards = buildBuddyCards(buddyJournalsByUser, journalData, buddyProfiles);
-    const cards      = selectCards(gigCards, colCards, buddyCards);
+    const scored     = selectCards(gigCards, colCards, buddyCards);
+
+    // Inject tip_discovery cards — at most 2 per render, after pinned content
+    const tipCards = buildTipDiscoveryCards().slice(0, 2);
+    const cards    = [
+        ...scored.filter(c => c.score >= 90),   // pinned tier first
+        ...tipCards,                              // then tip discovery
+        ...scored.filter(c => c.score < 90),     // then rotatable
+    ];
 
     if (cards.length === 0) {
         renderEmptyState(container);
@@ -1285,10 +1303,11 @@ export async function init(journalData, performanceData, _ignored = []) {
     container.innerHTML = html;
     renderGameCard(container, journalData);
 
-    // Cache skeleton + minimal card metadata for image re-resolution on return
-    sessionStorage.setItem(cacheKey, html);
+    // Cache skeleton — exclude tip_discovery cards (state-driven, must re-evaluate each visit)
+    const cacheableCards = cards.filter(c => c.type !== 'tip_discovery');
+    sessionStorage.setItem(cacheKey, cacheableCards.map((card, i) => renderCard(card, i)).join(''));
     sessionStorage.setItem(`${cacheKey}_cards`, JSON.stringify(
-        cards.map(c => ({
+        cacheableCards.map(c => ({
             journalKey:     c.journalKey,
             gig:            c.gig            || null,
             collectionItem: c.collectionItem || null,
