@@ -210,11 +210,12 @@ function renderGroup(group, accountCreatedAt, onCtaNavigate) {
     body.appendChild(renderTipRow(tip, accountCreatedAt, onCtaNavigate));
   });
 
-  // Toggle collapse
+  // Toggle collapse — use a CSS class rather than the `hidden` attribute so
+  // that Tailwind's [hidden] reset cannot override the collapsed state.
   header.addEventListener("click", () => {
     const expanded = header.getAttribute("aria-expanded") === "true";
     header.setAttribute("aria-expanded", String(!expanded));
-    body.hidden = expanded;
+    body.classList.toggle("tips-hub__group-body--collapsed", expanded);
     chevron.textContent = expanded ? "▸" : "▾";
   });
 
@@ -387,6 +388,9 @@ const HUB_CSS = `
 }
 
 /* Tip rows */
+.tips-hub__group-body--collapsed {
+  display: none;
+}
 .tips-hub__group-body {
   padding: 0 14px 10px;
   display: flex;

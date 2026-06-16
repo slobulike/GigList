@@ -1,9 +1,8 @@
 /**
  * GigList Core Engine
- * v7.0.0 — 2026-06-15
+ * v7.0.1 — 2026-06-16
  * -------------------------------------------------------------------
- * ✅ Tips registry, tips nudges and tips hub added
- * ✅ Bug fix to disable edit button in Band Mode gig modal
+ * ✅ Improved modal tips to be context aware
  */
 
 import * as Data from './modules/data.js';
@@ -37,7 +36,7 @@ import { checkNudgeTrigger, initExploreCard } from './modules/tip-nudges.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "7.0.0";
+const APP_VERSION = "7.0.1";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 

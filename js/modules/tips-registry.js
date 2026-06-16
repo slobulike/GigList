@@ -25,11 +25,14 @@ export const TIP_GROUPS = [
 
 // ─── 2.1  Tip Schema ──────────────────────────────────────────────────────────
 // Required fields:  id, group, hubTitle, hubBody
-// Optional fields:  hubCta, hubDeepLink, modalTip, modalButton,
+// Optional fields:  hubCta, hubDeepLink, modalTip, modalButton, context,
 //                   nudgeTitle, nudgeBody, nudgeTrigger, featured, addedVersion
 //
 // id          — stable unique key. NEVER rename after release.
 // group       — must match a TIP_GROUPS id.
+// context     — "past" | "future" — when set on a modal tip, restricts it to
+//               gigs that are past or upcoming respectively. Omit for tips that
+//               apply regardless of date (e.g. share, companion tag, setlist).
 // addedVersion— used for "New" badging. Bump when you ship the tip.
 
 export const TIPS = [
@@ -59,6 +62,7 @@ export const TIPS = [
     hubDeepLink:  "vault.html#data",
     modalTip:     "Tap Relive to generate a Spotify playlist built from that night's setlist — a permanent memento of the show.",
     modalButton:  "playlist",
+    context:      "past",   // only show in modals for past gigs
     featured:     true,
     addedVersion: "1.0",
   },
@@ -71,6 +75,7 @@ export const TIPS = [
     hubDeepLink:  "vault.html#data",
     modalTip:     "Tap Get Ready to build a playlist of songs likely to be played — go in knowing every word.",
     modalButton:  "playlist",
+    context:      "future", // only show in modals for upcoming gigs
     featured:     false,
     addedVersion: "1.0",
   },

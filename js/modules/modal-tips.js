@@ -382,20 +382,39 @@ function dispatchTipSeen(tipId) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * initModalTips(modalEl)
+ * initModalTips(modalEl, options)
  *
  * Call once each time a gig modal is opened, after its DOM is ready.
  * Adds pulse dots to all buttons with unseen tips, and shows a single
  * slide-up toast for the first unseen tip.
  *
- * @param {HTMLElement} modalEl — the root element of the gig modal
+ * @param {HTMLElement} modalEl          — the root element of the gig modal
+ * @param {object}      [options]
+ * @param {string|Date} [options.gigDate] — the date of the gig (any format
+ *   parseable by Date, or a Date object). Used to filter contextual tips:
+ *   tips with context:"past" only show for past/today gigs; tips with
+ *   context:"future" only show for upcoming gigs. Tips with no context
+ *   field show regardless of date. If omitted, all tips are eligible.
  */
-export function initModalTips(modalEl) {
+export function initModalTips(modalEl, { gigDate } = {}) {
   if (!modalEl) return;
   injectStyles();
 
-  // All tips that have a modal button + body copy
-  const modalTips = TIPS.filter(t => t.modalButton && t.modalTip);
+  // Derive context from gigDate. Treat today as "past" so the Relive tip
+  // shows for same-day gigs (the show has just happened).
+  let gigContext = null; // null = no filtering
+  if (gigDate) {
+    const d = gigDate instanceof Date ? gigDate : new Date(gigDate);
+    gigContext = !isNaN(d) ? (d <= new Date() ? "past" : "future") : null;
+  }
+
+  // All tips that have a modal button + body copy, filtered by context
+  const modalTips = TIPS.filter(t => {
+    if (!t.modalButton || !t.modalTip) return false;
+    // If the tip declares a context requirement, enforce it
+    if (t.context && gigContext && t.context !== gigContext) return false;
+    return true;
+  });
 
   // Add pulse dots for every unseen tip whose button exists in this modal
   modalTips.forEach(tip => {

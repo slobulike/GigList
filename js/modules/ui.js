@@ -1362,7 +1362,7 @@ const gigIsPast = (() => {
                 // ── Layer B: modal tips ──
                         if (window.currentUser?.isAuthUser) {
                             const modalEl = document.getElementById('modal-content');
-                            if (modalEl) initModalTips(modalEl);
+                            if (modalEl) initModalTips(modalEl, { gigDate: formattedDate });
                         }
             };
 
