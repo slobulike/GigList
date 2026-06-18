@@ -1,8 +1,8 @@
 /**
  * GigList Core Engine
- * v7.0.1 — 2026-06-16
- * -------------------------------------------------------------------
- * ✅ Improved modal tips to be context aware
+ * v7.0.2 — 2026-06-16
+ * ---------------------8---------------------------------------------
+ * ✅ Added Easy, Medium and Hard mode to slide puzzle
  */
 
 import * as Data from './modules/data.js';
@@ -36,7 +36,7 @@ import { checkNudgeTrigger, initExploreCard } from './modules/tip-nudges.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "7.0.1";
+const APP_VERSION = "7.0.2";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 

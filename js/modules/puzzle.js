@@ -75,7 +75,7 @@ export class GigPuzzle {
 
         // Render immediately — record badge slot starts empty, filled once save resolves
         this.container.innerHTML = `
-            <div class="col-span-4 flex flex-col items-center justify-center h-full text-center p-6 gap-4">
+            <div style="grid-column: span ${this.size} / span ${this.size}; grid-row: span ${this.size} / span ${this.size};" class="flex flex-col items-center justify-center h-full text-center p-6 gap-4">
                 <p class="text-4xl">🎉</p>
                 <p class="text-white font-black italic uppercase tracking-tighter text-xl">Memory Restored!</p>
                 <p class="text-white/60 text-xs font-bold uppercase tracking-widest">Solved in ${moves} moves · ${timeSecs}s</p>

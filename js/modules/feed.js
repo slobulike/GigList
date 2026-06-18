@@ -52,7 +52,7 @@
 
 import { parseDate, slugify, slugifyArtist } from './utils.js';
 import { supabase } from './supabase.js';
-import { startNewPuzzle } from './games.js';
+import { startNewPuzzle, setPuzzleDifficulty, resetPuzzleImage } from './games.js';
 import { buildTipDiscoveryCards, renderTipDiscoveryCard } from './tip-nudges.js';
 import { renderEmptyStateTips } from './tip-nudges.js';
 
@@ -1158,12 +1158,20 @@ window._openFeedGame = (gameType) => {
     const gameInnerHtml = isPuzzle ? `
         <div id="puzzle-section" class="flex flex-col gap-4 w-full">
             <div class="flex items-center justify-between px-1">
-                <p class="text-[9px] font-black uppercase tracking-widest text-white/50">Slide the tiles to reveal the show</p>
+                <p class="text-[9px] font-black uppercase tracking-widest text-white/50">Tap a tile to move it into the empty space and reveal the show</p>
                 <button id="feed-puzzle-new"
                         class="text-[9px] font-black uppercase tracking-widest text-white/40 hover:text-white transition-colors">
                     New puzzle
                 </button>
             </div>
+            <div class="flex gap-2 justify-center">
+                        <button id="puzzle-difficulty-easy"
+                                class="px-3 py-1 text-[10px] font-black uppercase rounded-full text-slate-400">Easy</button>
+                        <button id="puzzle-difficulty-medium"
+                                class="px-3 py-1 text-[10px] font-black uppercase rounded-full bg-indigo-500 text-white">Medium</button>
+                        <button id="puzzle-difficulty-hard"
+                                class="px-3 py-1 text-[10px] font-black uppercase rounded-full text-slate-400">Hard</button>
+                    </div>
             <div id="puzzle-grid" class="grid gap-1 w-full aspect-square rounded-2xl overflow-hidden bg-slate-800"></div>
         </div>` : `
         <div id="quiz-container" class="flex flex-col gap-4 w-full">
@@ -1213,10 +1221,17 @@ window._openFeedGame = (gameType) => {
 
     if (isPuzzle) {
         document.getElementById('feed-puzzle-new')?.addEventListener('click', () => startNewPuzzle());
+        ['easy', 'medium', 'hard'].forEach(level => {
+            document.getElementById(`puzzle-difficulty-${level}`)
+                ?.addEventListener('click', () => setPuzzleDifficulty(level));
+        });
     }
 
     requestAnimationFrame(() => {
-        if (isPuzzle) startNewPuzzle();
+        if (isPuzzle) {
+            resetPuzzleImage();
+            startNewPuzzle();
+        }
         else window.initQuiz?.();
     });
 };

@@ -1,6 +1,53 @@
 // js/modules/games.js
 import { GigPuzzle } from './puzzle.js';
 
+// Difficulty -> grid size mapping. Session-only (resets on page reload).
+const DIFFICULTY_GRID_SIZES = { easy: 3, medium: 4, hard: 5 };
+let currentDifficulty = 'medium';
+let currentImage      = null; // remembers the active puzzle image across difficulty changes
+
+const setActiveDifficultyButtons = (level) => {
+    Object.keys(DIFFICULTY_GRID_SIZES).forEach(key => {
+        const btn = document.getElementById(`puzzle-difficulty-${key}`);
+        if (!btn) return;
+        btn.classList.toggle('bg-indigo-500', key === level);
+        btn.classList.toggle('text-white', key === level);
+        btn.classList.toggle('text-slate-400', key !== level);
+    });
+};
+
+export const setPuzzleDifficulty = (level) => {
+    if (!DIFFICULTY_GRID_SIZES[level]) return;
+    currentDifficulty = level;
+    setActiveDifficultyButtons(level);
+
+    // Rebuild with the SAME image at the new grid size, if we have one.
+    // Falls back to picking a fresh image/gig if none is set yet.
+    if (currentImage) {
+        buildPuzzle(currentImage);
+    } else {
+        startNewPuzzle();
+    }
+};
+
+// Builds (or rebuilds) the puzzle grid for a given image at the current difficulty.
+const buildPuzzle = (imageUrl) => {
+    currentImage = imageUrl;
+    const gridSize = DIFFICULTY_GRID_SIZES[currentDifficulty] || 4;
+
+    try {
+        new GigPuzzle('puzzle-grid', imageUrl, gridSize);
+    } catch (e) {
+        console.error("Puzzle failed to initialize:", e);
+    }
+};
+
+// Call this when the puzzle modal/session opens fresh, so the next
+// startNewPuzzle() picks a brand-new image rather than reusing the last one.
+export const resetPuzzleImage = () => {
+    currentImage = null;
+};
+
 export const switchGame = (gameType) => {
     const quizSection   = document.getElementById('quiz-container');
     const puzzleSection = document.getElementById('puzzle-section');
@@ -58,13 +105,12 @@ export const startNewPuzzle = async () => {
     const fallbackPath = `assets/artists/${cleanArtist}_stock_photo.jpg`;
 
     const imageToUse = await determineImagePath(scrapbookPath, fallbackPath);
-
-    try {
-        new GigPuzzle('puzzle-grid', imageToUse);
-    } catch (e) {
-        console.error("Puzzle failed to initialize:", e);
-    }
+    buildPuzzle(imageToUse);
 };
+
+// Expose globally so puzzle.js's win-screen "New Puzzle" button (which has no
+// module import access) can trigger a fresh puzzle without relying on app.js wiring.
+window.startNewPuzzle = startNewPuzzle;
 
 // Guaranteed fallback — an Unsplash concert photo that is always available
 const DEFAULT_PUZZLE_IMAGE = 'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?auto=format&fit=crop&w=800&q=75';
