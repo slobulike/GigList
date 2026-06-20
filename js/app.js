@@ -1,8 +1,8 @@
 /**
  * GigList Core Engine
- * v7.0.2 — 2026-06-16
- * ---------------------8---------------------------------------------
- * ✅ Added Easy, Medium and Hard mode to slide puzzle
+ * v7.0.3 — 2026-06-20
+ * ------------------------------------------------------------------
+ * ✅ Added crop and zoom to scrapbook photo upload tool in gig modal
  */
 
 import * as Data from './modules/data.js';
@@ -32,6 +32,8 @@ import { initDeepLink, markAppReady } from './modules/deep-link.js';
 import { initPlaylistButton } from './modules/spotify.js';
 import { teardownModalTips } from './modules/modal-tips.js';
 import { checkNudgeTrigger, initExploreCard } from './modules/tip-nudges.js';
+import { openPhotoCropModal } from './modules/photo-crop.js';
+
 
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
@@ -1084,10 +1086,21 @@ window.track = (event, properties = {}) => {
 
 // ─── SCRAPBOOK PHOTO UPLOAD ───────────────────────────────────────────────────
 
-window.uploadScrapbookPhoto = async (input, journalKey, formattedDate, cleanVenue, isBandMode = false) => {
+window.uploadScrapbookPhoto = (input, journalKey, formattedDate, cleanVenue, isBandMode = false) => {
     const file = input.files?.[0];
     if (!file) return;
 
+    // Open the crop/frame modal first. The actual upload only fires once the
+    // user confirms their framing, via _uploadCroppedScrapbookPhoto below.
+    openPhotoCropModal(file, (croppedFile) => {
+        _uploadCroppedScrapbookPhoto(croppedFile, journalKey, formattedDate, cleanVenue, isBandMode);
+    });
+
+    // Reset so selecting the same file again still fires onchange next time.
+    input.value = '';
+};
+
+async function _uploadCroppedScrapbookPhoto(file, journalKey, formattedDate, cleanVenue, isBandMode = false) {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
 
@@ -1142,9 +1155,7 @@ window.uploadScrapbookPhoto = async (input, journalKey, formattedDate, cleanVenu
         if (window.lucide) lucide.createIcons();
         window.showToast('Photo upload failed — try again', 'error');
     }
-
-    input.value = '';
-};
+}
 
 async function compressImage(file, maxDimension, quality) {
     return new Promise((resolve) => {
