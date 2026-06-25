@@ -535,6 +535,82 @@ async function handleWeezerWednesday(env) {
   }
 }
 
+// ─── Cron: Gig Hydrated Delayed Push ─────────────────────────────────────────
+// Runs daily at 09:00 UTC (wrangler.toml: "0 9 * * *").
+//
+// Finds pending_captures rows that were hydrated 9–45 hours ago and haven't
+// yet received a push. The window means:
+//   - Shows confirmed late evening will get a push the following morning
+//   - Shows confirmed in the morning (or by users in other timezones) catch
+//     the next day's run at the latest — everyone gets exactly one push
+//   - Idempotent: push_sent flipped to true after dispatch; never double-fires
+//
+// Also handles needs_review rows (user tapped "I'll log it later") with
+// different copy — Stage 11 will add these.
+
+async function handleGigHydratedPush(env) {
+  console.log('[cron] gig-hydrated push — starting');
+
+  const now              = new Date();
+  const nineHoursAgo      = new Date(now - 9  * 60 * 60 * 1000).toISOString();
+  const fortyFiveHoursAgo = new Date(now - 45 * 60 * 60 * 1000).toISOString();
+
+  const rows = await supabaseFetch(
+    env,
+    `pending_captures?status=eq.hydrated&push_sent=eq.false` +
+    `&hydrated_at=gte.${fortyFiveHoursAgo}&hydrated_at=lte.${nineHoursAgo}` +
+    `&select=id,user_id,matched_artist,matched_venue,matched_journal_key`
+  );
+
+  console.log(`[cron] gig-hydrated push — ${rows?.length ?? 0} eligible row(s)`);
+
+  if (!rows?.length) {
+    console.log('[cron] gig-hydrated push — nothing to send');
+    return;
+  }
+
+  for (const row of rows) {
+    // Resolve numeric journal id for deep-link (falls back to app root)
+    const journals  = await supabaseFetch(
+      env,
+      `journals?journal_key=eq.${row.matched_journal_key}&user_id=eq.${row.user_id}&select=id`
+    );
+    const journalId = journals?.[0]?.id ?? null;
+    const deepLink  = journalId
+      ? `/GigList/vault.html?open=${journalId}`
+      : `/GigList/vault.html`;
+
+    const payload = {
+      title: '🎸 Last night is logged!',
+      body:  `${row.matched_artist} at ${row.matched_venue} is in your GigList — add a photo or tag who you were with →`,
+      tag:   'gig-hydrated',
+      data:  { url: deepLink },
+    };
+
+    console.log(`[cron] gig-hydrated — user ${row.user_id} url=${deepLink}`);
+
+    const result = await dispatchToUsers(env, [row.user_id], payload);
+    console.log(`[cron] gig-hydrated — user ${row.user_id}: ${JSON.stringify(result)}`);
+
+    // Mark push_sent regardless of delivery outcome — don't retry indefinitely
+    await fetch(
+      `${env.SUPABASE_URL}/rest/v1/pending_captures?id=eq.${row.id}`,
+      {
+        method:  'PATCH',
+        headers: {
+          apikey:          env.SUPABASE_SERVICE_KEY,
+          Authorization:   `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+          'Content-Type':  'application/json',
+          Prefer:          'return=minimal',
+        },
+        body: JSON.stringify({ push_sent: true }),
+      }
+    );
+  }
+
+  console.log('[cron] gig-hydrated push — done');
+}
+
 // ─── HTTP Handler ─────────────────────────────────────────────────────────────
 
 const CORS = {
@@ -596,6 +672,27 @@ async function handleRequest(request, env) {
     }
   }
 
+  // POST /push/cron/gig-hydrated — manual trigger for testing
+  // Runs the full cron handler immediately, identical to the scheduled version.
+  if (request.method === 'POST' && url.pathname === '/push/cron/gig-hydrated') {
+    const auth = request.headers.get('Authorization');
+    if (auth !== `Bearer ${env.INTERNAL_SECRET}`) {
+      return new Response('Unauthorized', { status: 401 });
+    }
+    try {
+      await handleGigHydratedPush(env);
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...CORS, 'Content-Type': 'application/json' },
+      });
+    } catch (err) {
+      console.error('[manual] gig-hydrated error:', err);
+      return new Response(JSON.stringify({ ok: false, error: err.message }), {
+        status: 500,
+        headers: { ...CORS, 'Content-Type': 'application/json' },
+      });
+    }
+  }
+
   // POST /push/webhook/:type — Supabase Database Webhook entry point
   const webhookMatch = url.pathname.match(/^\/push\/webhook\/([a-z-]+)$/);
   if (request.method === 'POST' && webhookMatch) {
@@ -622,12 +719,11 @@ export default {
 
   async scheduled(event, env) {
     const cron = event.cron;
-    // "0 7 * * *"  → On This Day      (07:00 UTC daily)
-    // "0 11 * * 3" → Weezer Wednesday (11:00 UTC every Wednesday)
-    if (cron === '0 11 * * 3') {
-      await handleWeezerWednesday(env);
-    } else {
-      await handleOnThisDay(env);
-    }
+// "0 7 * * *"    → On This Day      (07:00 UTC daily)
+// "0 9 * * *"    → Gig hydrated delayed push (09:00 UTC daily)
+// "0 11 * * WED" → Weezer Wednesday (11:00 UTC every Wednesday)
+    if      (cron === '0 11 * * WED') { await handleWeezerWednesday(env); }
+    else if (cron === '0 9 * * *')    { await handleGigHydratedPush(env); }
+    else                               { await handleOnThisDay(env); }
   },
 };

@@ -1,8 +1,10 @@
 /**
  * GigList Core Engine
- * v7.0.3 — 2026-06-20
+ * v8.0.8 — 2026-06-25
  * ------------------------------------------------------------------
- * ✅ Added crop and zoom to scrapbook photo upload tool in gig modal
+ * ✅ Added "Grab Gig" feature to allow users to capture a gig in real time
+ * ✅ Added Ticketmaster discovery API to allow realtime concert lookups for live captures
+ * ✅ New capture-gig push notification scheduled for morning after a show is captured
  */
 
 import * as Data from './modules/data.js';
@@ -38,7 +40,7 @@ import { openPhotoCropModal } from './modules/photo-crop.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "7.0.2";
+const APP_VERSION = "7.0.3";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
