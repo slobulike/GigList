@@ -1,10 +1,9 @@
 /**
  * GigList Core Engine
- * v8.0.8 — 2026-06-25
+ * v8.0.1 — 2026-06-26
  * ------------------------------------------------------------------
- * ✅ Added "Grab Gig" feature to allow users to capture a gig in real time
- * ✅ Added Ticketmaster discovery API to allow realtime concert lookups for live captures
- * ✅ New capture-gig push notification scheduled for morning after a show is captured
+ * ✅ Reminder tile added to home page for pending captures (incomplete grab gig records)
+ * ✅ Pre-populate editor with available data from pending capture
  */
 
 import * as Data from './modules/data.js';
@@ -40,7 +39,7 @@ import { openPhotoCropModal } from './modules/photo-crop.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "7.0.3";
+const APP_VERSION = "8.0.1";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
@@ -545,6 +544,10 @@ function refreshUI() {
             initExploreCard(exploreContainer, currentUser?.created_at || null);
         }
     }
+    if (currentUser?.Type === 'Personal' && !window.isBandMode) {
+            import('./modules/capture.js').then(m => m.loadPendingCaptureReminder());
+        }
+
     UI.renderTable(sortedResults);
 
     const companionContainer = document.getElementById('companionChartContainer');

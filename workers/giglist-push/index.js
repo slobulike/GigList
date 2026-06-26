@@ -609,6 +609,50 @@ async function handleGigHydratedPush(env) {
   }
 
   console.log('[cron] gig-hydrated push — done');
+
+    // ── needs_review push (Stage 11) ─────────────────────────────────────────
+    // Separate query: users who tapped "I'll log it later" 9–45h ago and haven't
+    // yet been nudged. Uses captured_at (hydrated_at is not set for these rows).
+
+    const needsReviewRows = await supabaseFetch(
+      env,
+      `pending_captures?status=eq.needs_review&push_sent=eq.false` +
+      `&captured_at=gte.${fortyFiveHoursAgo}&captured_at=lte.${nineHoursAgo}` +
+      `&select=id,user_id,matched_venue`
+    );
+
+    console.log(`[cron] needs-review push — ${needsReviewRows?.length ?? 0} eligible row(s)`);
+
+    for (const row of (needsReviewRows ?? [])) {
+      const venuePart = row.matched_venue ? ` at ${row.matched_venue}` : '';
+      const payload = {
+        title: '🎸 Didn\'t finish logging your show?',
+        body:  `You were at a show${venuePart} last night — tap to finish logging it →`,
+        tag:   'gig-needs-review',
+        data:  { url: '/GigList/vault.html' },
+      };
+
+      console.log(`[cron] needs-review — user ${row.user_id}`);
+
+      const result = await dispatchToUsers(env, [row.user_id], payload);
+      console.log(`[cron] needs-review — user ${row.user_id}: ${JSON.stringify(result)}`);
+
+      await fetch(
+        `${env.SUPABASE_URL}/rest/v1/pending_captures?id=eq.${row.id}`,
+        {
+          method:  'PATCH',
+          headers: {
+            apikey:         env.SUPABASE_SERVICE_KEY,
+            Authorization:  `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+            'Content-Type': 'application/json',
+            Prefer:         'return=minimal',
+          },
+          body: JSON.stringify({ push_sent: true }),
+        }
+      );
+    }
+
+    console.log('[cron] needs-review push — done');
 }
 
 // ─── HTTP Handler ─────────────────────────────────────────────────────────────

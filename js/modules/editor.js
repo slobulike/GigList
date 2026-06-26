@@ -1457,3 +1457,37 @@ export const openCompanionPrefillModal = async (journalId, taggedByUsername) => 
 };
 
 window.openCompanionPrefillModal = openCompanionPrefillModal;
+
+/**
+ * Opens the editor modal pre-filled with data from a pending_captures row.
+ * matched_date arrives as YYYY-MM-DD (not DD/MM/YYYY), so we convert it
+ * before passing to renderEditorModal which calls toInputDate (DD/MM/YYYY → YYYY-MM-DD).
+ *
+ * @param {{ matched_artist?: string, matched_venue?: string, matched_date?: string, notes?: string }} capture
+ */
+export const openCaptureGigModal = (capture) => {
+    editingKey = null;
+
+    // Derive date from captured_at (ISO timestamp) — matched_date may be null
+        // for no-match captures. Parse via Date() to handle the timestamp safely.
+        let dateForEditor = '';
+        const rawDate = capture.matched_date || capture.captured_at;
+        if (rawDate) {
+            const d = new Date(rawDate);
+            if (!isNaN(d)) {
+                const dd   = String(d.getUTCDate()).padStart(2, '0');
+                const mm   = String(d.getUTCMonth() + 1).padStart(2, '0');
+                const yyyy = d.getUTCFullYear();
+                dateForEditor = `${dd}/${mm}/${yyyy}`;
+            }
+        }
+
+    renderEditorModal({
+        Date:          dateForEditor,
+        Band:          capture.matched_artist || '',
+        OfficialVenue: capture.matched_venue  || '',
+        Comments:      capture.notes          || '',
+    });
+};
+
+window.openCaptureGigModal = openCaptureGigModal;

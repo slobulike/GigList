@@ -750,11 +750,11 @@ async function _saveArtistCapture() {
  */
 async function _deferCapture() {
     if (_currentCapture?.id) {
-        await supabase
+        const { error } = await supabase
             .from('pending_captures')
             .update({ status: 'needs_review' })
-            .eq('id', _currentCapture.id)
-            .catch(e => console.warn('_deferCapture update failed:', e.message));
+            .eq('id', _currentCapture.id);
+        if (error) console.warn('_deferCapture update failed:', error.message);
     }
     closeCaptureModal();
 }
@@ -764,3 +764,115 @@ window._showArtistInput        = _showArtistInput;
 window._saveArtistCapture      = _saveArtistCapture;
 window._deferCapture           = _deferCapture;
 window._selectArtistSuggestion = _selectArtistSuggestion;
+
+// ─── Stage 11: Home page pending reminder card ────────────────────────────────
+
+/**
+ * Queries for the most recent needs_review capture for the current user and
+ * renders a reminder card into #pending-capture-reminder. If none found,
+ * clears the container. Called from app.js refreshUI() in personal mode.
+ */
+export async function loadPendingCaptureReminder() {
+    const container = document.getElementById('pending-capture-reminder');
+    if (!container) return;
+
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { container.innerHTML = ''; return; }
+
+    const { data: rows } = await supabase
+        .from('pending_captures')
+        .select('id, matched_artist, matched_venue, captured_at')
+        .eq('user_id', session.user.id)
+        .eq('status', 'needs_review')
+        .order('captured_at', { ascending: false })
+        .limit(1);
+
+    const capture = rows?.[0] ?? null;
+
+    if (!capture) {
+        container.innerHTML = '';
+        return;
+    }
+
+    // Format the captured date as a friendly string, e.g. "25 Jun"
+    const capturedDate = capture.captured_at
+        ? new Date(capture.captured_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+        : null;
+
+    const venuePart  = capture.matched_venue  ? ` at ${capture.matched_venue}`  : '';
+    const artistPart = capture.matched_artist ? ` — ${capture.matched_artist}` : '';
+    const datePart   = capturedDate ? `on ${capturedDate}` : 'recently';
+
+    container.innerHTML = `
+        <div id="pending-capture-card"
+             class="mx-4 mb-3 bg-indigo-50 border border-indigo-200 rounded-2xl px-4 py-4 flex items-start gap-3">
+            <div class="flex-shrink-0 w-9 h-9 bg-indigo-100 rounded-xl flex items-center justify-center mt-0.5">
+                <i data-lucide="music" class="w-4 h-4 text-indigo-600" aria-hidden="true"></i>
+            </div>
+            <div class="flex-1 min-w-0">
+                <p class="text-xs font-black uppercase tracking-widest text-indigo-500 mb-0.5">Unfinished show</p>
+                <p class="text-sm font-bold text-slate-800 leading-snug">
+                    You were at a show ${datePart}${venuePart}${artistPart} — want to log it?
+                </p>
+                <div class="flex items-center gap-3 mt-3">
+                    <button type="button"
+                            onclick="window._openPendingCapture('${capture.id}')"
+                            class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black uppercase tracking-widest rounded-xl px-3 py-2 transition-all">
+                        Finish logging
+                    </button>
+                    <button type="button"
+                            onclick="window._dismissPendingCapture('${capture.id}')"
+                            class="text-xs font-black uppercase tracking-widest text-slate-400 hover:text-slate-600 transition-colors">
+                        Dismiss
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    if (window.lucide) lucide.createIcons();
+}
+
+/**
+ * "Finish logging" tap — opens the editor pre-filled with the capture data.
+ * openCaptureGigModal is implemented in Stage 12 (editor.js).
+ */
+async function _openPendingCapture(captureId) {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+
+    const { data: rows } = await supabase
+        .from('pending_captures')
+        .select('id, matched_artist, matched_venue, matched_date, notes, captured_at')
+        .eq('id', captureId)
+        .eq('user_id', session.user.id)
+        .limit(1);
+
+    const capture = rows?.[0];
+    if (!capture) return;
+
+    // Stage 12: editor.js will expose this
+        if (typeof window.openCaptureGigModal === 'function') {
+            window.openCaptureGigModal(capture);
+        } else {
+            // Temporary fallback until Stage 12 — open the editor via the add button
+            document.getElementById('btn-add-show')?.click();
+        }
+}
+
+/**
+ * "Dismiss" tap — marks the capture dismissed and removes the card from the DOM.
+ */
+async function _dismissPendingCapture(captureId) {
+    const card = document.getElementById('pending-capture-card');
+    if (card) card.closest('#pending-capture-reminder').innerHTML = '';
+
+    const { error } = await supabase
+        .from('pending_captures')
+        .update({ status: 'dismissed' })
+        .eq('id', captureId);
+    if (error) console.warn('_dismissPendingCapture failed:', error.message);
+}
+
+window._openPendingCapture    = _openPendingCapture;
+window._dismissPendingCapture = _dismissPendingCapture;
