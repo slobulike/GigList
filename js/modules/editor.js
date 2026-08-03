@@ -41,7 +41,7 @@ const setDirty = (dirty) => {
  * Allows free-text entry — if nothing is selected from the list the typed
  * value is used as-is, so new artists/venues can be added.
  */
-const wireCombobox = (inputId, listId, getOptions) => {
+export const wireCombobox = (inputId, listId, getOptions) => {
     const input = document.getElementById(inputId);
     const list  = document.getElementById(listId);
     if (!input || !list) return;
@@ -130,7 +130,7 @@ const wireCombobox = (inputId, listId, getOptions) => {
 let artistCache = null;
 export const invalidateArtistCache = () => { artistCache = null; };
 
-const loadArtistOptions = async () => {
+export const loadArtistOptions = async () => {
     if (artistCache) return artistCache;
     const { data, error } = await supabase
         .from('artists')
@@ -145,7 +145,7 @@ const loadArtistOptions = async () => {
     return artistCache;
 };
 
-const getArtistOptions = () => artistCache ||
+export const getArtistOptions = () => artistCache ||
     [...new Set((window.journalData || []).map(g => g.Band).filter(Boolean))].sort();
 
 let venueCache = null;

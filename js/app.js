@@ -1,9 +1,8 @@
 /**
  * GigList Core Engine
- * v8.0.1 — 2026-06-26
+ * v8.1.0 — 2026-08-03
  * ------------------------------------------------------------------
- * ✅ Reminder tile added to home page for pending captures (incomplete grab gig records)
- * ✅ Pre-populate editor with available data from pending capture
+ * ✅ Added wish list feature to track bands you want to see in the future
  */
 
 import * as Data from './modules/data.js';
@@ -39,7 +38,7 @@ import { openPhotoCropModal } from './modules/photo-crop.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "8.0.1";
+const APP_VERSION = "8.1.0";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 

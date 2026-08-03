@@ -127,6 +127,19 @@ function _buildSwitcherPanel() {
         </div>
 
         <div class="border-t border-slate-100">
+            <button id="menu-wishlist" onclick="window._closeSwitcher(); window.openWishlistModal();" role="menuitem"
+                    class="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-colors">
+                <span class="w-5 flex-shrink-0 flex items-center justify-center">
+                    <i data-lucide="heart" class="w-4 h-4 text-indigo-400"></i>
+                </span>
+                <span class="flex-1 min-w-0">
+                    <span class="block text-sm font-black text-slate-900">Want to See</span>
+                    <span class="block text-[10px] text-slate-400 font-bold uppercase tracking-widest">Your wishlist</span>
+                </span>
+            </button>
+        </div>
+
+        <div class="border-t border-slate-100">
             <button onclick="window.location.href='clashfinder.html'" role="menuitem"
                     class="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-colors">
                 <span class="w-5 flex-shrink-0 flex items-center justify-center">

@@ -1549,12 +1549,57 @@
     </div>
 </div>
 
+<!-- ── WANT TO SEE (WISHLIST) MODAL ──────────────────────────────────────── -->
+<div id="wishlist-modal" class="hidden fixed inset-0 z-[4500] bg-slate-900/60 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4" role="dialog" aria-modal="true" aria-labelledby="wishlist-modal-title" aria-hidden="true">
+    <div class="bg-white w-full sm:max-w-md max-h-[85vh] rounded-t-[2.5rem] sm:rounded-[2.5rem] flex flex-col overflow-hidden shadow-2xl">
+
+        <div class="flex items-center justify-between px-6 py-5 border-b border-slate-100 flex-shrink-0">
+            <h2 id="wishlist-modal-title" class="text-xl font-black tracking-tight text-slate-900 uppercase italic">Want to See</h2>
+            <button onclick="closeWishlistModal()"
+                    aria-label="Close"
+                    class="bg-slate-100 hover:bg-red-50 hover:text-red-600 text-slate-500 p-2.5 rounded-xl transition-all">
+                <i data-lucide="x" class="w-5 h-5" aria-hidden="true"></i>
+            </button>
+        </div>
+
+        <div class="overflow-y-auto px-6 py-4 flex-1">
+            <div id="wishlist-items"></div>
+        </div>
+
+        <div class="px-6 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-4 border-t border-slate-100 flex-shrink-0">
+            <button id="wishlist-show-add"
+                    class="w-full rounded-2xl bg-indigo-50 px-4 py-3 text-sm font-black text-indigo-700 hover:bg-indigo-100 transition-all active:scale-95 flex items-center justify-center gap-2 uppercase tracking-widest">
+                <i data-lucide="plus" class="w-4 h-4" aria-hidden="true"></i> Add an artist
+            </button>
+
+            <div id="wishlist-add-form" class="hidden mt-3 relative">
+                <div class="flex gap-2">
+                    <input id="wishlist-search" type="text" placeholder="Search artists…"
+                           aria-label="Search artists"
+                           class="flex-1 rounded-2xl border border-slate-200 px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                           autocomplete="off">
+                    <button id="wishlist-search-submit"
+                            class="flex-shrink-0 rounded-2xl bg-indigo-600 px-4 py-3 text-xs font-black uppercase tracking-widest text-white hover:bg-indigo-700 transition-all active:scale-95">
+                        Add
+                    </button>
+                </div>
+                <ul id="wishlist-search-list"
+                    class="hidden absolute left-0 right-0 bottom-full mb-1 z-10 max-h-52 overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-xl"
+                    role="listbox"></ul>
+            </div>
+        </div>
+
+    </div>
+</div>
+
 <script type="module">
     import { initApp } from './js/app.js';
     import { initFilters } from './js/modules/filters.js';
     import { init as initCollection, refresh as refreshCollection } from './js/modules/collection.js';
     import { initCollectionEditor, openCollectionEditor } from './js/modules/collection-editor.js';
     import { openCapture, closeCaptureModal } from './js/modules/capture.js';
+    import { initWishlist } from './js/modules/wishlist.js';
+    initWishlist();
 window._initCollectionEditor = initCollectionEditor;
 window.openCollectionEditor  = openCollectionEditor;
     window._initCollection  = initCollection;
