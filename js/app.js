@@ -1,8 +1,10 @@
 /**
  * GigList Core Engine
- * v8.1.0 — 2026-08-03
+ * v8.1.1 — 2026-08-06
  * ------------------------------------------------------------------
- * ✅ Added wish list feature to track bands you want to see in the future
+ * ✅ Fixed setlist not found for weezer-wednesday shareable image
+ * ✅ Fixed filters to include supports and festival lineups
+ * ✅ Added wishlist artists to push notifications for ticketmaster matches
  */
 
 import * as Data from './modules/data.js';

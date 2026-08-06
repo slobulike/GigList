@@ -16,6 +16,7 @@
 
 import { supabase } from './supabase.js';
 import { wireCombobox, loadArtistOptions, getArtistOptions, invalidateArtistCache } from './editor.js';
+import { enrichNewArtist } from './artist-enrichment.js';
 
 // ─── STATE ────────────────────────────────────────────────────────────────────
 
@@ -46,6 +47,7 @@ async function _findOrCreateArtist(name) {
         return null;
     }
     invalidateArtistCache();
+    enrichNewArtist(created.name); // fire-and-forget — same hydration as gig save
     return created;
 }
 

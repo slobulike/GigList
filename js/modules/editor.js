@@ -13,6 +13,7 @@ import {
     groupByShow, buildJournalRow, buildVenueRow,
     upsertVenues, upsertPerformances, upsertJournals,
 } from './setlist-sync.js';
+import { enrichNewArtist } from './artist-enrichment.js';
 
 const WORKER_URL = 'https://setlistfm-proxy.richard-lipscombe.workers.dev';
 
@@ -189,35 +190,6 @@ const getVenueOptions = () => {
 };
 
 const getSupportOptions = () => getArtistOptions();
-
-// ── Hydrate Spotify data for a newly added artist ─────────────────────────────
-
-const _hydrateArtistSpotify = async (bandName) => {
-    try {
-        const res = await fetch(
-            `https://api.spotify.com/v1/search?q=${encodeURIComponent(bandName)}&type=artist&limit=1`,
-            { headers: { 'Authorization': `Bearer ${await _getSpotifyToken()}` } }
-        );
-        if (!res.ok) return;
-        const data = await res.json();
-        const artist = data.artists?.items?.[0];
-        if (!artist) return;
-
-        // Basic name sanity check
-        if (!artist.name.toLowerCase().includes(bandName.toLowerCase()) &&
-            !bandName.toLowerCase().includes(artist.name.toLowerCase())) return;
-
-        await supabase.from('artists').update({
-            spotify_artist_id: artist.id,
-            spotify_image_url: artist.images?.[0]?.url || null,
-            spotify_url:       artist.external_urls?.spotify || null,
-        }).eq('name', bandName).is('spotify_artist_id', null);
-
-        invalidateArtistCache();
-    } catch (e) {
-        console.warn('Spotify hydration failed for', bandName, e);
-    }
-};
 
 // ─── JOURNAL KEY GENERATION ───────────────────────────────────────────────────
 
@@ -540,23 +512,6 @@ window.showSpinner?.('Saving show…');
     const isFest = document.getElementById('editor-festival')?.checked ? 'Y' : 'N';
     const [d, m, y] = dateStr.split('/');
 
-// ── Hydrate Spotify data for a newly added artist (non-blocking) ──────────────
-const _hydrateArtistSpotify = (bandName) => {
-    fetch(`${WORKER_URL}/?endpoint=spotify-artist&name=${encodeURIComponent(bandName)}`)
-        .then(r => r.json())
-        .then(async spotifyData => {
-            if (spotifyData.id) {
-                await supabase.from('artists').update({
-                    spotify_artist_id: spotifyData.id,
-                    spotify_image_url: spotifyData.image_url || null,
-                    spotify_url:       spotifyData.url || null,
-                }).eq('name', bandName).is('spotify_artist_id', null);
-                invalidateArtistCache();
-            }
-        })
-        .catch(e => console.warn('Spotify hydration failed for', bandName, e));
-};
-
     // 2. Auth Check
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
@@ -676,9 +631,14 @@ const _hydrateArtistSpotify = (bandName) => {
                     if (saveBtn) saveBtn.textContent = 'Searching setlist.fm...';
 
                     try {
+                        // Enrichment (mbid + Spotify) always fires on artist creation —
+                        // it's basic artist metadata, not a setlist, so it doesn't
+                        // depend on whether this particular show is past or future.
+                        const mbid = await enrichNewArtist(band);
+
                         // Future shows will never exist on setlist.fm yet — skip the
-                        // lookup entirely. The venue was confirmed by the user at entry
-                        // time so no pending review is needed either.
+                        // setlist lookup entirely. The venue was confirmed by the user
+                        // at entry time so no pending review is needed either.
                         const showDate = new Date(y, m - 1, d);
                         if (showDate > new Date()) {
                             console.log('Future show — skipping setlist.fm lookup.');
@@ -694,33 +654,15 @@ const _hydrateArtistSpotify = (bandName) => {
                                 .maybeSingle();
                             const venueIsKnown = !!knownVenue;
 
-                            // Step 1: Get MBID
-                            const searchUrl = `${WORKER_URL}/?endpoint=artist-search&name=${encodeURIComponent(band)}`;
-                            const artistRes = await fetch(searchUrl);
-                            const artistData = await artistRes.json();
-                            const mbid = artistData.artist?.[0]?.mbid;
-
                             if (!mbid) {
                                 // No MBID found — queue for admin review if venue is unknown
                                 if (!venueIsKnown) await _submitPendingVenue({ session, journalKey, band, dateStr, venue });
                             } else {
-                                // Step 1b: Write mbid back to artists table (non-blocking)
-                                supabase
-                                    .from('artists')
-                                    .update({ mbid })
-                                    .eq('name', band)
-                                    .is('mbid', null)
-                                    .then(() => console.log(`Artist mbid updated for ${band}`))
-                                    .catch(e => console.warn('Artist mbid update failed:', e));
-
-                                // Step 1c: Hydrate Spotify data (non-blocking)
-                                _hydrateArtistSpotify(band);
-
-                                // Step 2: Polite delay before second API call
+                                // Polite delay before second API call
                                 console.log("MBID found. Waiting for API cooldown...");
                                 await new Promise(resolve => setTimeout(resolve, 1100));
 
-                                // Step 3: Date-filtered setlist lookup via find-show
+                                // Date-filtered setlist lookup via find-show
                                 const workerDate = dateStr.replace(/\//g, '-');
                                 const setlistUrl = `${WORKER_URL}/?endpoint=find-show&mbid=${mbid}&eventDate=${workerDate}`;
                                 const setlistRes = await fetch(setlistUrl);

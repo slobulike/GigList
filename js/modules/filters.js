@@ -39,10 +39,26 @@ export function applyFilters(data) {
     });
   }
 
-  // Artist — exact match against select value
+  // Artist — matches headliner, festival lineup, or notable support.
+  // A strict g.band-only match would silently exclude festival/support
+  // appearances (e.g. selecting "Ash" would miss festival rows where Ash
+  // played but the row's band is the festival name, not "Ash").
   if (_state.artist.trim()) {
     const q = _state.artist.trim().toLowerCase();
-    results = results.filter(g => (g.band || '').toLowerCase() === q);
+    results = results.filter(g => {
+      const band     = (g.band || '').toLowerCase();
+      const lineup   = (g.festival_lineups || '').toLowerCase();
+      const support  = (g.notable_support || '').toLowerCase();
+
+      if (band === q) return true;
+
+      // Lineup/support fields can list multiple artists — split and check
+      // for an exact match per artist so "Ash" doesn't match "Ashcroft".
+      const lineupArtists  = lineup.split(/[\/|]/).map(s => s.trim());
+      const supportArtists = support.split(/[,;&/|]/).map(s => s.trim());
+
+      return lineupArtists.includes(q) || supportArtists.includes(q);
+    });
   }
 
   // Venue — exact match against official_venue or venue
@@ -382,8 +398,17 @@ function _populateLookupSelects() {
   const data = window.journalData;
   if (!data?.length) return;
 
-  // Artists — unique sorted list from the band field
-  const artists = [...new Set(data.map(g => g.band || g.Band).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  // Artists — unique sorted list from headliner, festival lineup, and
+  // notable support fields, so artists only ever seen supporting or at
+  // a festival are still selectable (matches how the Top Bands chart counts).
+  const headliners = data.map(g => g.band || g.Band).filter(Boolean);
+  const lineupArtists = data.flatMap(g =>
+    (g.festival_lineups || '').split(/[\/|]/).map(s => s.trim()).filter(Boolean)
+  );
+  const supportArtists = data.flatMap(g =>
+    (g.notable_support || '').split(/[,;&/|]/).map(s => s.trim()).filter(Boolean)
+  );
+  const artists = [...new Set([...headliners, ...lineupArtists, ...supportArtists])].sort((a, b) => a.localeCompare(b));
   _fillSelect('filter-artist-input', artists, 'All artists', _state.artist);
 
   // Venues — unique sorted list from official_venue/venue

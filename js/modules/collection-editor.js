@@ -21,6 +21,7 @@
  */
 
 import { supabase } from './supabase.js';
+import { enrichNewArtist } from './artist-enrichment.js';
 const PUSH_WORKER_URL = 'https://giglist-push.richard-lipscombe.workers.dev';
 
 // ─── STATE ────────────────────────────────────────────────────────────────────
@@ -994,6 +995,7 @@ window.saveCollectionItem = async () => {
 
             if (!existingArtist) {
                 await supabase.from('artists').insert({ name: bandName });
+                enrichNewArtist(bandName); // same MBID/Spotify hydration as editor.js and wishlist.js
                 // Invalidate the band options cache so new artist appears next time
                 _bandOptions = [];
             }

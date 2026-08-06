@@ -434,6 +434,7 @@ export const filterGigs = (query, data, includeFuture = false) => {
     return data.map(row => {
         const band        = (row.Band || row.Artist || "").toLowerCase();
         const lineup      = (row['Festival Lineups'] || "").toLowerCase();
+        const notableSupp = (row['Notable Support'] || "").toLowerCase();
         const journalKey  = row['Journal Key'];
         const perfsForKey = perfByKey.get(journalKey) || [];
 
@@ -443,9 +444,15 @@ export const filterGigs = (query, data, includeFuture = false) => {
 
         const isFestivalMatch = q.length > 2 && !band.includes(q) && lineup.includes(q);
 
-        const isSupportMatch = q.length > 2 && !isFestivalMatch && perfsForKey.some(p =>
-            (p.Artist || "").toLowerCase().includes(q) &&
-            band !== (p.Artist || "").toLowerCase()
+        // Support match checks both the performances table (setlist-tracked shows)
+        // AND the journal row's own free-text "Notable Support" field, since not
+        // every support act logged there has a matching performances row.
+        const isSupportMatch = q.length > 2 && !isFestivalMatch && (
+            notableSupp.includes(q) ||
+            perfsForKey.some(p =>
+                (p.Artist || "").toLowerCase().includes(q) &&
+                band !== (p.Artist || "").toLowerCase()
+            )
         );
 
         const gigDate     = parseDate(row.Date);

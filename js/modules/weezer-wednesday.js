@@ -171,11 +171,17 @@ function _ensureWWModal() {
  * Returns an array of track name strings, capped at MAX_TRACKS.
  */
 async function _resolveSetlist(entry) {
-    const key = entry?.['Journal Key'] || entry?.journal_key;
+    const key  = entry?.['Journal Key'] || entry?.journal_key;
+    const band = entry?.Band || entry?.band || '';
 
     // 1. Try performanceData already in memory
+    //    Match on journal_key AND artist — a journal entry can have multiple
+    //    performances rows (headliner + openers) sharing the same journal_key,
+    //    so journal_key alone isn't unique. This mirrors openGigModal's
+    //    headlineSet lookup in ui.js.
     const perf = (window.performanceData || []).find(p =>
-        (p['Journal Key'] || p.journal_key) === key
+        (p['Journal Key'] || p.journal_key) === key &&
+        (p.Artist || p.artist || '').toLowerCase() === band.toLowerCase()
     );
     const raw = perf?.setlist || perf?.Setlist || null;
     if (raw) return _parseTracks(raw);
@@ -186,6 +192,7 @@ async function _resolveSetlist(entry) {
             .from('performances')
             .select('setlist')
             .eq('journal_key', key)
+            .eq('artist', band)
             .maybeSingle();
         if (data?.setlist) return _parseTracks(data.setlist);
     } catch (err) {
