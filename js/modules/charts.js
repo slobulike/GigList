@@ -253,14 +253,23 @@ export const renderTopBandsChart = (journalData, performanceData, canvasId, isMo
     // regardless of whether they have matching entries in the performances table.
     // Counts headline acts (Band), support acts (Notable Support), and
     // festival artists (Festival Lineups) separately so all are represented.
+    // Keyed by normalized (trimmed, lowercased) band name so casing variants
+    // like "Bowling for Soup" / "bowling for soup" don't get split into two
+    // separate entries and dilute the count.
     const bandCounts = {};
 
     const addBand = (name, role) => {
-        const n = (name || '').trim();
-        if (!n || n.toLowerCase() === 'nan') return;
-        if (!bandCounts[n]) bandCounts[n] = { headline: 0, support: 0, total: 0 };
-        bandCounts[n][role]++;
-        bandCounts[n].total++;
+        const raw = (name || '').trim();
+        if (!raw || raw.toLowerCase() === 'nan') return;
+        const key = raw.toLowerCase();
+        if (!bandCounts[key]) {
+            bandCounts[key] = { display: raw, headline: 0, support: 0, total: 0 };
+        }
+        // Prefer the casing used when the band appears as a headline act —
+        // that's the "canonical" spelling the user typed for that band's own show.
+        if (role === 'headline') bandCounts[key].display = raw;
+        bandCounts[key][role]++;
+        bandCounts[key].total++;
     };
 
     journalData.forEach(g => {
@@ -280,23 +289,29 @@ export const renderTopBandsChart = (journalData, performanceData, canvasId, isMo
         }
     });
 
-    // Overlay headline/support split from performanceData on a per-band basis
-    // Only update bands where perf count doesn't exceed journal count — never inflate totals
+    // Overlay headline/support split from performanceData on a per-band basis.
+    // getBandAppearanceStats now returns keys normalized the same way as above,
+    // so this actually matches. `total` is recomputed here too — previously it
+    // kept its original (larger) journal-derived value after this overlay
+    // shrank headline/support, which meant the sort order (by stale total)
+    // no longer matched the rendered bar length (headline + support). That's
+    // what caused shorter-looking bars to outrank longer ones.
     const perfStats = Data.getBandAppearanceStats(journalData, performanceData);
-    Object.entries(perfStats).forEach(([band, counts]) => {
-        if (bandCounts[band] && counts.total <= bandCounts[band].total) {
-            bandCounts[band].headline = counts.headline;
-            bandCounts[band].support  = counts.support;
+    Object.entries(perfStats).forEach(([key, counts]) => {
+        if (bandCounts[key] && counts.total <= bandCounts[key].total) {
+            bandCounts[key].headline = counts.headline;
+            bandCounts[key].support  = counts.support;
+            bandCounts[key].total    = counts.headline + counts.support;
         }
     });
 
-    const topBands = Object.entries(bandCounts)
-        .sort((a, b) => b[1].total - a[1].total)
+    const topBands = Object.values(bandCounts)
+        .sort((a, b) => (b.headline + b.support) - (a.headline + a.support))
         .slice(0, topLimit);
 
     if (topBands.length === 0) return;
 
-    const labels = topBands.map(t => t[0]);
+    const labels = topBands.map(t => t.display);
 
     const newChart = new Chart(canvas, {
         type: 'bar',
@@ -305,14 +320,14 @@ export const renderTopBandsChart = (journalData, performanceData, canvasId, isMo
             datasets: [
                 {
                     label: 'Headline',
-                    data: topBands.map(t => t[1].headline),
+                    data: topBands.map(t => t.headline),
                     backgroundColor: '#1D3557',
                     stack: 'Stack 0',
                     borderRadius: 4
                 },
                 {
                     label: 'Support/Festival',
-                    data: topBands.map(t => t[1].support),
+                    data: topBands.map(t => t.support),
                     backgroundColor: '#A8DADC',
                     stack: 'Stack 0',
                     borderRadius: 4

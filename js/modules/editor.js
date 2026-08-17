@@ -14,6 +14,7 @@ import {
     upsertVenues, upsertPerformances, upsertJournals,
 } from './setlist-sync.js';
 import { enrichNewArtist } from './artist-enrichment.js';
+import { acknowledgeCompanionTag } from './onboarding.js';
 
 const WORKER_URL = 'https://setlistfm-proxy.richard-lipscombe.workers.dev';
 
@@ -23,6 +24,12 @@ let isDirty = false;   // true when in-memory data differs from last-loaded CSV
 let editingKey = null; // Journal Key of the gig being edited, null for new gig
 // Companion selector state — array of { name, userId, status, avatarUrl }
 let _companions = [];
+// Set only by openCompanionPrefillModal — the journal_key of the ORIGINAL
+// (tagger's) show that this modal was opened from. If the user goes on to
+// save, that companion tag is acknowledged so it stops reappearing in the
+// "You Were There Too" banner. Reset on every modal open/close so it never
+// leaks into an unrelated add/edit flow.
+let _pendingCompanionAckKey = null;
 
 // ─── DIRTY-STATE TRACKING ────────────────────────────────────────────────────
 
@@ -240,6 +247,10 @@ const renderEditorModal = (entry) => {
     const modal = document.getElementById('editor-modal');
     if (!modal) { console.error('Editor: #editor-modal not found in DOM'); return; }
 
+    // Only openCompanionPrefillModal sets this, and it does so AFTER this
+    // call — resetting here guarantees every other entry point starts clean.
+    _pendingCompanionAckKey = null;
+
     const isEdit  = !!editingKey;
     const isBandWrite = window.isBandMode && window.currentUser?.is_admin;
     const context = isBandWrite ? ` · ${window.currentArtist || 'Band'} Archive` : '';
@@ -296,6 +307,7 @@ export const closeEditorModal = () => {
     const scrollY = parseInt(document.body.dataset.scrollY || '0');
     document.body.classList.remove('modal-open');
     editingKey = null;
+    _pendingCompanionAckKey = null;
     document.body.style.position = '';
     document.body.style.top = '';
     document.body.style.width = '';
@@ -591,6 +603,20 @@ window.showSpinner?.('Saving show…');
             if (journalRow?.id) {
                 await _saveCompanions(journalRow.id, session.user.id);
             }
+        }
+
+        // 4b. If this save originated from a companion-tag "View" action,
+        // mark that tag resolved now — the user has actively saved their
+        // own entry for it, which is the real signal, not just closing
+        // a banner. Runs regardless of whether the venue/date text was
+        // edited from the original.
+        if (_pendingCompanionAckKey) {
+            try {
+                await acknowledgeCompanionTag(session.user.id, _pendingCompanionAckKey);
+            } catch (err) {
+                console.warn('companion tag acknowledge failed:', err.message);
+            }
+            _pendingCompanionAckKey = null;
         }
 
         // 4. Trigger Setlist Lookup (personal users only, not band archive writes)
@@ -1369,7 +1395,7 @@ window.openFestivalPrefillModal = openFestivalPrefillModal;
 export const openCompanionPrefillModal = async (journalId, taggedByUsername) => {
     const { data: row, error } = await supabase
         .from('journals')
-        .select('date, band, official_venue, festival, festival_lineups, notable_support')
+        .select('journal_key, date, band, official_venue, festival, festival_lineups, notable_support')
         .eq('id', journalId)
         .single();
 
@@ -1392,6 +1418,12 @@ export const openCompanionPrefillModal = async (journalId, taggedByUsername) => 
         Photos:             '',
         'Review URL':       '',
     });
+
+    // Set AFTER renderEditorModal, which resets this to null on every open.
+    // Tracks the ORIGINAL show's journal_key so a successful save can
+    // acknowledge the companion tag regardless of whether the user edits
+    // the venue/date text before saving their own copy.
+    _pendingCompanionAckKey = row.journal_key;
 
     if (taggedByUsername) {
         _addCompanion({ name: taggedByUsername, userId: null, status: 'legacy' });

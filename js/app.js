@@ -1,10 +1,9 @@
 /**
  * GigList Core Engine
- * v8.1.1 — 2026-08-06
+ * v8.1.2 — 2026-08-17
  * ------------------------------------------------------------------
- * ✅ Fixed setlist not found for weezer-wednesday shareable image
- * ✅ Fixed filters to include supports and festival lineups
- * ✅ Added wishlist artists to push notifications for ticketmaster matches
+ * ✅ Bug fixes to Top Band charts in main and buddy view (show correct count of bands)
+ * ✅ Bug fixes to onboarding flow for tagged gigs - allow user to dismiss a show they didn't attend, or review later by closing the modal
  */
 
 import * as Data from './modules/data.js';
@@ -40,7 +39,7 @@ import { openPhotoCropModal } from './modules/photo-crop.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "8.1.0";
+const APP_VERSION = "8.1.2";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 

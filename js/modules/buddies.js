@@ -248,18 +248,27 @@ async function _loadBuddyDrillData(buddyId, sharedOnly) {
         return;
     }
 
-    // Normalise to the same shape as journalData
+    // Normalise to the same shape as journalData — this MUST match what
+    // data.js's loadAppData produces, since these rows get passed straight
+    // into Charts.renderTopBandsChart. Previously this used 'Festival'
+    // (no '?', boolean value) instead of 'Festival?' ('Y'/'N' string), so
+    // renderTopBandsChart's isFest check never matched and festival rows
+    // got counted as if the festival name were a band. 'Notable Support'
+    // and 'Festival Lineups' were also missing entirely, so no support acts
+    // were ever counted for buddies.
     let rows = (buddyRows || []).map(r => ({
-        'Journal Key':   r.journal_key,
-        'Date':          r.date,
-        'Band':          r.band,
-        'OfficialVenue': r.official_venue || '',
-        'Venue':         r.venue || '',
-        'Festival':      r.festival || false,
-        'WentWith':      r.went_with || '',
-        'Comments':      r.comments || '',
-        'Photos':        r.photos || '',
-        'safeKey':       (r.journal_key || '').replace(/'/g, "\\'"),
+        'Journal Key':      r.journal_key,
+        'Date':             r.date,
+        'Band':             r.band,
+        'OfficialVenue':    r.official_venue || '',
+        'Venue':            r.venue || '',
+        'Festival?':        r.festival ? 'Y' : 'N',
+        'Festival Lineups': r.festival_lineups || '',
+        'Notable Support':  r.notable_support || '',
+        'WentWith':         r.went_with || '',
+        'Comments':         r.comments || '',
+        'Photos':           r.photos || '',
+        'safeKey':          (r.journal_key || '').replace(/'/g, "\\'"),
     }));
 
     // "Shared only" — filter to journal_keys that also exist in the logged-in user's data

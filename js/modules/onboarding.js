@@ -22,6 +22,10 @@
  *   checkCompanionTags(currentUser)    — called by initApp on every personal login
  *   showNoSetlistTip()                 — called by vault.html "no account" button
  *   handleZeroSyncResult()             — called by syncSetlistFm on 0 results
+ *   acknowledgeCompanionTag(userId, journalKey)
+ *                                       — called by editor.js after a companion-
+ *                                         prefilled show is saved, to mark that
+ *                                         tag resolved
  */
 
 import { supabase } from './supabase.js';
@@ -331,12 +335,31 @@ export async function checkCompanionTags(currentUser) {
     window.track?.('companion_tags_shown', { count: newMatches.length });
 }
 
+/**
+ * A show is "future" if its date is today or later. Used purely to pick
+ * the right decline label ("Not going" vs "Didn't go") — has no bearing
+ * on matching or acknowledgement logic.
+ */
+function _isFutureShow(dateStr) {
+    if (!dateStr) return false;
+    const [d, m, y] = dateStr.split('/').map(Number);
+    if (!d || !m || !y) return false;
+    const showDate = new Date(y, m - 1, d);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return showDate >= today;
+}
+
 function _renderCompanionTagsBanner(matches, currentUser) {
     const banner = document.getElementById('companion-tags-banner');
     const list   = document.getElementById('companion-tags-list');
     if (!banner || !list) return;
 
-    list.innerHTML = matches.map(m => `
+    list.innerHTML = matches.map(m => {
+        const declineLabel = _isFutureShow(m.date) ? 'Not going' : "Didn't go";
+        const journalKeyJs = _esc(m.journal_key).replace(/'/g, "\\'");
+
+        return `
         <div class="flex items-start justify-between gap-3 py-2 border-b border-slate-100 last:border-0"
              data-journal-key="${_esc(m.journal_key)}">
             <div class="flex-1 min-w-0">
@@ -346,12 +369,18 @@ function _renderCompanionTagsBanner(matches, currentUser) {
                     &mdash; added by <strong class="text-slate-700">${_esc(m.owner_username)}</strong>
                 </p>
             </div>
-            <button onclick="window.openCompanionPrefillModal('${m.journal_id}', '${m.owner_username.replace(/'/g, "\\'")}')"
-                    class="flex-shrink-0 bg-slate-900 text-white text-[10px] font-black px-3 py-1.5 rounded-full hover:bg-slate-700 transition-all active:scale-95 uppercase tracking-widest ml-2">
-                View
-            </button>
-        </div>
-    `).join('');
+            <div class="flex flex-col items-end gap-1.5 flex-shrink-0 ml-2">
+                <button onclick="window.openCompanionPrefillModal('${m.journal_id}', '${m.owner_username.replace(/'/g, "\\'")}')"
+                        class="bg-slate-900 text-white text-[10px] font-black px-3 py-1.5 rounded-full hover:bg-slate-700 transition-all active:scale-95 uppercase tracking-widest">
+                    View
+                </button>
+                <button onclick="window.declineCompanionTag('${journalKeyJs}', this.closest('[data-journal-key]'))"
+                        class="text-[9px] font-bold text-slate-300 hover:text-red-400 transition-colors uppercase tracking-widest">
+                    ${declineLabel}
+                </button>
+            </div>
+        </div>`;
+    }).join('');
 
     banner.classList.remove('hidden');
 
@@ -361,27 +390,57 @@ function _renderCompanionTagsBanner(matches, currentUser) {
 }
 
 // Called from vault.html via onclick — must be on window
-window.dismissCompanionTagsBanner = async function() {
+//
+// IMPORTANT: closing the banner is a "not now" action, not a "reviewed and
+// resolved" action. It must NOT write to companion_acknowledged_keys — doing
+// so previously caused shows the user never actually looked at to be
+// silently and permanently suppressed from future banners. Acknowledgement
+// should only ever happen against a specific journal_key as a result of an
+// explicit per-show action (e.g. viewing/claiming or declining that show).
+window.dismissCompanionTagsBanner = function() {
     const banner = document.getElementById('companion-tags-banner');
     if (!banner) return;
-
-    // Collect all journal keys currently displayed
-    const keys = Array.from(
-        banner.querySelectorAll('[data-journal-key]')
-    ).map(el => el.dataset.journalKey).filter(Boolean);
 
     banner.classList.add('hidden');
     sessionStorage.setItem('companion_tags_dismissed', '1');
     window.track?.('companion_tags_dismissed');
 
-    // Only acknowledge on explicit dismiss — not on mere display.
-    // This means if the tab is closed without dismissing, the banner
-    // will reappear next login until the user actively deals with it.
-    if (keys.length) {
-        const userId = banner.dataset.userId;
-        if (userId) await _acknowledgeCompanionTags(userId, keys);
+    // No acknowledgement here — dismiss only hides the banner for this
+    // session. Anything not individually resolved will reappear on the
+    // next login (as long as it isn't already in companion_acknowledged_keys).
+};
+
+// Called from the per-row "Not going" / "Didn't go" button in the banner.
+// This is an explicit, single-show decision — unlike the old dismiss-all
+// behaviour, it only ever acknowledges the one journal_key involved.
+window.declineCompanionTag = async (journalKey, rowEl) => {
+    const banner = document.getElementById('companion-tags-banner');
+    const userId = banner?.dataset.userId;
+    if (!userId) return;
+
+    const btn = rowEl?.querySelector('button:last-child');
+    if (btn) { btn.disabled = true; btn.textContent = '…'; }
+
+    await _acknowledgeCompanionTags(userId, [journalKey]);
+    window.track?.('companion_tag_declined', { journal_key: journalKey });
+
+    rowEl?.remove();
+
+    const list = document.getElementById('companion-tags-list');
+    if (list && !list.children.length) {
+        banner?.classList.add('hidden');
     }
 };
+
+/**
+ * Public single-key acknowledge helper. Used by editor.js after a
+ * companion-prefilled show is actually saved, so the tag is marked
+ * resolved by a genuine user action rather than a banner dismiss.
+ */
+export async function acknowledgeCompanionTag(userId, journalKey) {
+    if (!userId || !journalKey) return;
+    return _acknowledgeCompanionTags(userId, [journalKey]);
+}
 
 async function _acknowledgeCompanionTags(userId, journalKeys) {
     const { data: profile } = await supabase

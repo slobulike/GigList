@@ -483,34 +483,42 @@ export const filterGigs = (query, data, includeFuture = false) => {
  * Aggregates band appearance stats (headline vs support) across attended shows.
  */
 export const getBandAppearanceStats = (journalData, performanceData) => {
+    // Keyed by normalized (trimmed, lowercased) artist name so that casing
+    // differences between the journal's Band field and the performances
+    // table's Artist field (e.g. "Weezer" vs "weezer") don't cause a show
+    // to be miscounted as support instead of headline, and so this maps
+    // cleanly onto the same normalized keys used in charts.js.
     const stats = {};
     const attendedShowsMap = new Map();
 
     journalData.forEach(j => {
         const key = j['Journal Key'];
-        if (key) attendedShowsMap.set(key, j['Band']);
+        if (key) attendedShowsMap.set(key, (j['Band'] || '').trim().toLowerCase());
     });
 
     const processedPairs = new Set();
 
     performanceData.forEach(perf => {
-        const key        = perf['journal_key'] || perf['Journal Key'];
-        const artistName = perf['Artist'];
+        const key            = perf['journal_key'] || perf['Journal Key'];
+        const artistNameRaw  = (perf['Artist'] || '').trim();
+        const artistNameNorm = artistNameRaw.toLowerCase();
 
-        if (!attendedShowsMap.has(key) || !artistName) return;
+        if (!attendedShowsMap.has(key) || !artistNameNorm) return;
 
-        const uniqueKey = `${key}|${artistName}`;
+        const uniqueKey = `${key}|${artistNameNorm}`;
         if (processedPairs.has(uniqueKey)) return;
         processedPairs.add(uniqueKey);
 
-        if (!stats[artistName]) stats[artistName] = { headline: 0, support: 0, total: 0 };
-
-        if (attendedShowsMap.get(key) === artistName) {
-            stats[artistName].headline++;
-        } else {
-            stats[artistName].support++;
+        if (!stats[artistNameNorm]) {
+            stats[artistNameNorm] = { display: artistNameRaw, headline: 0, support: 0, total: 0 };
         }
-        stats[artistName].total++;
+
+        if (attendedShowsMap.get(key) === artistNameNorm) {
+            stats[artistNameNorm].headline++;
+        } else {
+            stats[artistNameNorm].support++;
+        }
+        stats[artistNameNorm].total++;
     });
 
     return stats;
