@@ -313,6 +313,29 @@ export const renderTopBandsChart = (journalData, performanceData, canvasId, isMo
 
     const labels = topBands.map(t => t.display);
 
+    // Draws the actual count (headline + support) at the end of each bar.
+    // Scoped to this chart instance via the `plugins` array (not registered
+    // globally), so it won't affect other charts.
+    const totalCountPlugin = {
+        id: 'totalCountLabel',
+        afterDatasetsDraw(chart) {
+            const { ctx } = chart;
+            const supportMeta = chart.getDatasetMeta(1); // 'Support/Festival' — drawn last, so its x is the right edge of the full stack
+            ctx.save();
+            ctx.font = '700 11px sans-serif';
+            ctx.fillStyle = '#475569';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            topBands.forEach((band, i) => {
+                const el = supportMeta?.data?.[i];
+                if (!el) return;
+                const total = band.headline + band.support;
+                ctx.fillText(String(total), el.x + 6, el.y);
+            });
+            ctx.restore();
+        }
+    };
+
     const newChart = new Chart(canvas, {
         type: 'bar',
         data: {
@@ -334,10 +357,15 @@ export const renderTopBandsChart = (journalData, performanceData, canvasId, isMo
                 }
             ]
         },
+        plugins: [totalCountPlugin],
         options: {
             indexAxis: 'y',
             responsive: true,
             maintainAspectRatio: false,
+            layout: {
+                // Leave room on the right for the count label so it doesn't clip
+                padding: { right: 28 }
+            },
             plugins: {
                 legend: {
                     display: isModal,

@@ -1,8 +1,8 @@
 /**
  * GigList Core Engine
- * v8.1.3 — 2026-08-18
+ * v8.1.4 — 2026-08-18
  * ------------------------------------------------------------------
- * ✅ Dismiss gig companion banner once user has selected an action e.g. decline, without needing to reload the page
+ * ✅ Added count to Top Bands chart for ease of visibility
  */
 
 import * as Data from './modules/data.js';
@@ -38,7 +38,7 @@ import { openPhotoCropModal } from './modules/photo-crop.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "8.1.3";
+const APP_VERSION = "8.1.4";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
