@@ -26,6 +26,10 @@
  *                                       — called by editor.js after a companion-
  *                                         prefilled show is saved, to mark that
  *                                         tag resolved
+ *   clearCompanionTagFromBanner(journalKey)
+ *                                       — called by editor.js alongside the above,
+ *                                         so the banner updates immediately instead
+ *                                         of persisting until dismiss/refresh
  */
 
 import { supabase } from './supabase.js';
@@ -410,6 +414,32 @@ window.dismissCompanionTagsBanner = function() {
     // next login (as long as it isn't already in companion_acknowledged_keys).
 };
 
+/**
+ * Removes a single row from the companion-tags banner (by journal_key) and
+ * hides the whole banner if that was the last row. Shared by decline and
+ * by the "accepted via save" path so the banner never sits stale until
+ * a manual dismiss or page refresh.
+ */
+function _removeCompanionRowFromBanner(journalKey) {
+    const banner = document.getElementById('companion-tags-banner');
+    const list   = document.getElementById('companion-tags-list');
+    if (!banner || !list) return;
+
+    const row = list.querySelector(`[data-journal-key="${CSS.escape(journalKey)}"]`);
+    row?.remove();
+
+    if (!list.children.length) banner.classList.add('hidden');
+}
+
+/**
+ * Public version of the above. Called by editor.js once a companion-
+ * prefilled show has been genuinely saved, so the banner updates
+ * immediately instead of persisting until dismiss or refresh.
+ */
+export function clearCompanionTagFromBanner(journalKey) {
+    _removeCompanionRowFromBanner(journalKey);
+}
+
 // Called from the per-row "Not going" / "Didn't go" button in the banner.
 // This is an explicit, single-show decision — unlike the old dismiss-all
 // behaviour, it only ever acknowledges the one journal_key involved.
@@ -424,12 +454,7 @@ window.declineCompanionTag = async (journalKey, rowEl) => {
     await _acknowledgeCompanionTags(userId, [journalKey]);
     window.track?.('companion_tag_declined', { journal_key: journalKey });
 
-    rowEl?.remove();
-
-    const list = document.getElementById('companion-tags-list');
-    if (list && !list.children.length) {
-        banner?.classList.add('hidden');
-    }
+    _removeCompanionRowFromBanner(journalKey);
 };
 
 /**

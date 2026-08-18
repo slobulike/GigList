@@ -14,7 +14,7 @@ import {
     upsertVenues, upsertPerformances, upsertJournals,
 } from './setlist-sync.js';
 import { enrichNewArtist } from './artist-enrichment.js';
-import { acknowledgeCompanionTag } from './onboarding.js';
+import { acknowledgeCompanionTag, clearCompanionTagFromBanner } from './onboarding.js';
 
 const WORKER_URL = 'https://setlistfm-proxy.richard-lipscombe.workers.dev';
 
@@ -613,6 +613,7 @@ window.showSpinner?.('Saving show…');
         if (_pendingCompanionAckKey) {
             try {
                 await acknowledgeCompanionTag(session.user.id, _pendingCompanionAckKey);
+                clearCompanionTagFromBanner(_pendingCompanionAckKey);
             } catch (err) {
                 console.warn('companion tag acknowledge failed:', err.message);
             }
