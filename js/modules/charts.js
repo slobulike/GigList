@@ -2,8 +2,6 @@
  * GigList - Charts Module
  */
 
-import * as Data from './data.js';
-
 let modalChartInstance      = null;
 let dashboardYearChart      = null;
 let dashboardCompanionChart = null;
@@ -249,13 +247,11 @@ export const renderTopBandsChart = (journalData, performanceData, canvasId, isMo
 
     const topLimit = isModal ? 20 : 10;
 
-    // Always count band frequency from journalData — correct for all users
-    // regardless of whether they have matching entries in the performances table.
-    // Counts headline acts (Band), support acts (Notable Support), and
-    // festival artists (Festival Lineups) separately so all are represented.
-    // Keyed by normalized (trimmed, lowercased) band name so casing variants
-    // like "Bowling for Soup" / "bowling for soup" don't get split into two
-    // separate entries and dilute the count.
+    // Per show, we prefer synced performance data (verified against
+    // setlist.fm) over the free-text journal fields when it's available —
+    // see the merge logic below. Keyed by normalized (trimmed, lowercased)
+    // band name so casing variants like "Bowling for Soup" / "bowling for
+    // soup" don't get split into two separate entries and dilute the count.
     const bandCounts = {};
 
     const addBand = (name, role) => {
@@ -272,36 +268,49 @@ export const renderTopBandsChart = (journalData, performanceData, canvasId, isMo
         bandCounts[key].total++;
     };
 
-    journalData.forEach(g => {
-        // Headline act — skip if festival row (Band field contains festival name, not an artist)
-        const isFest = (g['Festival?'] || g['festival'] || '').toString().toUpperCase().startsWith('Y');
-        if (!isFest) addBand(g.Band || g.band, 'headline');
-
-        // Notable support — single artist
-        if (g['Notable Support']) {
-            addBand(g['Notable Support'], 'support');
-        }
-
-        // Festival lineups — pipe or slash separated list of artists
-        const lineups = g['Festival Lineups'] || g['FestivalLineups'] || '';
-        if (lineups && lineups !== 'nan') {
-            lineups.split(/[\/|]/).forEach(artist => addBand(artist.trim(), 'support'));
-        }
+    // Group synced performances by show (journal_key), deduped per artist per
+    // show. This is the verified, setlist.fm-sourced record of who actually
+    // performed at a given show — more complete than the free-text
+    // "Notable Support" field, which can only hold a single name and is
+    // often left blank on shows with several openers.
+    const perfArtistsByKey = new Map();
+    (performanceData || []).forEach(perf => {
+        const key    = perf['journal_key'] || perf['Journal Key'];
+        const artist = (perf['Artist'] || '').trim();
+        if (!key || !artist) return;
+        if (!perfArtistsByKey.has(key)) perfArtistsByKey.set(key, new Map());
+        // dedupe by normalized name, keep original casing for display
+        perfArtistsByKey.get(key).set(artist.toLowerCase(), artist);
     });
 
-    // Overlay headline/support split from performanceData on a per-band basis.
-    // getBandAppearanceStats now returns keys normalized the same way as above,
-    // so this actually matches. `total` is recomputed here too — previously it
-    // kept its original (larger) journal-derived value after this overlay
-    // shrank headline/support, which meant the sort order (by stale total)
-    // no longer matched the rendered bar length (headline + support). That's
-    // what caused shorter-looking bars to outrank longer ones.
-    const perfStats = Data.getBandAppearanceStats(journalData, performanceData);
-    Object.entries(perfStats).forEach(([key, counts]) => {
-        if (bandCounts[key] && counts.total <= bandCounts[key].total) {
-            bandCounts[key].headline = counts.headline;
-            bandCounts[key].support  = counts.support;
-            bandCounts[key].total    = counts.headline + counts.support;
+    journalData.forEach(g => {
+        const key          = g['Journal Key'] || g['JournalKey'];
+        const headlineBand = (g.Band || g.band || '').trim();
+        const perfArtists  = key ? perfArtistsByKey.get(key) : null;
+
+        if (perfArtists && perfArtists.size) {
+            // Synced performance data exists for this show — trust it
+            // completely instead of the free-text fields below. Every artist
+            // it lists gets counted exactly once; headline vs support is
+            // determined by matching against the journal's own Band field.
+            perfArtists.forEach(artist => {
+                const role = artist.toLowerCase() === headlineBand.toLowerCase() ? 'headline' : 'support';
+                addBand(artist, role);
+            });
+        } else {
+            // No synced performance data for this show — fall back to
+            // whatever was manually entered in the journal fields.
+            const isFest = (g['Festival?'] || g['festival'] || '').toString().toUpperCase().startsWith('Y');
+            if (!isFest) addBand(headlineBand, 'headline');
+
+            if (g['Notable Support']) {
+                addBand(g['Notable Support'], 'support');
+            }
+
+            const lineups = g['Festival Lineups'] || g['FestivalLineups'] || '';
+            if (lineups && lineups !== 'nan') {
+                lineups.split(/[\/|]/).forEach(artist => addBand(artist.trim(), 'support'));
+            }
         }
     });
 
