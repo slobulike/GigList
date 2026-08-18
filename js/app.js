@@ -1,8 +1,8 @@
 /**
  * GigList Core Engine
- * v8.1.5 — 2026-08-18
+ * v8.1.6 — 2026-08-18
  * ------------------------------------------------------------------
- * ✅ Improved accuracy of counts for Top Band charts
+ * ✅ Bug fixes and additional logging for Spotify Connect
  */
 
 import * as Data from './modules/data.js';

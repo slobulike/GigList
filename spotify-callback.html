@@ -108,11 +108,18 @@
     }
 
     function showError(msg) {
-        document.getElementById('spinner').style.display = 'none';
-        document.getElementById('icon').textContent = '❌';
-        document.getElementById('title').innerHTML = `<span class="error">Connection failed</span>`;
-        document.getElementById('sub').textContent = msg;
-    }
+    document.getElementById('spinner').style.display = 'none';
+    document.getElementById('icon').textContent = '❌';
+    document.getElementById('title').innerHTML = `<span class="error">CONNECTION FAILED</span>`;
+    document.getElementById('sub').textContent = msg;
+
+    // Add a retry button so the user doesn't have to go back manually
+    const retryBtn = document.createElement('button');
+    retryBtn.textContent = 'Try again';
+    retryBtn.style.cssText = 'margin-top:1.5rem;padding:0.5rem 1.5rem;background:#22c55e;color:#000;font-weight:800;border:none;border-radius:999px;cursor:pointer;font-size:0.85rem;';
+    retryBtn.onclick = () => window.close();
+    document.querySelector('.card').appendChild(retryBtn);
+}
 
     function notifyOpener(payload) {
     // Primary: BroadcastChannel works across tabs on mobile (no opener needed)
