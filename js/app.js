@@ -1,8 +1,8 @@
 /**
  * GigList Core Engine
- * v8.1.6 — 2026-08-18
+ * v8.1.7 — 2026-08-19
  * ------------------------------------------------------------------
- * ✅ Bug fixes and additional logging for Spotify Connect
+ * ✅ More bug fixes and additional logging for Spotify Connect
  */
 
 import * as Data from './modules/data.js';
@@ -38,7 +38,7 @@ import { openPhotoCropModal } from './modules/photo-crop.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "8.1.5";
+const APP_VERSION = "8.1.7";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 

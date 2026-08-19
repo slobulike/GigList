@@ -56,7 +56,12 @@
 <script>
     const WORKER = 'https://giglist-spotify.richard-lipscombe.workers.dev';
 
+    let _exchangeStarted = false;
+
     async function run() {
+        if (_exchangeStarted) return;
+        _exchangeStarted = true;
+
         const params      = new URLSearchParams(window.location.search);
         const code        = params.get('code');
         const userId      = params.get('state');   // we set state = userId in /auth-url
