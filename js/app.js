@@ -1,8 +1,8 @@
 /**
  * GigList Core Engine
- * v8.1.8 — 2026-08-19
+ * v8.1.9 — 2026-08-31
  * ------------------------------------------------------------------
- * ✅ Added improved error messaging for Spotify Connect
+ * ✅ Switched map provider to OpenStreetMap due to new API requirements on Cartel
  */
 
 import * as Data from './modules/data.js';
@@ -38,7 +38,7 @@ import { openPhotoCropModal } from './modules/photo-crop.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "8.1.8";
+const APP_VERSION = "8.1.9";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
