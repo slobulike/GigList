@@ -831,7 +831,10 @@ export const renderMap = async (data) => {
             minZoom: 1,
             worldCopyJump: true
         });
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png').addTo(gigMap);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors',
+            subdomains: 'abc'
+        }).addTo(gigMap);
         markerLayer = L.layerGroup().addTo(gigMap);
     }
 
@@ -924,7 +927,10 @@ window.openMapModal = () => {
             zoomControl: false,
             worldCopyJump: true
         });
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png').addTo(fullMapInstance);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors',
+            subdomains: 'abc'
+        }).addTo(fullMapInstance);
         fullMarkerLayer = L.layerGroup().addTo(fullMapInstance);
     }
 
