@@ -7,6 +7,7 @@ let dashboardYearChart      = null;
 let dashboardCompanionChart = null;
 let dashboardTopBandsChart  = null;
 let dashboardSongsChart     = null;
+let dashboardBandFrequencyChart = null;
 
 const getChartColors = (count) => {
     const colors = [
@@ -505,14 +506,277 @@ export const renderTopSongsChart = (filteredJournal, canvasId, isModal = false) 
 };
 
 /**
+ * 6. BAND FREQUENCY OVER TIME (Scatter)
+ *
+ * One point per show, per top artist — date on the x-axis, artist on the
+ * y-axis (category scale, one row per band). Which bands qualify is based
+ * on total shows attended (top N), but the rows are then ordered
+ * chronologically by first-seen date — earliest-discovered artist at the
+ * top, most recent discovery at the bottom — so the chart reads as a
+ * timeline of how your taste developed, rather than duplicating the
+ * Top Bands leaderboard. Reuses the same synced-performance-preferred /
+ * free-text-fallback attribution logic as the Top Bands chart (see
+ * renderTopBandsChart) to decide who counts as "seen" at a given show.
+ *
+ * No Chart.js date adapter is loaded (see ensureChartJs in app.js — it
+ * fetches the bare chart.js UMD bundle), so dates are plotted as plain
+ * millisecond timestamps on a linear x-axis rather than a 'time' scale,
+ * with a tick/tooltip callback formatting them back to readable dates.
+ */
+export const renderBandFrequencyChart = (journalData, performanceData, canvasId, isModal = false) => {
+    const ctx = document.getElementById(canvasId);
+    if (!ctx) return;
+
+    const existingChart = Chart.getChart(ctx);
+    if (existingChart) existingChart.destroy();
+
+    const topLimit = isModal ? 20 : 8;
+
+    const parseDate = (dateStr) => {
+        if (!dateStr) return null;
+        const parts = dateStr.includes('/') ? dateStr.split('/') : dateStr.split('-');
+        if (parts.length !== 3) return null;
+        const isISO = parts[0].length === 4;
+        const [y, m, d] = isISO ? parts : [parts[2], parts[1], parts[0]];
+        const ts = new Date(`${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`).getTime();
+        return isNaN(ts) ? null : ts;
+    };
+
+    // Per show, prefer synced performance data over free-text journal
+    // fields — same merge approach as renderTopBandsChart.
+    const perfArtistsByKey = new Map();
+    (performanceData || []).forEach(perf => {
+        const key    = perf['journal_key'] || perf['Journal Key'];
+        const artist = (perf['Artist'] || '').trim();
+        if (!key || !artist) return;
+        if (!perfArtistsByKey.has(key)) perfArtistsByKey.set(key, new Map());
+        perfArtistsByKey.get(key).set(artist.toLowerCase(), artist);
+    });
+
+    const bandPoints = {}; // key -> { display, points: [{x}], total }
+
+    const addPoint = (name, dateStr) => {
+        const raw = (name || '').trim();
+        if (!raw || raw.toLowerCase() === 'nan') return;
+        const ts = parseDate(dateStr);
+        if (ts === null) return;
+        const key = raw.toLowerCase();
+        if (!bandPoints[key]) bandPoints[key] = { display: raw, points: [], total: 0 };
+        bandPoints[key].points.push({ x: ts });
+        bandPoints[key].total++;
+    };
+
+    journalData.forEach(g => {
+        const key          = g['Journal Key'] || g['JournalKey'];
+        const dateStr       = g.Date;
+        const headlineBand = (g.Band || g.band || '').trim();
+        const perfArtists  = key ? perfArtistsByKey.get(key) : null;
+
+        if (perfArtists && perfArtists.size) {
+            perfArtists.forEach(artist => addPoint(artist, dateStr));
+        } else {
+            const isFest = (g['Festival?'] || g['festival'] || '').toString().toUpperCase().startsWith('Y');
+            if (!isFest) addPoint(headlineBand, dateStr);
+            if (g['Notable Support']) addPoint(g['Notable Support'], dateStr);
+            const lineups = g['Festival Lineups'] || g['FestivalLineups'] || '';
+            if (lineups && lineups !== 'nan') {
+                lineups.split(/[\/|]/).forEach(artist => addPoint(artist.trim(), dateStr));
+            }
+        }
+    });
+
+    const topBands = Object.values(bandPoints)
+        .sort((a, b) => b.total - a.total)   // selection: most-attended bands qualify
+        .slice(0, topLimit)
+        .map(band => ({ ...band, firstSeen: Math.min(...band.points.map(p => p.x)) }))
+        .sort((a, b) => a.firstSeen - b.firstSeen); // display order: earliest-discovered at the top
+
+    if (topBands.length === 0) return;
+
+    const bandLabels = topBands.map(b => b.display);
+    const colors      = getChartColors(topBands.length);
+
+    const datasets = topBands.map((band, i) => ({
+        label: band.display,
+        data: band.points.map(p => ({ x: p.x, y: band.display })),
+        backgroundColor: colors[i % colors.length],
+        pointRadius: isModal ? 6 : 4,
+        pointHoverRadius: isModal ? 8 : 6
+    }));
+
+    const newChart = new Chart(ctx, {
+        type: 'scatter',
+        data: { datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        title: (items) => items[0]?.raw?.y || '',
+                        label: (item) => new Date(item.raw.x).toLocaleDateString('en-GB', {
+                            day: 'numeric', month: 'short', year: 'numeric'
+                        })
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    type: 'linear',
+                    grid: { display: false },
+                    ticks: {
+                        color: '#94a3b8',
+                        font: { size: isModal ? 12 : 10 },
+                        callback: (val) => new Date(val).getFullYear()
+                    }
+                },
+                y: {
+                    type: 'category',
+                    labels: bandLabels,
+                    grid: { color: 'rgba(148, 163, 184, 0.1)' },
+                    ticks: { color: '#64748b', font: { weight: '800', size: 12 } }
+                }
+            },
+            onClick: (evt, elements) => {
+                if (elements.length > 0) {
+                    const el       = elements[0];
+                    const bandName = datasets[el.datasetIndex].label;
+                    const searchInput = document.getElementById('searchInput');
+                    if (searchInput) {
+                        searchInput.value = bandName;
+                        if (window.refreshUI) window.refreshUI();
+                        if (isModal && typeof window.closeChartModal === 'function') window.closeChartModal();
+                    }
+                }
+            }
+        }
+    });
+
+    if (!isModal) dashboardBandFrequencyChart = newChart;
+};
+
+/**
+ * 7. HOT LIST — most-seen bands in the last 5 years (ranked list, not a
+ * canvas chart — rendered into a plain container, see hotListBody in
+ * vault.html). Time-boxes the same synced-performance-preferred
+ * attribution logic used by Top Bands, so it reflects who you're actually
+ * into right now rather than all-time favourites.
+ */
+export const renderHotList = (journalData, performanceData, containerId, isModal = false) => {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    const limit = isModal ? 25 : 8;
+
+    const cutoff = new Date();
+    cutoff.setFullYear(cutoff.getFullYear() - 5);
+
+    const parseDate = (dateStr) => {
+        if (!dateStr) return null;
+        const parts = dateStr.includes('/') ? dateStr.split('/') : dateStr.split('-');
+        if (parts.length !== 3) return null;
+        const isISO = parts[0].length === 4;
+        const [y, m, d] = isISO ? parts : [parts[2], parts[1], parts[0]];
+        const dt = new Date(`${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`);
+        return isNaN(dt.getTime()) ? null : dt;
+    };
+
+    const recentJournal = journalData.filter(g => {
+        const dt = parseDate(g.Date);
+        return dt && dt >= cutoff;
+    });
+
+    const perfArtistsByKey = new Map();
+    (performanceData || []).forEach(perf => {
+        const key    = perf['journal_key'] || perf['Journal Key'];
+        const artist = (perf['Artist'] || '').trim();
+        if (!key || !artist) return;
+        if (!perfArtistsByKey.has(key)) perfArtistsByKey.set(key, new Map());
+        perfArtistsByKey.get(key).set(artist.toLowerCase(), artist);
+    });
+
+    const bandCounts = {};
+    const addBand = (name) => {
+        const raw = (name || '').trim();
+        if (!raw || raw.toLowerCase() === 'nan') return;
+        const key = raw.toLowerCase();
+        if (!bandCounts[key]) bandCounts[key] = { display: raw, count: 0 };
+        bandCounts[key].count++;
+    };
+
+    recentJournal.forEach(g => {
+        const key          = g['Journal Key'] || g['JournalKey'];
+        const headlineBand = (g.Band || g.band || '').trim();
+        const perfArtists  = key ? perfArtistsByKey.get(key) : null;
+
+        if (perfArtists && perfArtists.size) {
+            perfArtists.forEach(artist => addBand(artist));
+        } else {
+            const isFest = (g['Festival?'] || g['festival'] || '').toString().toUpperCase().startsWith('Y');
+            if (!isFest) addBand(headlineBand);
+            if (g['Notable Support']) addBand(g['Notable Support']);
+            const lineups = g['Festival Lineups'] || g['FestivalLineups'] || '';
+            if (lineups && lineups !== 'nan') {
+                lineups.split(/[\/|]/).forEach(artist => addBand(artist.trim()));
+            }
+        }
+    });
+
+    const ranked = Object.values(bandCounts)
+        .sort((a, b) => b.count - a.count)
+        .slice(0, limit);
+
+    if (ranked.length === 0) {
+        container.innerHTML = `<p class="text-xs text-slate-400 text-center py-6">No shows in the last 5 years yet.</p>`;
+        return;
+    }
+
+    const maxCount = ranked[0].count;
+    const escapeHtml = (str) => String(str).replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+
+    container.innerHTML = ranked.map((band, i) => `
+        <div class="hotlist-row flex items-center gap-3 py-2 px-1 cursor-pointer hover:bg-slate-50 rounded-xl transition-colors"
+             data-band="${escapeHtml(band.display)}">
+            <span class="text-xs font-black text-slate-300 w-5 text-right flex-shrink-0">${i + 1}</span>
+            <div class="flex-1 min-w-0">
+                <div class="flex items-center justify-between gap-2">
+                    <p class="text-sm font-bold text-slate-800 truncate">${escapeHtml(band.display)}</p>
+                    <p class="text-xs font-black text-indigo-500 flex-shrink-0">${band.count}</p>
+                </div>
+                <div class="w-full bg-slate-100 rounded-full h-1.5 mt-1">
+                    <div class="bg-indigo-500 h-1.5 rounded-full" style="width:${(band.count / maxCount) * 100}%"></div>
+                </div>
+            </div>
+        </div>
+    `).join('');
+
+    container.querySelectorAll('.hotlist-row').forEach(row => {
+        row.addEventListener('click', () => window._applyHotListFilter(row.dataset.band));
+    });
+};
+
+window._applyHotListFilter = function(bandName) {
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) {
+        searchInput.value = bandName;
+        if (window.refreshUI) window.refreshUI();
+        if (typeof window.closeChartModal === 'function') window.closeChartModal();
+    }
+};
+
+/**
  * Modal Controller — called by HTML onclick="openChartModal('year')" etc.
  */
 window.openChartModal = async function(chartType) {
     // Ensure Chart.js is available before doing anything — it's loaded lazily
     await window.ensureChartJs();
 
-    const modal  = document.getElementById('chartModal');
-    const canvas = document.getElementById('modalChartCanvas');
+    const modal    = document.getElementById('chartModal');
+    const canvas   = document.getElementById('modalChartCanvas');
+    const listBody = document.getElementById('modalChartListBody');
     if (!modal || !canvas) return;
 
     const existingChart = Chart.getChart(canvas);
@@ -532,6 +796,15 @@ window.openChartModal = async function(chartType) {
 
     const titleEl = document.getElementById('modalChartTitle');
 
+    // List-type expansions (currently just Hot List) render into a
+    // scrollable div instead of the canvas — toggle which one shows.
+    const isListType = chartType === 'hotlist';
+    canvas.classList.toggle('hidden', isListType);
+    if (listBody) {
+        listBody.classList.toggle('hidden', !isListType);
+        if (isListType) listBody.innerHTML = '';
+    }
+
     if (chartType === 'companion') {
         if (titleEl) titleEl.innerText = "Companion Analysis";
         renderCompanionChart(dataToUse, 'modalChartCanvas', true);
@@ -544,6 +817,12 @@ window.openChartModal = async function(chartType) {
     } else if (chartType === 'topbands') {
         if (titleEl) titleEl.innerText = "Top Bands Leaderboard";
         renderTopBandsChart(dataToUse, window.performanceData, 'modalChartCanvas', true);
+    } else if (chartType === 'bandfrequency') {
+        if (titleEl) titleEl.innerText = "Band Frequency Over Time";
+        renderBandFrequencyChart(dataToUse, window.performanceData, 'modalChartCanvas', true);
+    } else if (chartType === 'hotlist') {
+        if (titleEl) titleEl.innerText = "Hot List — Last 5 Years";
+        renderHotList(dataToUse, window.performanceData, 'modalChartListBody', true);
     }
 
     if (window.lucide) lucide.createIcons();
@@ -581,6 +860,16 @@ export const renderDashboardCharts = (results, performanceData) => {
     }
 
     renderYearChart(results, 'dashboardYearChart');
+
+    // Stats tab additions. Guarded by container existence since these live
+    // in view-stats, which doesn't exist in band mode — the checks are
+    // simple no-ops there rather than an isBandMode branch.
+    if (document.getElementById('bandFrequencyScatterChart')) {
+        renderBandFrequencyChart(results, performanceData, 'bandFrequencyScatterChart');
+    }
+    if (document.getElementById('hotListBody')) {
+        renderHotList(results, performanceData, 'hotListBody');
+    }
 };
 
 window.closeChartModal = function() {

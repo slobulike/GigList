@@ -1,8 +1,10 @@
 /**
  * GigList Core Engine
- * v8.1.9 — 2026-08-31
+ * v8.2.0 — 2026-08-31
  * ------------------------------------------------------------------
- * ✅ Switched map provider to OpenStreetMap due to new API requirements on Cartel
+ * ✅ Moved "Grab Gig" feature to "Add Gig" button
+ * ✅ Moved charts to new "Stats" tab
+ * ✅ Added two new charts for seen over time, and most seen in last 5 years
  */
 
 import * as Data from './modules/data.js';
@@ -581,6 +583,16 @@ function refreshUI() {
         }
 
         Charts.renderYearChart(results, 'dashboardYearChart');
+
+        // Stats tab additions — see renderDashboardCharts in charts.js for
+        // the initial-load path; this covers every subsequent refresh
+        // (search/filter changes) the same way the four charts above do.
+        if (document.getElementById('bandFrequencyScatterChart')) {
+            Charts.renderBandFrequencyChart(results, window.performanceData, 'bandFrequencyScatterChart');
+        }
+        if (document.getElementById('hotListBody')) {
+            Charts.renderHotList(results, window.performanceData, 'hotListBody');
+        }
     }
 
     const mapContainer = document.getElementById('mapContainer');
@@ -813,6 +825,21 @@ function initEventListeners() {
     const search = document.getElementById('searchInput');
     if (search) {
         search.addEventListener('input', () => {
+            refreshUI();
+        });
+    }
+
+    // ── Stats tab search mirror ───────────────────────────────────────────────
+    // The Stats tab has its own search input so charts can be filtered
+    // without switching back to the Gigs tab. refreshUI() only ever reads
+    // from #searchInput, so this just keeps the two boxes' values in sync
+    // in both directions and lets the Stats one trigger the same refresh.
+    const statsSearch = document.getElementById('statsSearchInput');
+    if (search && statsSearch) {
+        statsSearch.value = search.value;
+        search.addEventListener('input', () => { statsSearch.value = search.value; });
+        statsSearch.addEventListener('input', () => {
+            search.value = statsSearch.value;
             refreshUI();
         });
     }

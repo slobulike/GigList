@@ -194,7 +194,7 @@
                 <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-0.5">Your personal live music journal</p>
             </div>
             <button id="btn-add-show"
-                    onclick="window.openAddGigModal()"
+                    onclick="window.openAddShowFork()"
                     aria-label="Add a new show"
                     class="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black uppercase tracking-widest px-4 py-2.5 rounded-full transition-all active:scale-95">
                 <i data-lucide="plus" class="w-3.5 h-3.5" aria-hidden="true"></i>
@@ -244,66 +244,6 @@
                 </div>
             </div>
 
-            <div class="grid grid-cols-1 gap-4">
-
-                <div id="yearChartContainer" class="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm relative group h-64">
-                    <div class="flex justify-between items-start mb-2">
-                        <p class="text-[10px] font-black uppercase text-slate-400">Yearly History</p>
-                        <button onclick="openChartModal('year')" class="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-slate-100 rounded-lg text-slate-400">
-                            <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i>
-                        </button>
-                    </div>
-                    <div class="h-40">
-                        <canvas id="dashboardYearChart"></canvas>
-                    </div>
-                </div>
-
-                <div id="topBandsChartContainer" class="group bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 hidden relative transition-all hover:shadow-md">
-                    <div class="flex justify-between items-start mb-4">
-                        <div>
-                            <p class="text-[10px] font-black uppercase text-slate-400 tracking-widest">Top Bands</p>
-                        </div>
-                        <button onclick="window.openTopBandsModal()"
-                                class="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-slate-50 rounded-lg text-slate-300 transition-all duration-200">
-                            <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i>
-                        </button>
-                    </div>
-                    <div class="h-[350px] relative">
-                        <canvas id="topBandsChart"></canvas>
-                    </div>
-                </div>
-
-                <div class="grid grid-cols-1 gap-4">
-
-                    <div id="songChartContainer" class="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm hidden h-72 relative group">
-                        <div class="flex justify-between items-start mb-2">
-                            <p class="text-[10px] font-black uppercase text-slate-400">Top Songs</p>
-                            <button onclick="window.openChartModal('songs')"
-                                    class="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-indigo-600">
-                                <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i>
-                            </button>
-                        </div>
-                        <div class="h-56">
-                            <canvas id="topSongsChart"></canvas>
-                        </div>
-                    </div>
-
-                    <div id="companionChartContainer" class="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm relative group h-64">
-                        <div class="flex justify-between items-start mb-2">
-                            <p class="text-[10px] font-black uppercase text-slate-400">Companions</p>
-                            <button onclick="openChartModal('companion')" class="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-slate-100 rounded-lg text-slate-400">
-                                <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i>
-                            </button>
-                        </div>
-                        <div class="h-40">
-                            <canvas id="dashboardCompanionChart"></canvas>
-                        </div>
-                    </div>
-
-                </div>
-            </div>
-
-
 
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div class="flex bg-slate-100 p-1 rounded-2xl shadow-inner w-fit">
@@ -344,6 +284,114 @@
         <div id="tableContainer"></div>
 
         <div id="calendarContainer" class="hidden space-y-8"></div>
+    </section>
+
+    <!-- ── STATS VIEW ─────────────────────────────────────────────────── -->
+    <section id="view-stats" class="view-section hidden space-y-4" role="region" aria-label="Stats" aria-hidden="true">
+        <div>
+            <h2 class="font-display text-5xl italic tracking-tight text-slate-900">Stats</h2>
+            <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-0.5">Your live music history, charted</p>
+        </div>
+
+        <div class="flex gap-2 items-center">
+            <div class="relative flex-1">
+                <i data-lucide="search" class="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"></i>
+                <input type="text"
+                       id="statsSearchInput"
+                       aria-label="Search artists, venues, or songs"
+                       placeholder="Search artists, venues, or songs..."
+                       class="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all shadow-sm">
+            </div>
+            <button onclick="window._filtersModule?.openFilterDrawer()"
+                    class="flex items-center gap-2 px-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm text-slate-600 hover:border-indigo-400 hover:text-indigo-600 transition-all shadow-sm flex-shrink-0">
+                <i data-lucide="sliders-horizontal" class="w-4 h-4"></i>
+                <span>Filter</span>
+            </button>
+        </div>
+
+        <div class="grid grid-cols-1 gap-4">
+
+            <div id="yearChartContainer" class="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm relative group h-64">
+                <div class="flex justify-between items-start mb-2">
+                    <p class="text-[10px] font-black uppercase text-slate-400">Yearly History</p>
+                    <button onclick="openChartModal('year')" class="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-slate-100 rounded-lg text-slate-400">
+                        <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i>
+                    </button>
+                </div>
+                <div class="h-40">
+                    <canvas id="dashboardYearChart"></canvas>
+                </div>
+            </div>
+
+            <div id="topBandsChartContainer" class="group bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 hidden relative transition-all hover:shadow-md">
+                <div class="flex justify-between items-start mb-4">
+                    <div>
+                        <p class="text-[10px] font-black uppercase text-slate-400 tracking-widest">Top Bands</p>
+                    </div>
+                    <button onclick="window.openTopBandsModal()"
+                            class="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-slate-50 rounded-lg text-slate-300 transition-all duration-200">
+                        <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i>
+                    </button>
+                </div>
+                <div class="h-[350px] relative">
+                    <canvas id="topBandsChart"></canvas>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 gap-4">
+
+                <div id="songChartContainer" class="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm hidden h-72 relative group">
+                    <div class="flex justify-between items-start mb-2">
+                        <p class="text-[10px] font-black uppercase text-slate-400">Top Songs</p>
+                        <button onclick="window.openChartModal('songs')"
+                                class="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-indigo-600">
+                            <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i>
+                        </button>
+                    </div>
+                    <div class="h-56">
+                        <canvas id="topSongsChart"></canvas>
+                    </div>
+                </div>
+
+                <div id="companionChartContainer" class="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm relative group h-64">
+                    <div class="flex justify-between items-start mb-2">
+                        <p class="text-[10px] font-black uppercase text-slate-400">Companions</p>
+                        <button onclick="openChartModal('companion')" class="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-slate-100 rounded-lg text-slate-400">
+                            <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i>
+                        </button>
+                    </div>
+                    <div class="h-40">
+                        <canvas id="dashboardCompanionChart"></canvas>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- NEW: band frequency over time scatter plot -->
+            <div id="bandFrequencyChartContainer" class="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm relative group h-72">
+                <div class="flex justify-between items-start mb-2">
+                    <p class="text-[10px] font-black uppercase text-slate-400">Band Frequency Over Time</p>
+                    <button onclick="window.openChartModal('bandfrequency')" class="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-slate-100 rounded-lg text-slate-400">
+                        <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i>
+                    </button>
+                </div>
+                <div class="h-56">
+                    <canvas id="bandFrequencyScatterChart"></canvas>
+                </div>
+            </div>
+
+            <!-- NEW: 5-year hot list -->
+            <div id="hotListContainer" class="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm relative group">
+                <div class="flex justify-between items-start mb-4">
+                    <p class="text-[10px] font-black uppercase text-slate-400">Hot List — Last 5 Years</p>
+                    <button onclick="window.openChartModal('hotlist')" class="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-slate-100 rounded-lg text-slate-400">
+                        <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i>
+                    </button>
+                </div>
+                <div id="hotListBody" class="space-y-2"></div>
+            </div>
+
+        </div>
     </section>
 
     <section id="view-feed" class="view-section hidden space-y-4 pb-4" role="region" aria-label="Feed" aria-hidden="true">
@@ -1134,9 +1182,9 @@
         <i data-lucide="database" class="w-6" aria-hidden="true"></i>
         <span class="text-[9px] font-black uppercase">Gigs</span>
     </button>
-    <button onclick="openCapture()" id="nav-record" class="nav-item text-slate-400 flex flex-col items-center gap-1 flex-1" aria-label="Grab this gig you're at right now">
-        <i data-lucide="circle-dot" class="w-6" aria-hidden="true"></i>
-        <span class="text-[9px] font-black uppercase">Grab Gig</span>
+    <button onclick="switchView('stats')" id="nav-stats" class="nav-item text-slate-400 flex flex-col items-center gap-1 flex-1" aria-current="false" aria-label="Stats">
+        <i data-lucide="bar-chart-2" class="w-6" aria-hidden="true"></i>
+        <span class="text-[9px] font-black uppercase">Stats</span>
     </button>
     <button onclick="switchView('collection')" id="nav-collection" class="nav-item text-slate-400 flex flex-col items-center gap-1 flex-1" aria-current="false" aria-label="Collection">
         <i data-lucide="package" class="w-6" aria-hidden="true"></i>
@@ -1336,8 +1384,9 @@
             </button>
         </div>
 
-        <div class="flex-grow p-6 md:p-10 relative bg-slate-50/50">
+        <div class="flex-grow p-6 md:p-10 relative bg-slate-50/50 overflow-hidden">
             <canvas id="modalChartCanvas" role="img" aria-labelledby="modalChartTitle"></canvas>
+            <div id="modalChartListBody" class="hidden h-full overflow-y-auto pr-2"></div>
         </div>
     </div>
 </div>
@@ -1597,7 +1646,7 @@
     import { initFilters } from './js/modules/filters.js';
     import { init as initCollection, refresh as refreshCollection } from './js/modules/collection.js';
     import { initCollectionEditor, openCollectionEditor } from './js/modules/collection-editor.js';
-    import { openCapture, closeCaptureModal } from './js/modules/capture.js';
+    import { openCapture, closeCaptureModal, openAddShowFork } from './js/modules/capture.js';
     import { initWishlist } from './js/modules/wishlist.js';
     initWishlist();
 window._initCollectionEditor = initCollectionEditor;
@@ -1606,6 +1655,7 @@ window.openCollectionEditor  = openCollectionEditor;
     window._refreshCollection = refreshCollection;
     window.openCapture       = openCapture;
     window.closeCaptureModal = closeCaptureModal;
+    window.openAddShowFork   = openAddShowFork;
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', () => { initFilters(); initApp(); });
     } else {

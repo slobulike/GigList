@@ -213,6 +213,85 @@ function _showResultVariant(variant) {
     if (artistInput) artistInput.classList.toggle('hidden', variant !== 'artist-input');
 }
 
+// ─── ADD SHOW ENTRY FORK ─────────────────────────────────────────────────────
+// Replaces the old dedicated "Grab Gig" nav button. The main "Add Show"
+// button (vault.html #btn-add-show) now opens this fork first; it asks
+// whether the user is at a show right now and routes to the existing Grab
+// Gig capture flow (openCapture, unchanged) or the existing manual editor
+// (window.openAddGigModal, unchanged). The two onboarding "add your first
+// gig" CTAs still call openAddGigModal directly — those are about logging a
+// past show found via email search, not "right now", so they skip the fork.
+
+const ADD_SHOW_FORK_HTML = `
+<div id="add-show-fork-root">
+    <div class="flex items-center justify-between px-6 py-5 border-b border-slate-100 flex-shrink-0">
+        <h2 class="text-xl font-black tracking-tight text-slate-900 uppercase italic">Add a Show</h2>
+        <button onclick="window.closeCaptureModal()"
+                aria-label="Close"
+                class="bg-slate-100 hover:bg-red-50 hover:text-red-600 text-slate-500 p-2.5 rounded-xl transition-all">
+            <i data-lucide="x" class="w-5 h-5" aria-hidden="true"></i>
+        </button>
+    </div>
+
+    <div class="px-6 py-8 space-y-4">
+        <p class="text-sm font-bold text-slate-600 text-center leading-relaxed">
+            At a show right now?
+        </p>
+
+        <button type="button"
+                onclick="window._addShowForkYes()"
+                class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black uppercase tracking-wide text-sm rounded-2xl px-4 py-4 transition-all flex items-center justify-center gap-2">
+            <i data-lucide="circle-dot" class="w-4 h-4" aria-hidden="true"></i>
+            Yes — grab it
+        </button>
+
+        <button type="button"
+                onclick="window._addShowForkNo()"
+                class="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-black uppercase tracking-wide text-sm rounded-2xl px-4 py-4 transition-all">
+            No — log it manually
+        </button>
+    </div>
+</div>
+`;
+
+/**
+ * Opens the "At a show right now?" fork into the same generic #modal /
+ * #modal-content shell Grab Gig uses. This is the new entry point for the
+ * main Gigs-tab "Add Show" button.
+ */
+export function openAddShowFork() {
+    const modal = document.getElementById('modal');
+    const content = document.getElementById('modal-content');
+    if (!modal || !content) {
+        console.error('openAddShowFork: #modal / #modal-content not found in DOM');
+        return;
+    }
+
+    content.innerHTML = ADD_SHOW_FORK_HTML;
+    modal.classList.remove('hidden');
+    modal.setAttribute('aria-hidden', 'false');
+
+    if (window.lucide) lucide.createIcons();
+}
+
+/** "Yes" branch — hands straight off to the existing, unchanged Grab Gig flow. */
+function _addShowForkYes() {
+    openCapture();
+}
+
+/** "No" branch — closes the fork and hands off to the existing, unchanged manual editor. */
+function _addShowForkNo() {
+    closeCaptureModal();
+    if (typeof window.openAddGigModal === 'function') {
+        window.openAddGigModal();
+    } else {
+        console.error('_addShowForkNo: window.openAddGigModal not found');
+    }
+}
+
+window._addShowForkYes = _addShowForkYes;
+window._addShowForkNo  = _addShowForkNo;
+
 // ─── OPEN / CLOSE ───────────────────────────────────────────────────────────
 
 /**
