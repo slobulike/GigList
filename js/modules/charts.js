@@ -8,6 +8,7 @@ let dashboardCompanionChart = null;
 let dashboardTopBandsChart  = null;
 let dashboardSongsChart     = null;
 let dashboardBandFrequencyChart = null;
+let dashboardAverageMetricsChart = null;
 
 const getChartColors = (count) => {
     const colors = [
@@ -72,7 +73,7 @@ export const renderCompanionChart = (data, canvasId, isModal = false) => {
             },
             onClick: (evt, elements) => {
                 if (elements.length > 0) {
-                    window.applyChartFilter('companion', labels[elements[0].index]);
+                    window._filtersModule?.setFilters({ companion: labels[elements[0].index] });
                     if (isModal) window.closeChartModal();
                 }
             }
@@ -150,7 +151,7 @@ export const renderYearChart = (data, canvasId, isModal = false) => {
                     if (isModal) {
                         renderMonthDrillDown(data, year);
                     } else {
-                        window.applyChartFilter('year', year);
+                        window._filtersModule?.setYearFilter(parseInt(year, 10));
                     }
                 }
             }
@@ -228,6 +229,11 @@ const renderMonthDrillDown = (data, year) => {
             },
             onClick: (evt, elements) => {
                 if (elements.length > 0) {
+                    // Intentionally left on the old search-box bridge — filters.js's
+                    // state only has year-level granularity (a Set of years), no
+                    // month dimension, so there's nothing to migrate this onto yet.
+                    // Extending filters.js's model to cover month would be a real
+                    // feature addition, not a like-for-like swap like the others.
                     window.applyChartFilter('month', { year: year.toString(), month: elements[0].index });
                     window.closeChartModal();
                 }
@@ -395,13 +401,9 @@ export const renderTopBandsChart = (journalData, performanceData, canvasId, isMo
             },
             onClick: (evt, elements) => {
                 if (elements.length > 0) {
-                    const bandName    = labels[elements[0].index];
-                    const searchInput = document.getElementById('searchInput');
-                    if (searchInput) {
-                        searchInput.value = bandName;
-                        if (window.refreshUI) window.refreshUI();
-                        if (typeof window.closeChartModal === 'function') window.closeChartModal();
-                    }
+                    const bandName = labels[elements[0].index];
+                    window._filtersModule?.setFilters({ artist: bandName });
+                    if (typeof window.closeChartModal === 'function') window.closeChartModal();
                 }
             }
         }
@@ -490,6 +492,11 @@ export const renderTopSongsChart = (filteredJournal, canvasId, isModal = false) 
             },
             onClick: (evt, elements) => {
                 if (elements.length > 0) {
+                    // Intentionally left on the old search-box bridge — filters.js
+                    // only filters journalData fields (artist/venue/companion/etc.),
+                    // it has no concept of an individual song, which lives in the
+                    // separate performances/setlist data. Nothing to migrate this
+                    // onto without extending filters.js's data model.
                     const songName    = labels[elements[0].index];
                     const searchInput = document.getElementById('searchInput');
                     if (searchInput) {
@@ -538,6 +545,12 @@ export const renderBandFrequencyChart = (journalData, performanceData, canvasId,
         if (parts.length !== 3) return null;
         const isISO = parts[0].length === 4;
         const [y, m, d] = isISO ? parts : [parts[2], parts[1], parts[0]];
+        // Require a real 4-digit year — anything shorter (a mistyped or
+        // truncated year field) falls through to JS's legacy non-standard
+        // 2-digit-year parsing, which is inconsistent (e.g. '33' -> 2033,
+        // '23' -> NaN) and is how bad rows have produced bogus far-future
+        // points on this chart before. Reject rather than guess.
+        if (y.length !== 4) return null;
         const ts = new Date(`${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`).getTime();
         return isNaN(ts) ? null : ts;
     };
@@ -604,6 +617,16 @@ export const renderBandFrequencyChart = (journalData, performanceData, canvasId,
         pointHoverRadius: isModal ? 8 : 6
     }));
 
+    // Chart.js's linear scale auto-generates "nice" round tick intervals
+    // from the data range, which can overshoot well past the actual max
+    // data point (e.g. ticks landing on 2033 when the latest real show is
+    // in 2027) rather than stopping at it. Pin min/max explicitly to the
+    // real data range instead of letting the axis guess.
+    const allTimestamps = topBands.flatMap(b => b.points.map(p => p.x));
+    const dataMin = Math.min(...allTimestamps);
+    const dataMax = Math.max(...allTimestamps);
+    const padMs   = (dataMax - dataMin) * 0.04 || (1000 * 60 * 60 * 24 * 30); // ~4% padding, or 30 days if a single date
+
     const newChart = new Chart(ctx, {
         type: 'scatter',
         data: { datasets },
@@ -624,6 +647,8 @@ export const renderBandFrequencyChart = (journalData, performanceData, canvasId,
             scales: {
                 x: {
                     type: 'linear',
+                    min: dataMin - padMs,
+                    max: dataMax + padMs,
                     grid: { display: false },
                     ticks: {
                         color: '#94a3b8',
@@ -642,12 +667,8 @@ export const renderBandFrequencyChart = (journalData, performanceData, canvasId,
                 if (elements.length > 0) {
                     const el       = elements[0];
                     const bandName = datasets[el.datasetIndex].label;
-                    const searchInput = document.getElementById('searchInput');
-                    if (searchInput) {
-                        searchInput.value = bandName;
-                        if (window.refreshUI) window.refreshUI();
-                        if (isModal && typeof window.closeChartModal === 'function') window.closeChartModal();
-                    }
+                    window._filtersModule?.setFilters({ artist: bandName });
+                    if (isModal && typeof window.closeChartModal === 'function') window.closeChartModal();
                 }
             }
         }
@@ -678,6 +699,11 @@ export const renderHotList = (journalData, performanceData, containerId, isModal
         if (parts.length !== 3) return null;
         const isISO = parts[0].length === 4;
         const [y, m, d] = isISO ? parts : [parts[2], parts[1], parts[0]];
+        // Same 4-digit-year guard as renderBandFrequencyChart's parseDate —
+        // see comment there. Without this, a bad row's year could parse via
+        // JS's legacy 2-digit-year fallback and wrongly land inside the
+        // "last 5 years" window this chart filters on.
+        if (y.length !== 4) return null;
         const dt = new Date(`${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`);
         return isNaN(dt.getTime()) ? null : dt;
     };
@@ -759,12 +785,220 @@ export const renderHotList = (journalData, performanceData, containerId, isModal
 };
 
 window._applyHotListFilter = function(bandName) {
-    const searchInput = document.getElementById('searchInput');
-    if (searchInput) {
-        searchInput.value = bandName;
-        if (window.refreshUI) window.refreshUI();
-        if (typeof window.closeChartModal === 'function') window.closeChartModal();
+    window._filtersModule?.setFilters({ artist: bandName });
+    if (typeof window.closeChartModal === 'function') window.closeChartModal();
+};
+
+/**
+ * 8. AVERAGES OVER TIME (Line, multi-series)
+ *
+ * Four per-year averages plotted together — avg ticket price for standard
+ * gigs, avg ticket price for festivals (split out separately, since
+ * festival pricing sits on a different scale and blending it in spikes/
+ * distorts the "normal gig" price trend), avg miles travelled per show,
+ * and avg buddies per show. Rather than juggling four separate y-axes on
+ * a small dashboard card, each series is independently min-max normalised
+ * to a shared 0-100 range for its *line shape only* — the y-axis itself is
+ * hidden, and the tooltip reports the real value with its proper unit via
+ * each dataset's stashed `_raw`/`_unit`. A year with no data for a metric
+ * (e.g. no festivals attended that year) leaves that point as null rather
+ * than plotting a false 0; `spanGaps` bridges the line across it.
+ *
+ * Ticket price comes from journals.price, which is stored as free-text
+ * (e.g. "£25.50", "30", "Free") rather than numeric, so it's parsed with
+ * parsePrice below rather than a bare parseFloat.
+ *
+ * Distance needs venue coordinates plus an estimated home location,
+ * neither of which live in journalData. Pass venuesData as a lookup keyed
+ * by venues.official_name -> { latitude, longitude } (build it from the
+ * shared venues table — same shape as its columns, no renaming needed),
+ * and homeLocation as { lat, lng }. The join uses journals.official_venue
+ * first (the canonical name, matches venues.official_name reliably) and
+ * falls back to journals.venue (free text, which per the known venue-name
+ * mismatch issue — e.g. "Hatfield Park" vs canonical "Hatfield House" —
+ * won't always resolve). A show that doesn't resolve to a venue simply
+ * doesn't contribute a distance sample for that year, rather than erroring.
+ */
+const parsePrice = (raw) => {
+    if (!raw) return NaN;
+    const cleaned = String(raw).replace(/[^0-9.]/g, '');
+    return cleaned ? parseFloat(cleaned) : NaN;
+};
+
+const haversineMiles = (lat1, lng1, lat2, lng2) => {
+    // Matches the haversineMiles implementation already used in the push
+    // worker (index.js) — same formula, atan2 form for consistency.
+    const toRad = (deg) => deg * Math.PI / 180;
+    const R = 3958.8; // Earth radius in miles
+    const dLat = toRad(lat2 - lat1);
+    const dLng = toRad(lng2 - lng1);
+    const a = Math.sin(dLat / 2) ** 2 +
+              Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
+export const renderAverageMetricsChart = (journalData, venuesData = {}, homeLocation = null, canvasId, isModal = false) => {
+    const ctx = document.getElementById(canvasId);
+    if (!ctx) return;
+
+    const existingChart = Chart.getChart(ctx);
+    if (existingChart) existingChart.destroy();
+
+    const yearBuckets = {}; // year -> { pricesGig: [], pricesFestival: [], distances: [], buddies: [] }
+
+    journalData.forEach(g => {
+        if (!g.Date) return;
+        const parts = g.Date.includes('/') ? g.Date.split('/') : g.Date.split('-');
+        if (parts.length !== 3) return;
+        const year = parts[2].length === 4 ? parts[2] : parts[0];
+        if (!year) return;
+        if (!yearBuckets[year]) yearBuckets[year] = { pricesGig: [], pricesFestival: [], distances: [], buddies: [] };
+
+        // Festival vs standard gig — journals.festival is a bool, but this
+        // file's existing convention (see renderBandFrequencyChart) also
+        // tolerates a 'Y'/'N'-style string coming through the app layer.
+        const festivalRaw = g['Festival?'] ?? g.festival;
+        const isFestival = typeof festivalRaw === 'boolean'
+            ? festivalRaw
+            : (festivalRaw || '').toString().toUpperCase().startsWith('Y');
+
+        // Ticket price — journals.price is text (currency symbols, commas,
+        // "Free", blanks all possible), so strip down to a bare number.
+        // Split by festival vs standard gig — festival prices are on a
+        // different scale entirely and blending them spikes/distorts the
+        // "normal gig" trend.
+        const price = parsePrice(g.Price ?? g.price);
+        if (!isNaN(price) && price > 0) {
+            (isFestival ? yearBuckets[year].pricesFestival : yearBuckets[year].pricesGig).push(price);
+        }
+
+        // Distance travelled — official_venue (canonical) preferred over
+        // the free-text venue field, since only the former reliably
+        // matches venues.official_name.
+        const venueName = g['Official Venue'] || g.official_venue || g.Venue || g.venue;
+        const venue = venueName ? venuesData[venueName] : null;
+        // Tolerant of either field naming — venuesData is aliased from
+        // window.allVenues (app.js), whose per-record shape isn't visible
+        // from this file, so this doesn't bet on latitude/longitude vs lat/lng.
+        const lat = venue ? parseFloat(venue.latitude ?? venue.lat) : NaN;
+        const lng = venue ? parseFloat(venue.longitude ?? venue.lng) : NaN;
+        if (homeLocation && !isNaN(lat) && !isNaN(lng)) {
+            const miles = haversineMiles(homeLocation.lat, homeLocation.lng, lat, lng);
+            yearBuckets[year].distances.push(miles);
+        }
+
+        // Buddies — same companion parsing as renderCompanionChart
+        const companionVal = g.Companion || g['Went With'] || g.went_with || "";
+        let buddyCount = 0;
+        if (companionVal && companionVal !== "nan" && companionVal !== "Alone") {
+            buddyCount = companionVal.split(/[,\/&]/).map(c => c.trim()).filter(Boolean).length;
+        }
+        yearBuckets[year].buddies.push(buddyCount);
+    });
+
+    const allYears = Object.keys(yearBuckets).map(Number).filter(y => !isNaN(y));
+    if (allYears.length === 0) return;
+
+    const startYear = Math.min(...allYears);
+    const endYear   = new Date().getFullYear();
+
+    const avg = (arr) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
+
+    const yearLabels        = [];
+    const rawPricesGig      = [];
+    const rawPricesFestival = [];
+    const rawDistances      = [];
+    const rawBuddies        = [];
+
+    for (let y = startYear; y <= endYear; y++) {
+        const bucket = yearBuckets[y.toString()];
+        yearLabels.push(y.toString());
+        rawPricesGig.push(bucket ? avg(bucket.pricesGig) : null);
+        rawPricesFestival.push(bucket ? avg(bucket.pricesFestival) : null);
+        rawDistances.push(bucket ? avg(bucket.distances) : null);
+        rawBuddies.push(bucket ? avg(bucket.buddies) : null);
     }
+
+    // Normalise each series independently to 0-100 so very different units
+    // (£, miles, headcount) can share one axis and be compared by trend
+    // shape. Real values are reported via the tooltip, not this scale.
+    const normalise = (arr) => {
+        const values = arr.filter(v => v !== null);
+        if (!values.length) return arr.map(() => null);
+        const min = Math.min(...values), max = Math.max(...values);
+        const range = max - min;
+        return arr.map(v => v === null ? null : (range === 0 ? 50 : ((v - min) / range) * 100));
+    };
+
+    const series = [
+        { label: 'Avg ticket price (gigs)',      raw: rawPricesGig,      unit: (v) => `£${v.toFixed(2)}`, color: '#22c55e' },
+        { label: 'Avg ticket price (festivals)', raw: rawPricesFestival, unit: (v) => `£${v.toFixed(2)}`, color: '#f59e0b' },
+        { label: 'Avg miles / show',             raw: rawDistances,      unit: (v) => `${v.toFixed(0)} mi`, color: '#3b82f6' },
+        { label: 'Avg buddies / show',           raw: rawBuddies,        unit: (v) => v.toFixed(1), color: '#ec4899' }
+    ];
+
+    const datasets = series.map(s => ({
+        label: s.label,
+        data: normalise(s.raw),
+        borderColor: s.color,
+        backgroundColor: s.color,
+        tension: 0.3,
+        spanGaps: true,
+        pointRadius: isModal ? 4 : 3,
+        pointHoverRadius: isModal ? 6 : 5,
+        _raw: s.raw,
+        _unit: s.unit
+    }));
+
+    const newChart = new Chart(ctx, {
+        type: 'line',
+        data: { labels: yearLabels, datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: true,
+                    position: 'bottom',
+                    labels: { color: '#94a3b8', font: { size: isModal ? 11 : 9, weight: 'bold' }, boxWidth: 10 }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: (item) => {
+                            const ds  = item.dataset;
+                            const raw = ds._raw[item.dataIndex];
+                            return raw === null ? `${ds.label}: no data` : `${ds.label}: ${ds._unit(raw)}`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: { display: false, min: 0, max: 100 },
+                x: {
+                    grid: { display: false },
+                    ticks: { font: { size: isModal ? 12 : 8 } }
+                }
+            },
+            onClick: (evt, elements) => {
+                if (elements.length === 0) return;
+                const el   = elements[0];
+                const year = parseInt(yearLabels[el.index], 10);
+
+                // Price lines (0 = gigs, 1 = festivals) set year + festival
+                // together via filters.js's real filter state. Miles/buddies
+                // (2, 3) are year-only, same as everything else clicks to.
+                if (el.datasetIndex === 0 || el.datasetIndex === 1) {
+                    window._filtersModule?.setYearFilter(year, el.datasetIndex === 1 ? 'festival' : 'headline');
+                } else {
+                    window._filtersModule?.setYearFilter(year, 'all');
+                }
+
+                if (isModal && typeof window.closeChartModal === 'function') window.closeChartModal();
+            }
+        }
+    });
+
+    if (!isModal) dashboardAverageMetricsChart = newChart;
 };
 
 /**
@@ -823,6 +1057,9 @@ window.openChartModal = async function(chartType) {
     } else if (chartType === 'hotlist') {
         if (titleEl) titleEl.innerText = "Hot List — Last 5 Years";
         renderHotList(dataToUse, window.performanceData, 'modalChartListBody', true);
+    } else if (chartType === 'averagemetrics') {
+        if (titleEl) titleEl.innerText = "Averages Over Time";
+        renderAverageMetricsChart(dataToUse, window.venuesData, window.homeLocation, 'modalChartCanvas', true);
     }
 
     if (window.lucide) lucide.createIcons();
@@ -869,6 +1106,12 @@ export const renderDashboardCharts = (results, performanceData) => {
     }
     if (document.getElementById('hotListBody')) {
         renderHotList(results, performanceData, 'hotListBody');
+    }
+    // Needs venuesData/homeLocation exposed globally the same way
+    // performanceData already is — see renderAverageMetricsChart's doc
+    // comment for what shape those need to be in.
+    if (document.getElementById('averageMetricsChart')) {
+        renderAverageMetricsChart(results, window.venuesData, window.homeLocation, 'averageMetricsChart');
     }
 };
 

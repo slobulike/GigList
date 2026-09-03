@@ -1,10 +1,9 @@
 /**
  * GigList Core Engine
- * v8.2.0 — 2026-08-31
+ * v8.2.1 — 2026-09-03
  * ------------------------------------------------------------------
- * ✅ Moved "Grab Gig" feature to "Add Gig" button
- * ✅ Moved charts to new "Stats" tab
- * ✅ Added two new charts for seen over time, and most seen in last 5 years
+ * ✅ Added new averages over time line chart
+ * ✅ Improved chart filters to use filter.js instead of search
  */
 
 import * as Data from './modules/data.js';
@@ -40,7 +39,7 @@ import { openPhotoCropModal } from './modules/photo-crop.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "8.1.9";
+const APP_VERSION = "8.2.1";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
@@ -330,6 +329,9 @@ export async function initApp() {
     // (previously set innerText / onclick directly here)
 
     window.venueLookup = window.allVenues;
+    // Same lookup, aliased for renderAverageMetricsChart's distance calc —
+    // see charts.js for the shape it expects (official_name -> lat/lng).
+    window.venuesData  = window.allVenues;
     window.track('app_load', {
         mode:     currentUser.Type,
         is_admin: currentUser.is_admin || false
@@ -592,6 +594,15 @@ function refreshUI() {
         }
         if (document.getElementById('hotListBody')) {
             Charts.renderHotList(results, window.performanceData, 'hotListBody');
+        }
+        // Was missing here — averageMetricsChart renders correctly on initial
+        // load (via renderDashboardCharts in charts.js) but this refreshUI
+        // path is a separate, hand-maintained copy of that same chart list
+        // that predates the averages chart, so it never got added. This was
+        // why the dashboard card looked frozen on the unfiltered data while
+        // the modal (which calls renderAverageMetricsChart directly) updated fine.
+        if (document.getElementById('averageMetricsChart')) {
+            Charts.renderAverageMetricsChart(results, window.venuesData, window.homeLocation, 'averageMetricsChart');
         }
     }
 

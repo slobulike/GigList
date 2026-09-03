@@ -126,6 +126,37 @@ export function hasActiveFilters() {
   );
 }
 
+/**
+ * Programmatically set one or more filter dimensions and clear everything
+ * not explicitly passed — for chart-click "jump to this slice" interactions,
+ * as distinct from the drawer's own click handlers which only ever touch
+ * one dimension at a time. Treated as a fresh filter rather than additive,
+ * so a stale artist/venue selection from earlier doesn't silently narrow
+ * the result the user just clicked on.
+ */
+export function setFilters(overrides = {}) {
+  _state.years      = overrides.years ? new Set(overrides.years) : new Set();
+  _state.artist      = overrides.artist ?? '';
+  _state.venue        = overrides.venue ?? '';
+  _state.companion    = overrides.companion ?? '';
+  _state.festival     = overrides.festival ?? 'all';
+  _state.hasPhotos    = 'all';
+  _state.hasReview    = 'all';
+  _state.hasSetlist   = 'all';
+
+  _syncDrawerUI();           // reset drawer visuals to defaults first...
+  _populateYearList();       // ...then rebuild year chips so any selected year shows active
+  _syncFestivalToggleUI();   // ...re-apply the festival toggle syncDrawerUI just reset
+  _populateLookupSelects();  // ...and rebuild artist/venue/companion selects to reflect state
+
+  _dispatchChange();
+}
+
+/** Convenience wrapper over setFilters for the year+festival case. */
+export function setYearFilter(year, festivalValue = 'all') {
+  setFilters({ years: [year], festival: festivalValue });
+}
+
 /** Returns a human-readable summary string for the active filters. */
 export function buildSummaryLine(resultCount, totalCount) {
   if (!hasActiveFilters()) return '';
@@ -345,6 +376,8 @@ function _bindEvents() {
     closeFilterDrawer,
     clearAllFilters,
     _handleToggle,
+    setYearFilter,
+    setFilters,
   };
 
   // Debounced select input handlers — wired after DOM injection
@@ -504,16 +537,43 @@ function _syncDrawerUI() {
   });
 }
 
+function _syncFestivalToggleUI() {
+  document.querySelectorAll('[data-filter-group="filter-festival"]').forEach(btn => {
+    const active = btn.dataset.filterValue === _state.festival;
+    btn.classList.toggle('bg-indigo-600', active);
+    btn.classList.toggle('text-white', active);
+    btn.classList.toggle('bg-gray-800', !active);
+    btn.classList.toggle('text-gray-400', !active);
+    btn.classList.toggle('hover:bg-gray-700', !active);
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Change dispatch — triggers re-render in app.js
 // ---------------------------------------------------------------------------
 
 function _dispatchChange() {
-  // Show/hide "Clear all" button
+  // Show/hide the drawer's own internal "Clear all" button
   const clearBtn = document.getElementById('filter-clear-all');
   if (clearBtn) {
     clearBtn.classList.toggle('hidden', !hasActiveFilters());
   }
+
+  // Filter-summary strip ("X of Y shows — Clear all") — driven from a
+  // shared class rather than a single id, so every view that includes this
+  // markup (Gigs, Stats, ...) is kept in sync from here rather than each
+  // needing its own listener wired up separately in app.js.
+  const active  = hasActiveFilters();
+  const data    = window.journalData || [];
+  const results = applyFilters(data);
+  const summary = buildSummaryLine(results.length, data.length);
+
+  document.querySelectorAll('.filter-summary-line').forEach(el => {
+    el.classList.toggle('hidden', !active);
+  });
+  document.querySelectorAll('.filter-summary-text').forEach(el => {
+    el.textContent = summary;
+  });
 
   // Fire custom event — app.js listens and calls renderTable with filtered data
   document.dispatchEvent(new CustomEvent('filtersChanged'));

@@ -936,31 +936,61 @@ window.openMapModal = () => {
 
     // 2. Fetch data from the global window objects
     const data = window.filteredResults || window.journalData || [];
-    const venues = window.venueLookup || {};
+    const venuesLookup = window.venueLookup || {};
 
-    // 3. Render
+    // 3. Render — mirrors renderMap's aggregation: group by venue first so
+    // each venue gets one pin (sized by visit count) with a popup listing
+    // every show there, rather than one overlapping same-size pin per gig.
     setTimeout(() => {
         fullMapInstance.invalidateSize();
         fullMarkerLayer.clearLayers();
 
         const bounds = [];
-        data.forEach(gig => {
-            const venueInfo = venues[gig.OfficialVenue];
+        const venueStats = {};
 
-            if (venueInfo && venueInfo.lat && venueInfo.lng) {
+        data.forEach(gig => {
+            const vName = gig.OfficialVenue;
+            if (!venueStats[vName]) venueStats[vName] = [];
+            venueStats[vName].push(gig);
+        });
+
+        Object.keys(venueStats).forEach(vName => {
+            const gigsAtVenue = venueStats[vName];
+            const venueInfo   = venuesLookup[vName];
+
+            if (venueInfo && !isNaN(venueInfo.lat)) {
+                const visitCount = gigsAtVenue.length;
+                const radius = Math.min(6 + (visitCount * 2), 20);
+
+                const gigListHTML = gigsAtVenue.map(g => {
+                    const safeKey = g['Journal Key']?.replace(/'/g, "\\'");
+                    return `
+                        <div onclick="window.viewGigDetails('${safeKey}')"
+                             class="cursor-pointer hover:bg-slate-50 p-2 rounded transition-colors border-b border-slate-100 last:border-0 mb-1">
+                            <p class="text-[10px] font-black text-indigo-500 uppercase leading-none">${g.Date}</p>
+                            <p class="text-[12px] font-bold text-slate-800 leading-tight">${g.Band}</p>
+                        </div>
+                    `;
+                }).join('');
+
                 const m = L.circleMarker([venueInfo.lat, venueInfo.lng], {
-                    radius: 7,
+                    radius: radius,
                     fillColor: "#4f46e5",
                     color: "#fff",
                     weight: 2,
                     fillOpacity: 0.9
                 }).bindPopup(`
-                    <div style="font-family: sans-serif; padding: 5px;">
-                        <strong style="color: #4f46e5; font-size: 14px;">${gig.Band}</strong><br>
-                        <span style="font-weight: bold;">${gig.OfficialVenue}</span><br>
-                        <small style="color: #64748b;">${gig.Date}</small>
+                    <div class="p-1 max-h-48 overflow-y-auto custom-scrollbar min-w-[180px]">
+                        <h4 class="text-[10px] font-black uppercase text-slate-400 mb-2 tracking-widest border-b pb-1">${vName}</h4>
+                        ${gigListHTML}
+                        <div class="pt-2 text-center">
+                            <span class="bg-indigo-50 text-indigo-600 text-[10px] font-black px-2 py-0.5 rounded-full uppercase">
+                                ${visitCount} ${visitCount > 1 ? 'Shows' : 'Show'}
+                            </span>
+                        </div>
                     </div>
-                `);
+                `, { maxWidth: 250, className: 'gig-map-popup' });
+
                 m.addTo(fullMarkerLayer);
                 bounds.push([venueInfo.lat, venueInfo.lng]);
             }

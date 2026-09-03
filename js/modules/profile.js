@@ -4,11 +4,13 @@
  * music identity editing, and header avatar population.
  *
  * Public API (attached to window):
- *   window.openProfile(userId)   — null = own profile, uuid = buddy's
- *   window.closeProfileView()    — back button for buddy profile view
- *   window.handleAvatarUpload(e) — file input change handler
- *   window.toggleIdentityEdit()  — toggle edit mode for music identity
- *   window.saveIdentity()        — persist music identity fields
+ *   window.openProfile(userId)       — null = own profile, uuid = buddy's
+ *   window.closeProfileView()        — back button for buddy profile view
+ *   window.handleAvatarUpload(e)     — file input change handler
+ *   window.toggleIdentityEdit()      — toggle edit mode for music identity
+ *   window.saveIdentity()            — persist music identity fields
+ *   window.toggleHomeLocationEdit()  — toggle edit mode for home location
+ *   window.saveHomeLocation()        — geocode postcode via postcodes.io, persist
  *
  * Called from app.js:
  *   initProfile(currentUser)     — populates header avatar, wires privacy toggle
@@ -43,8 +45,134 @@ export async function initProfile(currentUser) {
 
     _populateHeaderAvatar(currentUser);
     _initPrivacyToggle(currentUser);
+    _setHomeLocationGlobal(currentUser);
+    // renderDashboardCharts may have already run once (e.g. the Stats tab
+    // pre-rendering while hidden) before this async initProfile() call
+    // resolved, in which case the Averages chart's miles-per-show line
+    // would have found window.homeLocation still unset and silently
+    // skipped every distance sample. Trigger one refresh now that it's
+    // guaranteed to be correct — cheap, and a no-op if nothing changed.
+    window.refreshUI?.();
     initPushUI(supabase);
 }
+
+// ─── HOME LOCATION ────────────────────────────────────────────────────────────
+
+/**
+ * Exposes window.homeLocation for renderAverageMetricsChart's distance calc
+ * (charts.js). Runs on every app load, not just when the profile view is
+ * opened, since Stats can be viewed without ever visiting the profile page.
+ *
+ * Uses the saved override (home_lat/home_lng, set via the postcode field
+ * below) if present. Otherwise falls back to a guess: the most-visited
+ * venue's coordinates, via the same _topValue() helper already used for
+ * the favourite-venue default elsewhere in this file.
+ */
+function _setHomeLocationGlobal(user) {
+    if (user?.home_lat != null && user?.home_lng != null) {
+        window.homeLocation = { lat: parseFloat(user.home_lat), lng: parseFloat(user.home_lng) };
+        return;
+    }
+
+    const topVenueName = _topValue(window.journalData || [], 'OfficialVenue');
+    const venue = topVenueName ? (window.venuesData || {})[topVenueName] : null;
+    const lat = venue ? parseFloat(venue.latitude ?? venue.lat) : NaN;
+    const lng = venue ? parseFloat(venue.longitude ?? venue.lng) : NaN;
+
+    window.homeLocation = (!isNaN(lat) && !isNaN(lng)) ? { lat, lng } : null;
+}
+
+/** Display text for the home-location settings row — saved label if set,
+ *  otherwise names the venue the guess is based on so it's clear it's an
+ *  estimate rather than something the user entered. */
+function _renderHomeLocationDisplay(profile) {
+    const hasOverride = profile.home_lat != null && profile.home_lng != null;
+    if (hasOverride) {
+        _setText('profile-home-location', profile.home_label || 'Set');
+        return;
+    }
+
+    const gigs = profile.id === _currentUser?.id ? (window.journalData || []) : null;
+    const guessedVenue = gigs ? _topValue(gigs, 'OfficialVenue') : null;
+    _setText('profile-home-location', guessedVenue ? `Estimated near ${guessedVenue}` : 'Not set');
+}
+
+window.toggleHomeLocationEdit = function() {
+    const display = document.getElementById('profile-home-display');
+    const edit    = document.getElementById('profile-home-edit');
+    const btn     = document.getElementById('profile-home-edit-btn');
+    if (!display || !edit) return;
+
+    const isEditing = !edit.classList.contains('hidden');
+    if (isEditing) {
+        edit.classList.add('hidden');
+        display.classList.remove('hidden');
+        if (btn) btn.textContent = 'Edit';
+    } else {
+        edit.classList.remove('hidden');
+        display.classList.add('hidden');
+        if (btn) btn.textContent = 'Cancel';
+        const input = document.getElementById('profile-edit-postcode');
+        if (input) {
+            input.value = _currentUser?.home_label || '';
+            input.focus();
+        }
+    }
+};
+
+window.saveHomeLocation = async function() {
+    if (!_currentUser?.id) return;
+
+    const input    = document.getElementById('profile-edit-postcode');
+    const postcode = input?.value.trim();
+    if (!postcode) return;
+
+    const saveBtn = document.getElementById('profile-home-save-btn');
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Checking…'; }
+
+    // postcodes.io — free, no API key, UK-only (matches this app's audience)
+    let result;
+    try {
+        const res  = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(postcode)}`);
+        const json = await res.json();
+        if (json.status !== 200 || !json.result) throw new Error('not found');
+        result = json.result;
+    } catch (err) {
+        window.showToast("Couldn't find that postcode — please check and try again", 'error');
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save'; }
+        return;
+    }
+
+    const home_lat   = result.latitude;
+    const home_lng   = result.longitude;
+    const home_label = result.postcode; // postcodes.io's formatted form, e.g. "SW1A 1AA"
+
+    const { error } = await supabase
+        .from('profiles')
+        .update({ home_lat, home_lng, home_label })
+        .eq('id', _currentUser.id);
+
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save'; }
+
+    if (error) {
+        window.showToast('Could not save — please try again', 'error');
+        return;
+    }
+
+    _currentUser.home_lat   = home_lat;
+    _currentUser.home_lng   = home_lng;
+    _currentUser.home_label = home_label;
+    if (window.currentUser) {
+        window.currentUser.home_lat   = home_lat;
+        window.currentUser.home_lng   = home_lng;
+        window.currentUser.home_label = home_label;
+    }
+    window.homeLocation = { lat: parseFloat(home_lat), lng: parseFloat(home_lng) };
+
+    _renderHomeLocationDisplay(_currentUser);
+    window.toggleHomeLocationEdit();
+    window.showToast('Home location saved', 'success');
+};
 
 
 // ─── HEADER AVATAR ────────────────────────────────────────────────────────────
@@ -193,6 +321,9 @@ async function _renderOwnProfile() {
     // Music identity edit button — visible for own profile
     document.getElementById('profile-identity-edit-btn')?.classList.remove('hidden');
 
+    // Home location edit button — visible for own profile
+    document.getElementById('profile-home-edit-btn')?.classList.remove('hidden');
+
     // ── Header ──
     _setText('profile-display-name', user.display_name || user.username || '—');
     _setText('profile-username', '@' + (user.username || '—'));
@@ -209,6 +340,9 @@ async function _renderOwnProfile() {
 
     // ── Music identity ──
     _renderIdentityDisplay(user);
+
+    // ── Home location ──
+    _renderHomeLocationDisplay(user);
 
     // Pre-fill identity edit inputs with saved values
     const editBand  = document.getElementById('profile-edit-band');
@@ -329,10 +463,15 @@ async function _renderBuddyProfile(userId) {
     document.getElementById('profile-identity-edit')?.classList.add('hidden');
     document.getElementById('profile-identity-display')?.classList.remove('hidden');
 
+    // Home location edit button — hidden for buddy profile, same treatment
+    document.getElementById('profile-home-edit-btn')?.classList.add('hidden');
+    document.getElementById('profile-home-edit')?.classList.add('hidden');
+    document.getElementById('profile-home-display')?.classList.remove('hidden');
+
     // ── Fetch buddy's profile ──
     const { data: profile, error } = await supabase
         .from('profiles')
-        .select('id, username, display_name, avatar_url, is_public, favourite_band, favourite_venue, favourite_song, favourite_show_key')
+        .select('id, username, display_name, avatar_url, is_public, favourite_band, favourite_venue, favourite_song, favourite_show_key, home_lat, home_lng, home_label')
         .eq('id', userId)
         .single();
 
@@ -371,6 +510,9 @@ async function _renderBuddyProfile(userId) {
 
     // ── Music identity ──
     _renderIdentityDisplay(profile);
+
+    // ── Home location ──
+    _renderHomeLocationDisplay(profile);
 
     // ── Stats — fetch buddy's journal (two-step, safe pattern) ──
     let buddyData = [];
