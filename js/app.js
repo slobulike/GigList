@@ -1,9 +1,8 @@
 /**
  * GigList Core Engine
- * v8.2.1 — 2026-09-03
+ * v8.2.2 — 2026-09-04
  * ------------------------------------------------------------------
- * ✅ Added new averages over time line chart
- * ✅ Improved chart filters to use filter.js instead of search
+ * ✅ Amended format of gig modal to allow for easier viewing on smaller screens
  */
 
 import * as Data from './modules/data.js';
@@ -39,7 +38,7 @@ import { openPhotoCropModal } from './modules/photo-crop.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "8.2.1";
+const APP_VERSION = "8.2.2";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 

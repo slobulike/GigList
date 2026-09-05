@@ -1158,139 +1158,204 @@ const gigIsPast = (() => {
         `;
 
 // --- RENDER ---
+// Layout: hero image + compact title strip are pinned (position: sticky) at
+// the top of the single scroll container below. Actions, Setlist, Buddies,
+// and Notes are independent collapsible strips (Setlist open by default) so
+// no single section gets squeezed into a tiny scrolling sliver on short
+// viewports (e.g. iPhone SE). The outer #modal wrapper in vault.html already
+// provides max-h-[90vh] + overflow-y-auto — that's the *only* scroll
+// container; the sticky header relies on that. Note: the sticky wrapper must
+// not sit inside any OTHER ancestor with overflow:hidden/auto between it and
+// that real scroll container, or the browser anchors "sticky" to the wrong
+// box and it silently stops working — that's why the rounding/clipping was
+// moved onto the sticky wrapper itself rather than a plain parent div.
+    window._gigModalOpenSections = new Set(['setlist']);
     modalContent.innerHTML = `
-        <div class="flex flex-col h-full max-h-[90vh]">
-            <div class="flex-none bg-white rounded-t-[2.5rem] overflow-hidden border-b border-slate-100 shadow-sm z-50">
-                <div class="relative h-48 md:h-64 w-full bg-slate-900 flex items-center justify-center overflow-hidden">
-                                    <img id="h-supabase"
-                                         src=""
-                                         alt=""
-                                         class="absolute inset-0 w-full h-full object-cover z-20 hidden">
+        <div class="bg-white">
+            <div class="sticky top-0 z-30 bg-white rounded-t-[2.5rem] overflow-hidden">
+            <div class="relative h-32 md:h-56 w-full bg-slate-900 flex items-center justify-center overflow-hidden">
+                                <img id="h-supabase"
+                                     src=""
+                                     alt=""
+                                     class="absolute inset-0 w-full h-full object-cover z-20 hidden">
 
-                                    <img id="h-scrapbook"
-                                         src=""
-                                         alt=""
-                                         class="absolute inset-0 w-full h-full object-cover z-10 hidden">
+                                <img id="h-scrapbook"
+                                     src=""
+                                     alt=""
+                                     class="absolute inset-0 w-full h-full object-cover z-10 hidden">
 
-                                    <img id="h-artist"
-                                         src=""
-                                         alt=""
-                                         class="absolute inset-0 w-full h-full object-cover z-10 hidden">
+                                <img id="h-artist"
+                                     src=""
+                                     alt=""
+                                     class="absolute inset-0 w-full h-full object-cover z-10 hidden">
 
-                                    <div id="h-ticket"
-                                         class="absolute inset-0 z-10 items-center justify-center p-6 bg-slate-50 hidden">
-                                        ${ticketHTML}
-                                    </div>
+                                <div id="h-ticket"
+                                     class="absolute inset-0 z-10 items-center justify-center p-6 bg-slate-50 hidden">
+                                    ${ticketHTML}
+                                </div>
 
-                    <!-- Camera upload button — personal users + band admins -->
-                    ${(!window.isReadOnly && (window.currentUser?.Type === 'Personal' || (window.isBandMode && window.currentUser?.is_admin))) ? `
-                    <label id="h-camera-btn"
-                           aria-label="Add or replace photo for this show"
-                           class="absolute bottom-3 right-14 z-50 bg-black/40 backdrop-blur-md text-white p-2 rounded-full hover:bg-black/60 transition-all cursor-pointer">
-                        <i data-lucide="camera" class="w-5 h-5" aria-hidden="true"></i>
-                        <input type="file" accept="image/*"
-                               class="hidden"
-                               onchange="window.uploadScrapbookPhoto(this, '${entry['Journal Key']?.replace(/'/g, "\\'")}', '${formattedDate}', '${cleanVenue}', ${window.isBandMode})">
-                    </label>` : ''}
+                <!-- Camera upload button — personal users + band admins -->
+                ${(!window.isReadOnly && (window.currentUser?.Type === 'Personal' || (window.isBandMode && window.currentUser?.is_admin))) ? `
+                <label id="h-camera-btn"
+                       aria-label="Add or replace photo for this show"
+                       class="absolute bottom-3 right-14 z-50 bg-black/40 backdrop-blur-md text-white p-2 rounded-full hover:bg-black/60 transition-all cursor-pointer">
+                    <i data-lucide="camera" class="w-5 h-5" aria-hidden="true"></i>
+                    <input type="file" accept="image/*"
+                           class="hidden"
+                           onchange="window.uploadScrapbookPhoto(this, '${entry['Journal Key']?.replace(/'/g, "\\'")}', '${formattedDate}', '${cleanVenue}', ${window.isBandMode})">
+                </label>` : ''}
 
-                    <button onclick="window.closeModal()"
-                            aria-label="Close details"
-                            class="absolute top-4 right-4 z-50 bg-black/40 backdrop-blur-md text-white p-2 rounded-full hover:bg-black/60 transition-all focus:ring-2 focus:ring-white">
-                        <i data-lucide="x" class="w-5 h-5" aria-hidden="true"></i>
-                    </button>
-                </div>
+                <button onclick="window.closeModal()"
+                        aria-label="Close details"
+                        class="absolute top-4 right-4 z-50 bg-black/40 backdrop-blur-md text-white p-2 rounded-full hover:bg-black/60 transition-all focus:ring-2 focus:ring-white">
+                    <i data-lucide="x" class="w-5 h-5" aria-hidden="true"></i>
+                </button>
+            </div>
 
-                <div class="p-6 pb-4 bg-white">
-                    <div class="flex items-center gap-2 mb-3 flex-wrap">
-                        <a href="${youtubeLink}" target="_blank" rel="noopener"
-                            data-tip="watch_clips"
-                            class="bg-red-600 hover:bg-red-700 text-white text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-transform active:scale-95 focus:ring-2 focus:ring-red-500">
-                             <i data-lucide="play-circle" class="w-4 h-4" aria-hidden="true"></i> WATCH CLIPS
-                        </a>
-                        <button onclick="window.openEditGigModal('${entry['Journal Key']?.replace(/'/g, "\\'")}')"
-                                data-tip="edit"
-                                ${window.isReadOnly ? 'hidden' : ''}
-                                class="bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 text-slate-500 text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
-                            <i data-lucide="pencil" class="w-3.5 h-3.5" aria-hidden="true"></i> EDIT
-                        </button>
-                        <a href="${spotifyLink}" target="_blank" rel="noopener"
-                           class="bg-emerald-500 hover:bg-emerald-600 text-white text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
-                            <i data-lucide="music-2" class="w-3.5 h-3.5" aria-hidden="true"></i> SPOTIFY
-                        </a>
-                        ${window.currentUser?.isAuthUser && (hasSetlistData && gigIsPast || !gigIsPast) ? `
-                            <button id="${gigIsPast ? 'relive' : 'gig-ready'}-btn-${entry['Journal Key']?.replace(/[^a-z0-9]/gi,'_')}"
-                                    data-tip="playlist"
-                                    onclick="window.${gigIsPast ? 'createRelivePlaylist' : 'createGigReadyPlaylist'}('${entry['Journal Key']?.replace(/'/g, "\\'")}', '${entry.Band.replace(/'/g, "\\'")}', '${entry.Date}', '${entry.OfficialVenue?.replace(/'/g, "\\'")}')"
-                                    class="${gigIsPast ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-green-500 hover:bg-green-600'} text-white text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
-                                <i data-lucide="${gigIsPast ? 'list-music' : 'zap'}" class="w-3.5 h-3.5" aria-hidden="true"></i>
-                                ${gigIsPast ? 'RELIVE' : 'GET READY'}
-                            </button>` : ''}
-                        <button onclick="window.shareGig(window.currentEditingGig)"
-                                data-tip="share"
-                                class="bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 text-slate-500 text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
-                            <i data-lucide="share-2" class="w-3.5 h-3.5" aria-hidden="true"></i> SHARE
-                        </button>
-                        ${isFestival ? '<span class="bg-amber-400 text-black text-[8px] font-black px-2 py-1 rounded uppercase">Festival</span>' : ''}
-                        <span id="modal-archive-btn-wrap-${entry['Journal Key']?.replace(/[^a-z0-9]/gi,'_')}"></span>
+            <div class="px-6 pt-4 pb-3 border-b border-slate-100 flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                    <h2 id="modal-title" tabindex="-1" class="text-xl md:text-3xl font-black italic uppercase leading-tight text-slate-900 outline-none truncate">${entry.Band}</h2>
+                    <div class="flex gap-3 text-slate-400 text-[9px] font-bold uppercase tracking-widest mt-1 flex-wrap">
+                        <span class="flex items-center gap-1"><i data-lucide="calendar" class="w-3 h-3 text-indigo-500"></i> <time datetime="${formattedDate}">${entry.Date}</time></span>
+                        <span class="flex items-center gap-1 min-w-0"><i data-lucide="map-pin" class="w-3 h-3 text-indigo-500 flex-shrink-0"></i> <span class="truncate">${entry.OfficialVenue}</span></span>
                     </div>
-                    <!-- External links row: photos, review, setlist.fm -->
-                    ${(hasPhotos || hasReview || hasSetlist) ? `
-                    <div class="flex items-center gap-4 mb-3 pb-3 border-b border-slate-50">
-                        ${hasPhotos ? `<a href="${photosUrl}" target="_blank" rel="noopener"
-                            class="flex items-center gap-1.5 text-[10px] font-black text-slate-400 hover:text-indigo-600 transition-colors"
-                            title="View photo album">
-                            <i data-lucide="camera" class="w-3.5 h-3.5" aria-hidden="true"></i>
-                            <span class="uppercase tracking-widest">Photos</span>
-                        </a>` : ''}
-                        ${hasReview ? `<a href="${reviewUrl}" target="_blank" rel="noopener"
-                            data-tip="setlist"
-                            class="flex items-center gap-1.5 text-[10px] font-black text-slate-400 hover:text-indigo-600 transition-colors"
-                            title="Read review or show page">
-                            <i data-lucide="newspaper" class="w-3.5 h-3.5" aria-hidden="true"></i>
-                            <span class="uppercase tracking-widest">${window.isBandMode && (window.currentArtist||'').toLowerCase() === 'weezer' ? 'Weezerpedia' : 'Review'}</span>
-                        </a>` : ''}
-                        ${hasSetlist ? `<a href="${setlistUrl}" target="_blank" rel="noopener"
-                            class="flex items-center gap-1.5 text-[10px] font-black text-slate-400 hover:text-indigo-600 transition-colors"
-                            title="View on setlist.fm">
-                            <i data-lucide="list-music" class="w-3.5 h-3.5" aria-hidden="true"></i>
-                            <span class="uppercase tracking-widest">Setlist.fm</span>
-                        </a>` : ''}
-                    </div>` : ''}
-                    <h2 id="modal-title" tabindex="-1" class="text-4xl font-black italic uppercase leading-none text-slate-900 mb-3 outline-none">${entry.Band}</h2>
-                    <div class="flex gap-4 text-slate-400 text-[10px] font-bold uppercase tracking-widest">
-                        <span class="flex items-center gap-1.5"><i data-lucide="calendar" class="w-3.5 h-3.5 text-indigo-500"></i> <time datetime="${formattedDate}">${entry.Date}</time></span>
-                        <span class="flex items-center gap-1.5"><i data-lucide="map-pin" class="w-3.5 h-3.5 text-indigo-500"></i> ${entry.OfficialVenue}</span>
+                </div>
+                ${isFestival ? '<span class="flex-shrink-0 bg-amber-400 text-black text-[8px] font-black px-2 py-1 rounded uppercase">Festival</span>' : ''}
+            </div>
+            </div>
+
+            <button type="button"
+                    onclick="window._toggleGigModalSection('actions')"
+                    aria-expanded="false"
+                    aria-controls="gig-panel-actions"
+                    class="w-full flex items-center justify-between px-6 py-3 border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                <span class="text-[10px] font-black uppercase tracking-widest text-slate-500">Actions</span>
+                <i id="gig-chevron-actions" data-lucide="chevron-down" class="w-4 h-4 text-slate-400 transition-transform duration-200" aria-hidden="true"></i>
+            </button>
+            <div id="gig-panel-actions" class="border-b border-slate-100" style="display:grid;grid-template-rows:0fr;transition:grid-template-rows 0.25s ease">
+                <div style="overflow:hidden;min-height:0">
+                    <div class="px-6 py-4">
+                        <div class="flex items-center gap-2 mb-3 flex-wrap">
+                            <a href="${youtubeLink}" target="_blank" rel="noopener"
+                                data-tip="watch_clips"
+                                class="bg-red-600 hover:bg-red-700 text-white text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-transform active:scale-95 focus:ring-2 focus:ring-red-500">
+                                 <i data-lucide="play-circle" class="w-4 h-4" aria-hidden="true"></i> WATCH CLIPS
+                            </a>
+                            <button onclick="window.openEditGigModal('${entry['Journal Key']?.replace(/'/g, "\\'")}')"
+                                    data-tip="edit"
+                                    ${window.isReadOnly ? 'hidden' : ''}
+                                    class="bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 text-slate-500 text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
+                                <i data-lucide="pencil" class="w-3.5 h-3.5" aria-hidden="true"></i> EDIT
+                            </button>
+                            <a href="${spotifyLink}" target="_blank" rel="noopener"
+                               class="bg-emerald-500 hover:bg-emerald-600 text-white text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
+                                <i data-lucide="music-2" class="w-3.5 h-3.5" aria-hidden="true"></i> SPOTIFY
+                            </a>
+                            ${window.currentUser?.isAuthUser && (hasSetlistData && gigIsPast || !gigIsPast) ? `
+                                <button id="${gigIsPast ? 'relive' : 'gig-ready'}-btn-${entry['Journal Key']?.replace(/[^a-z0-9]/gi,'_')}"
+                                        data-tip="playlist"
+                                        onclick="window.${gigIsPast ? 'createRelivePlaylist' : 'createGigReadyPlaylist'}('${entry['Journal Key']?.replace(/'/g, "\\'")}', '${entry.Band.replace(/'/g, "\\'")}', '${entry.Date}', '${entry.OfficialVenue?.replace(/'/g, "\\'")}')"
+                                        class="${gigIsPast ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-green-500 hover:bg-green-600'} text-white text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
+                                    <i data-lucide="${gigIsPast ? 'list-music' : 'zap'}" class="w-3.5 h-3.5" aria-hidden="true"></i>
+                                    ${gigIsPast ? 'RELIVE' : 'GET READY'}
+                                </button>` : ''}
+                            <button onclick="window.shareGig(window.currentEditingGig)"
+                                    data-tip="share"
+                                    class="bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 text-slate-500 text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
+                                <i data-lucide="share-2" class="w-3.5 h-3.5" aria-hidden="true"></i> SHARE
+                            </button>
+                            <span id="modal-archive-btn-wrap-${entry['Journal Key']?.replace(/[^a-z0-9]/gi,'_')}"></span>
+                        </div>
+                        ${(hasPhotos || hasReview || hasSetlist) ? `
+                        <div class="flex items-center gap-4">
+                            ${hasPhotos ? `<a href="${photosUrl}" target="_blank" rel="noopener"
+                                class="flex items-center gap-1.5 text-[10px] font-black text-slate-400 hover:text-indigo-600 transition-colors"
+                                title="View photo album">
+                                <i data-lucide="camera" class="w-3.5 h-3.5" aria-hidden="true"></i>
+                                <span class="uppercase tracking-widest">Photos</span>
+                            </a>` : ''}
+                            ${hasReview ? `<a href="${reviewUrl}" target="_blank" rel="noopener"
+                                data-tip="setlist"
+                                class="flex items-center gap-1.5 text-[10px] font-black text-slate-400 hover:text-indigo-600 transition-colors"
+                                title="Read review or show page">
+                                <i data-lucide="newspaper" class="w-3.5 h-3.5" aria-hidden="true"></i>
+                                <span class="uppercase tracking-widest">${window.isBandMode && (window.currentArtist||'').toLowerCase() === 'weezer' ? 'Weezerpedia' : 'Review'}</span>
+                            </a>` : ''}
+                            ${hasSetlist ? `<a href="${setlistUrl}" target="_blank" rel="noopener"
+                                class="flex items-center gap-1.5 text-[10px] font-black text-slate-400 hover:text-indigo-600 transition-colors"
+                                title="View on setlist.fm">
+                                <i data-lucide="list-music" class="w-3.5 h-3.5" aria-hidden="true"></i>
+                                <span class="uppercase tracking-widest">Setlist.fm</span>
+                            </a>` : ''}
+                        </div>` : ''}
                     </div>
                 </div>
             </div>
 
-            <div class="flex-grow overflow-y-auto custom-modal-scroll p-6 md:p-8 pt-4">
-                <div class="flex items-start gap-2 mb-6 pb-4 border-b border-slate-50">
-                    <i data-lucide="users" class="w-4 h-4 text-slate-300 mt-0.5 flex-shrink-0"></i>
-                    <div class="flex-1 min-w-0">
+            <button type="button"
+                    onclick="window._toggleGigModalSection('setlist')"
+                    aria-expanded="true"
+                    aria-controls="gig-panel-setlist"
+                    class="w-full flex items-center justify-between px-6 py-3 border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                <span class="text-[10px] font-black uppercase tracking-widest text-slate-500">Setlist</span>
+                <i id="gig-chevron-setlist" data-lucide="chevron-down" class="w-4 h-4 text-slate-400 transition-transform duration-200" style="transform:rotate(180deg)" aria-hidden="true"></i>
+            </button>
+            <div id="gig-panel-setlist" class="border-b border-slate-100" style="display:grid;grid-template-rows:1fr;transition:grid-template-rows 0.25s ease">
+                <div style="overflow:hidden;min-height:0">
+                    <div class="px-6 py-4">
+                        <div class="${isFestival ? 'grid grid-cols-1 md:grid-cols-2 gap-4' : 'flex flex-col gap-4'}">
+                            ${sets.map(s => `
+                                <div class="bg-white p-5 rounded-[1.5rem] border border-slate-100 shadow-sm">
+                                    <div class="flex justify-between items-center mb-3 border-b border-slate-50 pb-2">
+                                        <span class="font-black text-indigo-600 text-xs uppercase italic">${s.Artist}</span>
+                                        <span class="text-[7px] font-black px-2 py-0.5 bg-slate-50 rounded text-slate-400 uppercase">${s.Role}</span>
+                                    </div>
+                                    <div class="text-[11px] text-slate-500 leading-relaxed font-medium">
+                                        ${(s.Setlist || '').replace(/^NOT_FOUND$/i, '')
+                                            ? (s.Setlist).replace(/\|/g, '<br>')
+                                            : '<span class="text-slate-300 italic text-xs">No setlist recorded</span>'
+                                        }
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <button type="button"
+                    onclick="window._toggleGigModalSection('buddies')"
+                    aria-expanded="false"
+                    aria-controls="gig-panel-buddies"
+                    class="w-full flex items-center justify-between px-6 py-3 border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                <span class="text-[10px] font-black uppercase tracking-widest text-slate-500">Buddies</span>
+                <i id="gig-chevron-buddies" data-lucide="chevron-down" class="w-4 h-4 text-slate-400 transition-transform duration-200" aria-hidden="true"></i>
+            </button>
+            <div id="gig-panel-buddies" class="border-b border-slate-100" style="display:grid;grid-template-rows:0fr;transition:grid-template-rows 0.25s ease">
+                <div style="overflow:hidden;min-height:0">
+                    <div class="px-6 py-4">
                         <div id="modal-companions-${entry['Journal Key']?.replace(/[^a-z0-9]/gi,'_')}" class="flex flex-wrap gap-1.5">
                             <span class="text-[9px] opacity-60 italic text-slate-400">Loading…</span>
                         </div>
                     </div>
                 </div>
+            </div>
 
-                ${entry.Comments && entry.Comments !== "nan" ? `<div class="p-5 bg-amber-50/50 border-l-4 border-amber-400 italic text-slate-700 text-sm rounded-r-2xl mb-8">"${entry.Comments}"</div>` : ''}
-
-                <div class="${isFestival ? 'grid grid-cols-1 md:grid-cols-2 gap-4' : 'flex flex-col gap-4'}">
-                    ${sets.map(s => `
-                        <div class="bg-white p-5 rounded-[1.5rem] border border-slate-100 shadow-sm">
-                            <div class="flex justify-between items-center mb-3 border-b border-slate-50 pb-2">
-                                <span class="font-black text-indigo-600 text-xs uppercase italic">${s.Artist}</span>
-                                <span class="text-[7px] font-black px-2 py-0.5 bg-slate-50 rounded text-slate-400 uppercase">${s.Role}</span>
-                            </div>
-                            <div class="text-[11px] text-slate-500 leading-relaxed font-medium">
-                                ${(s.Setlist || '').replace(/^NOT_FOUND$/i, '')
-                                    ? (s.Setlist).replace(/\|/g, '<br>')
-                                    : '<span class="text-slate-300 italic text-xs">No setlist recorded</span>'
-                                }
-                            </div>
-                        </div>
-                    `).join('')}
+            <button type="button"
+                    onclick="window._toggleGigModalSection('notes')"
+                    aria-expanded="false"
+                    aria-controls="gig-panel-notes"
+                    class="w-full flex items-center justify-between px-6 py-3 border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                <span class="text-[10px] font-black uppercase tracking-widest text-slate-500">Notes</span>
+                <i id="gig-chevron-notes" data-lucide="chevron-down" class="w-4 h-4 text-slate-400 transition-transform duration-200" aria-hidden="true"></i>
+            </button>
+            <div id="gig-panel-notes" style="display:grid;grid-template-rows:0fr;transition:grid-template-rows 0.25s ease">
+                <div style="overflow:hidden;min-height:0">
+                    <div class="px-6 py-4">
+                        ${entry.Comments && entry.Comments !== "nan"
+                            ? `<div class="p-5 bg-amber-50/50 border-l-4 border-amber-400 italic text-slate-700 text-sm rounded-r-2xl">"${entry.Comments}"</div>`
+                            : `<p class="text-xs text-slate-300 italic">No notes for this show.</p>`}
+                    </div>
                 </div>
             </div>
         </div>
@@ -1401,6 +1466,30 @@ const gigIsPast = (() => {
                             if (modalEl) initModalTips(modalEl, { gigDate: formattedDate });
                         }
             };
+
+// ─── GIG MODAL ACCORDION (Actions / Setlist) ─────────────────────────────────
+// Each strip (Actions, Setlist, Buddies, Notes) collapses/expands independently —
+// with 4 sections a strict single-open accordion would hide too much, so this
+// is just a set of independent toggles, not mutually exclusive. Uses the CSS
+// grid-template-rows 0fr → 1fr trick so it animates to/from arbitrary content
+// height without needing scrollHeight measurement in JS.
+
+window._gigModalOpenSections = new Set(['setlist']);
+
+window._toggleGigModalSection = (section) => {
+    const panel  = document.getElementById(`gig-panel-${section}`);
+    const chev   = document.getElementById(`gig-chevron-${section}`);
+    const header = panel?.previousElementSibling;
+    const wasOpen = window._gigModalOpenSections.has(section);
+    const isOpen  = !wasOpen;
+
+    if (isOpen) window._gigModalOpenSections.add(section);
+    else window._gigModalOpenSections.delete(section);
+
+    if (panel) panel.style.gridTemplateRows = isOpen ? '1fr' : '0fr';
+    if (chev)  chev.style.transform = isOpen ? 'rotate(180deg)' : 'rotate(0deg)';
+    if (header?.tagName === 'BUTTON') header.setAttribute('aria-expanded', String(isOpen));
+};
 
 // ─── BAND PAGE REQUEST BUTTON ─────────────────────────────────────────────────
 
