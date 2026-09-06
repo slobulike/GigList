@@ -121,7 +121,7 @@ async function fetchBuddyJournals() {
 
     try {
         const { data, error } = await supabase
-            .from('journal')
+            .from('journals')
             .select('user_id, journal_key, date, band, official_venue')
             .in('user_id', buddyIds);
 

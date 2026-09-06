@@ -1785,6 +1785,20 @@ window.openCollectionEditor  = openCollectionEditor;
                 </div>
             </div>
 
+            <!-- Band frequency over time scatter plot -->
+            <div id="buddy-drill-frequency-chart-wrap" class="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm h-72">
+                <p class="text-[10px] font-black uppercase text-slate-400 mb-2">Band Frequency Over Time</p>
+                <div class="h-56">
+                    <canvas id="buddy-band-frequency-chart"></canvas>
+                </div>
+            </div>
+
+            <!-- 5-year hot list -->
+            <div id="buddy-drill-hotlist-wrap" class="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm">
+                <p class="text-[10px] font-black uppercase text-slate-400 mb-4">Hot List — Last 5 Years</p>
+                <div id="buddy-hotlist-body" class="space-y-2"></div>
+            </div>
+
             <!-- Shared only toggle -->
             <div class="flex items-center justify-between bg-white rounded-2xl px-4 py-3 border border-slate-100 shadow-sm">
                 <span class="text-sm font-black text-slate-700">Shared shows only</span>

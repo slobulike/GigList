@@ -160,6 +160,8 @@ export const renderYearChart = (data, canvasId, isModal = false) => {
 
     if (isModal) modalChartInstance = newChart;
     else dashboardYearChart = newChart;
+
+    return newChart;
 };
 
 /**
@@ -411,6 +413,8 @@ export const renderTopBandsChart = (journalData, performanceData, canvasId, isMo
 
     if (isModal) dashboardTopBandsChart = newChart;
     else dashboardTopBandsChart = newChart;
+
+    return newChart;
 };
 
 /**
@@ -675,6 +679,8 @@ export const renderBandFrequencyChart = (journalData, performanceData, canvasId,
     });
 
     if (!isModal) dashboardBandFrequencyChart = newChart;
+
+    return newChart;
 };
 
 /**

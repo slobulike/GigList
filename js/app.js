@@ -1,8 +1,10 @@
 /**
  * GigList Core Engine
- * v8.2.2 — 2026-09-04
+ * v8.2.3 — 2026-09-06
  * ------------------------------------------------------------------
- * ✅ Amended format of gig modal to allow for easier viewing on smaller screens
+ * ✅ Added new charts to buddy profile view
+ * ✅ Fix to feed to include buddy cards
+ * ✅ Fix to "On this day" push notification
  */
 
 import * as Data from './modules/data.js';
@@ -38,7 +40,7 @@ import { openPhotoCropModal } from './modules/photo-crop.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "8.2.2";
+const APP_VERSION = "8.2.3";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 

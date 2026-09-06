@@ -318,14 +318,23 @@ function _renderDrillStats(rows) {
 
 function _renderDrillCharts(rows) {
     // Destroy previous instances so Chart.js doesn't complain about canvas reuse
-    if (window._buddyYearChart)  { window._buddyYearChart.destroy();  window._buddyYearChart  = null; }
-    if (window._buddyBandsChart) { window._buddyBandsChart.destroy(); window._buddyBandsChart = null; }
+    if (window._buddyYearChart)      { window._buddyYearChart.destroy();      window._buddyYearChart      = null; }
+    if (window._buddyBandsChart)     { window._buddyBandsChart.destroy();     window._buddyBandsChart     = null; }
+    if (window._buddyFrequencyChart) { window._buddyFrequencyChart.destroy(); window._buddyFrequencyChart = null; }
 
     // Year chart — reuse the existing Charts function, capture the returned instance
     window._buddyYearChart  = Charts.renderYearChart(rows, 'buddy-year-chart');
 
     // Top bands chart — pass empty performanceData (buddy's song data isn't loaded)
     window._buddyBandsChart = Charts.renderTopBandsChart(rows, [], 'buddy-bands-chart');
+
+    // Band frequency scatter (Stats tab addition) — same empty-performanceData
+    // caveat as Top Bands above; falls back to journal free-text fields.
+    window._buddyFrequencyChart = Charts.renderBandFrequencyChart(rows, [], 'buddy-band-frequency-chart');
+
+    // Hot list (Stats tab addition) — ranked list rendered into a plain div,
+    // not a canvas chart, so there's no instance to destroy/reassign.
+    Charts.renderHotList(rows, [], 'buddy-hotlist-body');
 }
 
 // ─── TABLE ────────────────────────────────────────────────────────────────────
