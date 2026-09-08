@@ -1,10 +1,9 @@
 /**
  * GigList Core Engine
- * v8.2.3 — 2026-09-06
+ * v8.2.4 — 2026-09-08
  * ------------------------------------------------------------------
- * ✅ Added new charts to buddy profile view
- * ✅ Fix to feed to include buddy cards
- * ✅ Fix to "On this day" push notification
+ * ✅ Updated festival view in gig modal to only show bands the user specified as seeing
+ * ✅ Enhanced editor UI for festivals to show a pick list of artists already logged by other users at that festival
  */
 
 import * as Data from './modules/data.js';
@@ -40,7 +39,7 @@ import { openPhotoCropModal } from './modules/photo-crop.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "8.2.3";
+const APP_VERSION = "8.2.4";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 

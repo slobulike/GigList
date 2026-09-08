@@ -221,6 +221,137 @@ const buildJournalKey = (dateStr, officialVenue) => {
     return `${dateStr}${officialVenue}`;
 };
 
+// ─── FESTIVAL LINEUP POOL ─────────────────────────────────────────────────────
+// `performances` is a SHARED pool keyed only by journal_key — many users
+// logging the same festival on the same date+venue key contribute to (and
+// benefit from) the same pool of already-resolved bands. This section lets
+// the editor show that pool as a tick-list instead of making every user
+// retype every band name (which both duplicates setlist.fm lookups and risks
+// naming drift — e.g. one user typing "Beauty School" for a band setlist.fm
+// resolves as "Beauty School Dropout" — that the display-side match in
+// ui.js's openGigModal then silently fails to reconcile).
+//
+// NOTE: normalizeArtist/artistNamesMatch are duplicated in ui.js's
+// openGigModal for the same reason. Worth promoting both to utils.js if we
+// ever consolidate — not done here since utils.js wasn't in scope for this change.
+
+const normalizeArtist = (s) => (s || '').toLowerCase().trim().replace(/\s+/g, ' ');
+
+/** Loose match: exact, or one name is a prefix of the other (handles cases
+ *  like "Beauty School" vs setlist.fm's "Beauty School Dropout"). */
+const artistNamesMatch = (a, b) => {
+    const na = normalizeArtist(a), nb = normalizeArtist(b);
+    if (!na || !nb) return false;
+    return na === nb || na.startsWith(nb) || nb.startsWith(na);
+};
+
+/**
+ * Fetches the distinct set of artists already logged in `performances`
+ * for a given journal_key — i.e. everyone's contributions to this festival's
+ * pool so far, regardless of who added them.
+ */
+async function fetchLineupPool(journalKey) {
+    if (!journalKey) return [];
+    const { data, error } = await supabase
+        .from('performances')
+        .select('artist')
+        .eq('journal_key', journalKey);
+    if (error) {
+        console.error('Failed to load festival lineup pool:', error.message);
+        return [];
+    }
+    // Dedupe case-insensitively, keeping the first-seen casing as canonical.
+    const seen = new Map();
+    for (const row of data || []) {
+        const name = (row.artist || '').trim();
+        if (!name) continue;
+        const key = normalizeArtist(name);
+        if (!seen.has(key)) seen.set(key, name);
+    }
+    return [...seen.values()].sort((a, b) => a.localeCompare(b));
+}
+
+const _currentJournalKeyFromForm = () => {
+    const dateStr = fromInputDate(document.getElementById('editor-date')?.value || '');
+    const venue = document.getElementById('editor-venue')?.value.trim() || '';
+    return (dateStr && venue) ? buildJournalKey(dateStr, venue) : null;
+};
+
+/** Renders the tick-list. Checkbox state lives purely in the DOM from here
+ *  on — saveGig() and _getLineupSelections() read it directly, no separate
+ *  tracked state to keep in sync. */
+function _renderLineupPool(poolNames, checkedKeys) {
+    const container = document.getElementById('editor-lineup-pool');
+    if (!container) return;
+
+    if (poolNames.length === 0) {
+        container.innerHTML = `<p class="text-[11px] text-slate-400 italic px-1">No bands logged yet for this festival — add them below.</p>`;
+        return;
+    }
+
+    container.innerHTML = poolNames.map(name => {
+        const id = `lineup-pool-${name.replace(/[^a-z0-9]/gi, '_')}`;
+        const checked = checkedKeys.has(normalizeArtist(name));
+        return `
+            <label for="${id}"
+                   class="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-700 cursor-pointer hover:bg-indigo-50 hover:border-indigo-200 transition-colors">
+                <input type="checkbox" id="${id}" data-artist="${name.replace(/"/g, '&quot;')}"
+                       class="lineup-pool-checkbox w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                       ${checked ? 'checked' : ''}>
+                ${name}
+            </label>`;
+    }).join('');
+}
+
+/**
+ * Re-fetches the pool for the current date+venue, seeds checkbox state from
+ * whatever's currently in the free-text textarea (covers opening an existing
+ * festival entry, or a user who typed a name that's since been added to the
+ * pool by someone else), then strips matched names out of the textarea so it
+ * only ever shows genuinely new, unresolved names.
+ */
+async function refreshLineupPool() {
+    const poolContainer = document.getElementById('editor-lineup-pool');
+    const textarea = document.getElementById('editor-lineups');
+    if (!poolContainer || !textarea) return;
+
+    const journalKey = _currentJournalKeyFromForm();
+    if (!journalKey) {
+        poolContainer.innerHTML = `<p class="text-[11px] text-slate-400 italic px-1">Enter a date and venue first.</p>`;
+        return;
+    }
+
+    poolContainer.innerHTML = `<p class="text-[11px] text-slate-400 italic px-1">Loading known lineup…</p>`;
+    const pool = await fetchLineupPool(journalKey);
+
+    const currentNames = textarea.value.split('/').map(s => s.trim()).filter(Boolean);
+    const checkedKeys = new Set();
+    const leftoverNames = [];
+    for (const name of currentNames) {
+        const poolMatch = pool.find(p => artistNamesMatch(p, name));
+        if (poolMatch) checkedKeys.add(normalizeArtist(poolMatch));
+        else leftoverNames.push(name);
+    }
+    textarea.value = leftoverNames.join(' / ');
+
+    _renderLineupPool(pool, checkedKeys);
+}
+
+/**
+ * Reads the final lineup selection directly from the DOM at save time.
+ * `newNames` (typed extras not matched to any ticked pool item) is the
+ * subset that actually needs a fresh setlist.fm lookup — ticked pool items
+ * already have performances rows for this journal_key.
+ */
+function _getLineupSelections() {
+    const poolChecked = [...document.querySelectorAll('#editor-lineup-pool .lineup-pool-checkbox:checked')]
+        .map(cb => cb.dataset.artist);
+    const extra = (document.getElementById('editor-lineups')?.value || '')
+        .split('/').map(s => s.trim()).filter(Boolean);
+    const newNames = extra.filter(name => !poolChecked.some(p => artistNamesMatch(p, name)));
+    return { fullLineup: [...poolChecked, ...newNames], newNames };
+}
+
 // ─── OPEN MODAL ───────────────────────────────────────────────────────────────
 
 export const openAddGigModal = () => {
@@ -281,6 +412,7 @@ const renderEditorModal = (entry) => {
     _check('editor-festival', isFest);
 
     toggleFestivalFields(isFest);
+    if (isFest) refreshLineupPool();
 
     modal.classList.remove('hidden');
     modal.setAttribute('aria-hidden', 'false');
@@ -327,6 +459,7 @@ const toggleFestivalFields = (show) => {
 window.editorToggleFestival = () => {
     const checked = document.getElementById('editor-festival')?.checked;
     toggleFestivalFields(checked);
+    if (checked) refreshLineupPool();
 };
 
 // ─── SETLIST.FM LOOKUP (new shows only) ───────────────────────────────────────
@@ -524,6 +657,13 @@ window.showSpinner?.('Saving show…');
     const isFest = document.getElementById('editor-festival')?.checked ? 'Y' : 'N';
     const [d, m, y] = dateStr.split('/');
 
+    // Combine ticked pool selections with any genuinely new free-text names.
+    // `newNames` is what still needs a setlist.fm lookup below — anything
+    // ticked from the pool already has performances rows for this journal_key.
+    const { fullLineup, newNames } = isFest === 'Y'
+        ? _getLineupSelections()
+        : { fullLineup: [], newNames: [] };
+
     // 2. Auth Check
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
@@ -542,7 +682,7 @@ window.showSpinner?.('Saving show…');
         official_venue: venue,
         venue: venue,
         festival: isFest === 'Y',
-        festival_lineups: _get('editor-lineups').trim(),
+        festival_lineups: fullLineup.join(' / '),
         notable_support: _get('editor-support').trim(),
         went_with: _companions.map(c => c.name).join(' / '),
         comments: isBandWrite ? 'Historical Artist Entry' : _get('editor-comments').trim(),
@@ -627,10 +767,13 @@ window.showSpinner?.('Saving show…');
             try {
                 if (isFest === 'Y') {
                     // ── Festival path ──────────────────────────────────────────
-                    const lineups = _get('editor-lineups').trim();
-                    if (lineups) {
+                    // Only the names NOT ticked from the pool need a fresh
+                    // setlist.fm lookup — ticked ones already have performances
+                    // rows for this journal_key, so re-searching them would
+                    // just waste API calls (and rate-limit budget) for nothing.
+                    if (newNames.length > 0) {
                         if (saveBtn) saveBtn.textContent = 'Searching Lineup...';
-                        const matches = await lookupFestivalSetlists(lineups, dateStr);
+                        const matches = await lookupFestivalSetlists(newNames.join(' / '), dateStr);
                         if (matches.length > 0) {
                             const grouped = groupByShow(matches);
                             const perfRows = [];
@@ -1355,6 +1498,18 @@ export const initEditor = () => {
     wireCombobox('editor-venue',   'editor-venue-list',   getVenueOptions);
     wireCombobox('editor-support', 'editor-support-list', getSupportOptions);
     initCompanionSelector();
+
+    // The lineup pool is keyed on date+venue — if either changes while the
+    // festival section is open, the journal_key (and therefore the pool)
+    // may have changed too, so refresh. wireCombobox's selectItem() fires a
+    // 'change' event on venue selection, so this covers picking from the
+    // dropdown as well as manually typing + blurring either field.
+    const _onDateVenueChange = () => {
+        const section = document.getElementById('editor-festival-section');
+        if (section && !section.classList.contains('hidden')) refreshLineupPool();
+    };
+    document.getElementById('editor-date')?.addEventListener('change', _onDateVenueChange);
+    document.getElementById('editor-venue')?.addEventListener('change', _onDateVenueChange);
 };
 
 // ─── FESTIVAL PREFILL MODAL ───────────────────────────────────────────────────

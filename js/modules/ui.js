@@ -1058,10 +1058,33 @@ export const openGigModal = (key, journalData, performanceData) => {
     const modalContent = document.getElementById('modal-content');
 
     // --- DATA PREP ---
-    const sets = pData.filter(p =>
+    const isFestival = entry['Festival?'] && entry['Festival?'].trim().toUpperCase().startsWith('Y');
+
+    // `pData` (performances) is a SHARED pool keyed only by journal_key — at a
+    // festival, other users' journal entries under the same key can add their
+    // own bands to this pool via their own Festival Lineups. Without scoping,
+    // every user attending the same festival key sees the union of everyone's
+    // bands. For non-festival shows this scoping is unnecessary (and skipped)
+    // because the headline/support acts are the same fact for every attendee.
+    let sets = pData.filter(p =>
         (p['Journal Key'] || '').toString().trim() === key.toString().trim()
     );
-    const isFestival = entry['Festival?'] && entry['Festival?'].trim().toUpperCase().startsWith('Y');
+
+    if (isFestival) {
+        const normalizeArtist = (s) => (s || '').toLowerCase().trim().replace(/\s+/g, ' ');
+        const ownLineup = new Set(
+            (entry['Festival Lineups'] || '')
+                .split('/')
+                .map(normalizeArtist)
+                .filter(Boolean)
+        );
+        // Only filter down if this entry actually has a recorded lineup —
+        // an empty lineup (e.g. a legacy row) falls back to showing
+        // everything rather than silently showing nothing.
+        if (ownLineup.size > 0) {
+            sets = sets.filter(s => ownLineup.has(normalizeArtist(s.Artist)));
+        }
+    }
     const [d, m, y] = entry.Date.split('/');
     const formattedDate = `${y}-${m}-${d}`;
     const cleanVenue = entry.OfficialVenue.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-');
