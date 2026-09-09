@@ -55,7 +55,9 @@
 
 <script>
     const WORKER = 'https://giglist-spotify.richard-lipscombe.workers.dev';
+    const LS_KEY = 'spotify-auth-result';
 
+    // Guard against the page script firing more than once (mobile Chrome quirk)
     let _exchangeStarted = false;
 
     async function run() {
@@ -72,17 +74,17 @@
             showError(error === 'access_denied'
                 ? 'Spotify access was denied.'
                 : `Spotify error: ${error}`);
-            notifyOpener({ ok: false, error });
+            notifyParent({ ok: false, error });
             return;
         }
 
         if (!code || !userId) {
             showError('Missing code or user ID.');
-            notifyOpener({ ok: false, error: 'missing_params' });
+            notifyParent({ ok: false, error: 'missing_params' });
             return;
         }
 
-                try {
+        try {
             const res = await fetch(`${WORKER}/token-exchange`, {
                 method:  'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -102,12 +104,12 @@
             }
 
             showSuccess();
-            notifyOpener({ ok: true });
+            notifyParent({ ok: true });
 
         } catch (err) {
             const detail = `${err.message} — ${new Date().toLocaleTimeString()}`;
             showError(detail);
-            notifyOpener({ ok: false, error: err.message });
+            notifyParent({ ok: false, error: err.message });
         }
     }
 
@@ -119,7 +121,7 @@
         setTimeout(() => window.close(), 1200);
     }
 
-        function showError(msg) {
+    function showError(msg) {
         document.getElementById('spinner').style.display = 'none';
         document.getElementById('icon').textContent = '❌';
         document.getElementById('title').innerHTML = `<span class="error">CONNECTION FAILED</span>`;
@@ -132,24 +134,28 @@
         document.querySelector('.card').appendChild(retryBtn);
     }
 
-    function notifyOpener(payload) {
-    // Primary: BroadcastChannel works across tabs on mobile (no opener needed)
-    try {
-        const bc = new BroadcastChannel('spotify-auth');
-        bc.postMessage({ type: 'SPOTIFY_AUTH', ...payload });
-        bc.close();
-    } catch (e) {
-        // BroadcastChannel not supported (very rare) — fall back to postMessage
-    }
+    function notifyParent(payload) {
+        // Primary: localStorage — fires a storage event in all other tabs of
+        // the same origin, including the parent app tab on every browser and
+        // platform (Android PWA, desktop, iOS Safari).
+        try {
+            localStorage.setItem(LS_KEY, JSON.stringify({
+                type: 'SPOTIFY_AUTH',
+                ts:   Date.now(),
+                ...payload,
+            }));
+        } catch (e) {
+            // localStorage unavailable (private browsing with storage blocked)
+        }
 
-    // Fallback: desktop popup still has an opener, keep it working
-    if (window.opener && !window.opener.closed) {
-        window.opener.postMessage(
-            { type: 'SPOTIFY_AUTH', ...payload },
-            window.location.origin
-        );
+        // Fallback: postMessage for desktop where a true popup opener exists
+        if (window.opener && !window.opener.closed) {
+            window.opener.postMessage(
+                { type: 'SPOTIFY_AUTH', ...payload },
+                window.location.origin
+            );
+        }
     }
-}
 
     run();
 </script>

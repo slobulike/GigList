@@ -8,6 +8,7 @@
 import { supabase } from './supabase.js';
 
 const WORKER = 'https://giglist-spotify.richard-lipscombe.workers.dev';
+const LS_KEY = 'spotify-auth-result';
 
 // ─── SESSION CACHE ────────────────────────────────────────────────────────────
 // Avoids repeated Supabase lookups within the same page load.
@@ -41,12 +42,14 @@ export const invalidateSpotifyCache = () => { _connected = null; };
 // ─── CONNECT FLOW ─────────────────────────────────────────────────────────────
 
 /**
- * Opens a Spotify OAuth popup and returns a promise that resolves when the
+ * Opens a Spotify OAuth popup/tab and returns a promise that resolves when the
  * user successfully connects, or rejects with a descriptive error.
+ *
+ * Cross-tab messaging uses localStorage storage events, which fire reliably
+ * across all tabs of the same origin on every browser and platform, including
+ * installed PWAs on Android.
  */
 export const connectSpotify = (userId) => new Promise(async (resolve, reject) => {
-    // Derive the redirect URI from the current page's location so it works
-    // identically on 127.0.0.1 and GitHub Pages without hardcoding.
     const redirectUri = new URL('spotify-callback.html', window.location.href).href
         .replace('//localhost:', '//127.0.0.1:');
 
@@ -62,7 +65,10 @@ export const connectSpotify = (userId) => new Promise(async (resolve, reject) =>
         return reject(new Error('Could not start Spotify login: ' + err.message));
     }
 
-    // Open the Spotify authorisation screen in a centred popup
+    // Clear any stale result from a previous attempt
+    localStorage.removeItem(LS_KEY);
+
+    // Open the Spotify authorisation screen
     const w = 480, h = 680;
     const left = Math.max(0, (window.screen.width  / 2) - (w / 2));
     const top  = Math.max(0, (window.screen.height / 2) - (h / 2));
@@ -76,51 +82,63 @@ export const connectSpotify = (userId) => new Promise(async (resolve, reject) =>
         return reject(new Error('Popup was blocked. Please allow popups for this site and try again.'));
     }
 
-    // BroadcastChannel handles mobile (new tab); postMessage handles desktop (popup)
-    let bc;
-    try {
-        bc = new BroadcastChannel('spotify-auth');
-        bc.onmessage = (event) => handleAuthMessage(event.data);
-    } catch (e) {
-        bc = null;
+    let settled = false;
+
+    function cleanup() {
+        window.removeEventListener('storage', onStorage);
+        clearInterval(pollClosed);
+        clearTimeout(timeout);
     }
 
-    function handleAuthMessage(data) {
-        if (data?.type !== 'SPOTIFY_AUTH') return;
+    function settle(ok, errorMsg) {
+        if (settled) return;
+        settled = true;
         cleanup();
-        if (data.ok) {
+        if (ok) {
             _connected = true;
             resolve();
         } else {
-            const msg = data.error === 'access_denied'
+            const msg = errorMsg === 'access_denied'
                 ? 'Spotify access was denied.'
-                : (data.error || 'Spotify connection failed.');
+                : (errorMsg || 'Spotify connection failed.');
             reject(new Error(msg));
         }
     }
 
-    const onMessage = (event) => {
-        if (event.origin !== window.location.origin) return;
-        handleAuthMessage(event.data);
-    };
+    // Primary: localStorage storage event — works across all tabs/platforms
+    function onStorage(event) {
+        if (event.key !== LS_KEY || !event.newValue) return;
+        try {
+            const data = JSON.parse(event.newValue);
+            if (!data?.type === 'SPOTIFY_AUTH') return;
+            if (Date.now() - data.ts > 30000) return; // ignore if stale
+            localStorage.removeItem(LS_KEY);
+            settle(data.ok, data.error);
+        } catch (e) {
+            // malformed — ignore
+        }
+    }
+    window.addEventListener('storage', onStorage);
 
-    // Only cancel on popup close for desktop — on mobile the "popup" is a tab
-    // and we rely on BroadcastChannel, so closure isn't a cancellation signal.
+    // Fallback: postMessage for desktop popup (opener relationship exists)
+    function onMessage(event) {
+        if (event.origin !== window.location.origin) return;
+        if (event.data?.type !== 'SPOTIFY_AUTH') return;
+        settle(event.data.ok, event.data.error);
+    }
+    window.addEventListener('message', onMessage);
+
+    // Cancel if the user closes the tab/popup without completing auth
     const pollClosed = setInterval(() => {
-        if (popup.closed && !bc) {
-            cleanup();
-            reject(new Error('Spotify login was cancelled.'));
+        if (popup.closed && !settled) {
+            settle(false, 'Spotify login was cancelled.');
         }
     }, 600);
 
-    function cleanup() {
-        clearInterval(pollClosed);
-        window.removeEventListener('message', onMessage);
-        if (bc) { bc.close(); bc = null; }
-    }
-
-    window.addEventListener('message', onMessage);
-
+    // Safety timeout — 5 minutes
+    const timeout = setTimeout(() => {
+        settle(false, 'Spotify login timed out.');
+    }, 5 * 60 * 1000);
 }); // closes connectSpotify Promise
 
 // ─── CONNECT BUTTON RENDERER ──────────────────────────────────────────────────
@@ -134,7 +152,6 @@ export const connectSpotify = (userId) => new Promise(async (resolve, reject) =>
  * @param {string}   userId     - Supabase user ID
  * @param {Function} onSuccess  - callback fired after successful connection
  */
-
 export const renderConnectPrompt = (btnId, userId, onSuccess) => {
     const el = document.getElementById(btnId);
     if (!el) return;
@@ -161,13 +178,11 @@ export const renderConnectPrompt = (btnId, userId, onSuccess) => {
         try {
             await connectSpotify(userId);
             window.showToast('Spotify connected! 🎧', 'success');
-            // Restore the original btn id so createGigReadyPlaylist can find and replace the element
             const connectEl = document.getElementById(promptId);
             if (connectEl) connectEl.id = btnId;
             onSuccess();
         } catch (err) {
             window.showToast(err.message, 'error');
-            // Restore the connect button so the user can try again
             const el2 = document.getElementById(promptId);
             if (el2) {
                 el2.innerHTML = '<i data-lucide="music-2" class="w-3.5 h-3.5" aria-hidden="true"></i> CONNECT SPOTIFY';

@@ -1,9 +1,8 @@
 /**
  * GigList Core Engine
- * v8.2.4 — 2026-09-08
+ * v8.2.5 — 2026-09-09
  * ------------------------------------------------------------------
- * ✅ Updated festival view in gig modal to only show bands the user specified as seeing
- * ✅ Enhanced editor UI for festivals to show a pick list of artists already logged by other users at that festival
+ * ✅ Bug fixes for spotify auth flow
  */
 
 import * as Data from './modules/data.js';
@@ -39,7 +38,7 @@ import { openPhotoCropModal } from './modules/photo-crop.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "8.2.4";
+const APP_VERSION = "8.2.5";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
