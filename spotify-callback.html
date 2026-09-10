@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <<meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Connecting Spotify…</title>
     <style>
         body {
@@ -51,9 +51,11 @@
     <div class="title" id="title">Connecting Spotify…</div>
     <div class="sub" id="sub">This window will close automatically.</div>
     <div class="spinner" id="spinner"></div>
+    <div style="font-size:0.6rem;opacity:0.2;margin-top:1rem;">v1.1.0</div>
 </div>
 
 <script>
+    const VERSION = '1.1.0';
     const WORKER = 'https://giglist-spotify.richard-lipscombe.workers.dev';
     const LS_KEY = 'spotify-auth-result';
 
