@@ -1,4 +1,4 @@
-import { parseDate } from './utils.js';
+import { parseDate, isFestivalRow, getOwnFestivalLineup, normalizeArtist } from './utils.js';
 
 // ─── CONSECUTIVE MONTHS STREAK ────────────────────────────────────────────────
 
@@ -514,9 +514,23 @@ export const renderBandBadges = (performanceData) => {
         return;
     }
 
-    const bandData = performanceData.filter(p =>
-        (p.Artist || p.Band || '').toLowerCase() === bandName.toLowerCase()
+    const journalByKey = new Map(
+        (window.journalData || []).map(g => [g['Journal Key'] || g['JournalKey'], g])
     );
+
+    const bandData = performanceData.filter(p => {
+        if ((p.Artist || p.Band || '').toLowerCase() !== bandName.toLowerCase()) return false;
+
+        // At a festival, performanceData is a pool shared with every other
+        // user who logged the same Journal Key — only count this show if
+        // this row's own attendee logged seeing the band (see utils.js).
+        const row = journalByKey.get(p['Journal Key']);
+        if (row && isFestivalRow(row)) {
+            const ownLineup = getOwnFestivalLineup(row);
+            if (ownLineup.size > 0 && !ownLineup.has(normalizeArtist(bandName))) return false;
+        }
+        return true;
+    });
 
     if (bandData.length === 0) {
         badgeContainer.innerHTML = `<p class="text-center py-10 text-slate-400 italic text-xs uppercase tracking-widest">No data for ${bandName}</p>`;

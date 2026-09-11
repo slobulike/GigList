@@ -1,6 +1,7 @@
 /**
  * GigList - Charts Module
  */
+import { isFestivalRow, getOwnFestivalLineup, scopeFestivalArtistMap, normalizeArtist } from './utils.js';
 
 let modalChartInstance      = null;
 let dashboardYearChart      = null;
@@ -295,7 +296,10 @@ export const renderTopBandsChart = (journalData, performanceData, canvasId, isMo
     journalData.forEach(g => {
         const key          = g['Journal Key'] || g['JournalKey'];
         const headlineBand = (g.Band || g.band || '').trim();
-        const perfArtists  = key ? perfArtistsByKey.get(key) : null;
+        // Scoped to this row's own Festival Lineups when it's a festival —
+        // otherwise perfArtistsByKey is a pool shared with every other user
+        // who logged the same festival Journal Key (see utils.js).
+        const perfArtists  = key ? scopeFestivalArtistMap(g, perfArtistsByKey.get(key) || new Map()) : null;
 
         if (perfArtists && perfArtists.size) {
             // Synced performance data exists for this show — trust it
@@ -427,18 +431,27 @@ export const renderTopSongsChart = (filteredJournal, canvasId, isModal = false) 
     const existingChart = Chart.getChart(ctx);
     if (existingChart) existingChart.destroy();
 
-    const currentKeys = new Set(
-        filteredJournal
-            .map(g => (g['Journal Key'] || g['JournalKey'] || "").toString().trim().toLowerCase())
-            .filter(k => k !== "")
-    );
+    const journalByKey = new Map();
+    filteredJournal.forEach(g => {
+        const k = (g['Journal Key'] || g['JournalKey'] || "").toString().trim().toLowerCase();
+        if (k) journalByKey.set(k, g);
+    });
 
     const EXCLUDED   = new Set(['nan', 'not_found', 'unknown', 'null', '']);
     const songCounts = {};
 
     (window.performanceData || []).forEach(perf => {
         const pKey = (perf['Journal Key'] || perf['JournalKey'] || "").toString().trim().toLowerCase();
-        if (!currentKeys.has(pKey)) return;
+        const row  = journalByKey.get(pKey);
+        if (!row) return;
+
+        // At a festival, performanceData is a pool shared with every other
+        // user who logged the same Journal Key — only count songs from acts
+        // this row's own attendee logged as seeing (see utils.js).
+        if (isFestivalRow(row)) {
+            const ownLineup = getOwnFestivalLineup(row);
+            if (ownLineup.size > 0 && !ownLineup.has(normalizeArtist(perf.Artist))) return;
+        }
 
         const setlistRaw = perf.Setlist || "";
         if (!setlistRaw || setlistRaw === "nan" || setlistRaw === "NOT_FOUND") return;
@@ -587,7 +600,8 @@ export const renderBandFrequencyChart = (journalData, performanceData, canvasId,
         const key          = g['Journal Key'] || g['JournalKey'];
         const dateStr       = g.Date;
         const headlineBand = (g.Band || g.band || '').trim();
-        const perfArtists  = key ? perfArtistsByKey.get(key) : null;
+        // Scoped to this row's own Festival Lineups — see renderTopBandsChart.
+        const perfArtists  = key ? scopeFestivalArtistMap(g, perfArtistsByKey.get(key) || new Map()) : null;
 
         if (perfArtists && perfArtists.size) {
             perfArtists.forEach(artist => addPoint(artist, dateStr));
@@ -740,7 +754,8 @@ export const renderHotList = (journalData, performanceData, containerId, isModal
     recentJournal.forEach(g => {
         const key          = g['Journal Key'] || g['JournalKey'];
         const headlineBand = (g.Band || g.band || '').trim();
-        const perfArtists  = key ? perfArtistsByKey.get(key) : null;
+        // Scoped to this row's own Festival Lineups — see renderTopBandsChart.
+        const perfArtists  = key ? scopeFestivalArtistMap(g, perfArtistsByKey.get(key) || new Map()) : null;
 
         if (perfArtists && perfArtists.size) {
             perfArtists.forEach(artist => addBand(artist));

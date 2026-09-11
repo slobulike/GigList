@@ -64,6 +64,69 @@ export const slugify = (text) => {
 };
 
 /**
+ * Normalizes an artist name for case/whitespace-insensitive comparison.
+ */
+export const normalizeArtist = (s) => (s || '').toLowerCase().trim().replace(/\s+/g, ' ');
+
+/**
+ * True if a journal row is a festival show. Accepts either the raw
+ * Supabase boolean (`row.festival`) or the CSV/export-style 'Y'/'N' string
+ * (`row['Festival?']`).
+ */
+export const isFestivalRow = (row) => {
+    const raw = row?.['Festival?'] ?? row?.festival;
+    return typeof raw === 'boolean' ? raw : (raw || '').toString().trim().toUpperCase().startsWith('Y');
+};
+
+/**
+ * The set of artists a festival row's own attendee logged as seeing, from
+ * its 'Festival Lineups' field (bands joined with '/', see editor.js).
+ * Also tolerates '|' as a separator for older/imported rows.
+ */
+export const getOwnFestivalLineup = (row) => {
+    const raw = row?.['Festival Lineups'] || row?.FestivalLineups || '';
+    return new Set(raw.split(/[/|]/).map(normalizeArtist).filter(Boolean));
+};
+
+/**
+ * Scopes a shared pool of synced performances down to a festival journal
+ * row's own lineup. `performanceData` is pooled across every user who
+ * logged the same festival Journal Key (see loadPerformances in data.js) —
+ * without this, every attendee sees the union of everyone's logged
+ * festival bands, not just the ones they personally recorded seeing.
+ *
+ * Non-festival rows are returned unfiltered (the headline/support acts are
+ * the same fact for every attendee, so there's nothing to scope). A
+ * festival row with no recorded lineup (e.g. a legacy row) also falls back
+ * to unfiltered, rather than silently filtering everything out.
+ *
+ * @param row    the journal row the performances are being scoped to
+ * @param perfs  array of performance-like objects to filter
+ * @param getArtist  extracts the artist name from one entry of `perfs`
+ */
+export const scopeFestivalPerformances = (row, perfs, getArtist = (p) => p.Artist || p.artist) => {
+    if (!isFestivalRow(row)) return perfs;
+    const ownLineup = getOwnFestivalLineup(row);
+    if (ownLineup.size === 0) return perfs;
+    return perfs.filter(p => ownLineup.has(normalizeArtist(getArtist(p))));
+};
+
+/**
+ * Same scoping as scopeFestivalPerformances, but for a Map<normalizedArtist,
+ * displayName> (the shape charts.js builds its per-show artist lookups in).
+ */
+export const scopeFestivalArtistMap = (row, artistMap) => {
+    if (!isFestivalRow(row)) return artistMap;
+    const ownLineup = getOwnFestivalLineup(row);
+    if (ownLineup.size === 0) return artistMap;
+    const scoped = new Map();
+    artistMap.forEach((display, key) => {
+        if (ownLineup.has(key)) scoped.set(key, display);
+    });
+    return scoped;
+};
+
+/**
  * Counts how many times a band appears in a dataset.
  * Note: ui.js filters to past-only before calling this for future carousel cards.
  */

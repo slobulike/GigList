@@ -25,8 +25,10 @@
  *
  * Social (Phase 2):
  *   buddy_together      — your show today's anniversary, buddy was there too
- *   buddy_on_this_day   — buddy had a show on today's date (you weren't there)
+ *   buddy_on_this_day   — buddy had a solo show this month, 5+ years ago
  *   buddy_venue_echo    — you + buddy played the same venue, different years
+ *   buddy_collection_together   — buddy has collection items for a band you've seen live
+ *   buddy_collection_this_month — buddy added a collection item this month, in a past year
  *
  * ─── SCORING REFERENCE ────────────────────────────────────────────────────────
  *
@@ -37,10 +39,12 @@
  *    80  buddy_on_this_day
  *    75  artist_story / artist_milestone (with anniversary bonus)
  *    65  artist_milestone (non-anniversary)
+ *    65  buddy_collection_together
  *    62  artist_first
  *    60  buddy_venue_echo
  *    58  artist_cities
  *    55  artist_era
+ *    55  buddy_collection_this_month
  *    52  venue_chapter
  *    50  season_flashback
  *    47  first_last (2 shows)
@@ -148,6 +152,57 @@ async function fetchBuddyJournals() {
 
     } catch (e) {
         console.warn('[Feed] buddy journal fetch exception:', e.message);
+        return {};
+    }
+}
+
+/**
+ * Fetches a lightweight subset of every buddy's collection in a single
+ * Supabase query. RLS already grants buddies read access to `collection_items`
+ * (same pattern as fetchBuddyJournals above, just a different table).
+ *
+ * Returns: { [userId]: [ { id, type, title, band_name, acquired_date, photos } ] }
+ *
+ * Stored on window._buddyCollectionItemsByUser so subsequent feed activations
+ * within the same session skip the network call.
+ */
+async function fetchBuddyCollectionItems() {
+    const buddies = window._following || [];
+    if (!buddies.length) return {};
+
+    if (window._buddyCollectionItemsByUser) return window._buddyCollectionItemsByUser;
+
+    const buddyIds = buddies.map(b => b.id);
+
+    try {
+        const { data, error } = await supabase
+            .from('collection_items')
+            .select('id, user_id, type, title, band_name, acquired_date, photos')
+            .in('user_id', buddyIds);
+
+        if (error) {
+            console.warn('[Feed] buddy collection fetch failed:', error.message);
+            return {};
+        }
+
+        const byUser = {};
+        for (const row of (data || [])) {
+            if (!byUser[row.user_id]) byUser[row.user_id] = [];
+            byUser[row.user_id].push({
+                id:            row.id,
+                type:          row.type,
+                title:         row.title,
+                band_name:     row.band_name,
+                acquired_date: row.acquired_date,
+                photos:        row.photos,
+            });
+        }
+
+        window._buddyCollectionItemsByUser = byUser;
+        return byUser;
+
+    } catch (e) {
+        console.warn('[Feed] buddy collection fetch exception:', e.message);
         return {};
     }
 }
@@ -523,10 +578,16 @@ function _formatAcquiredDate(raw) {
  * Three social card types, all built from buddy journal data already in memory
  * after fetchBuddyJournals() runs.
  *
- * buddy_together:     My on-this-day show where a buddy's journal key overlaps.
+ * buddy_together:     My on-this-day show where one or more buddies' journal
+ *                     keys overlap. One consolidated card per show, listing
+ *                     every attending buddy — not one card per buddy.
  *                     Uses window._buddyJournalKeys — zero extra DB work.
  *
- * buddy_on_this_day:  Buddy had a show on today's date; I wasn't there.
+ * buddy_on_this_day:  Buddy had a solo show in this calendar month, at least
+ *                     5 years ago. Matches the whole month rather than the
+ *                     exact day — exact-day anniversaries are rare, and this
+ *                     card exists to keep buddy content flowing frequently,
+ *                     not to mark a single date.
  *
  * buddy_venue_echo:   Same venue, same calendar month, different years.
  *                     "Same room, different night."
@@ -560,6 +621,47 @@ function buildBuddyCards(buddyJournalsByUser, myJournalData, buddyProfiles) {
     // selectCards() can suppress the plain on_this_day duplicate for the same show.
     const togetherKeys = new Set();
 
+    // ── BUDDY TOGETHER (one consolidated card per show, not per buddy) ────────
+    // My on-this-day anniversaries where one or more buddies were also there.
+    // A show with 5 buddies at it gets 1 card listing all 5, not 5 cards.
+    const myOnThisDay = myJournalData.filter(g => {
+        if (g.Date.split('/').length !== 3) return false;
+        const d = parseDate(g.Date);
+        return d && d < today &&
+               gigDay(g) === todayDay &&
+               gigMonth(g) === todayMonth &&
+               gigYear(g) < thisYear;
+    });
+
+    myOnThisDay.forEach(myGig => {
+        const key = myGig['Journal Key'];
+        const attendingBuddies = buddyProfiles.filter(b => (buddyJournalKeys[b.id] || new Set()).has(key));
+        if (!attendingBuddies.length) return;
+
+        togetherKeys.add(key);
+        const yearsAgo = thisYear - gigYear(myGig);
+        const names    = attendingBuddies.map(b => b.display_name || b.username || 'Your buddy');
+        const namesJoined = names.length <= 2
+            ? names.join(' and ')
+            : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+
+        cards.push({
+            type:        'buddy_together',
+            score:       95,
+            gig:         myGig,
+            allGigs:     [myGig],
+            buddies:     attendingBuddies,
+            buddy:       attendingBuddies[0],
+            buddyName:   namesJoined,
+            headline:    myGig.Band,
+            subline:     `${myGig.OfficialVenue} · ${myGig.Date}`,
+            eyebrow:     `You and ${namesJoined} were there`,
+            badge:       `${yearsAgo} Year${yearsAgo !== 1 ? 's' : ''} Ago`,
+            badgeColor:  'bg-rose-500',
+            journalKey:  `together_${key}`,
+        });
+    });
+
     buddyProfiles.forEach(buddy => {
         const buddyName    = buddy.display_name || buddy.username || 'Your buddy';
         const buddyGigs    = buddyJournalsByUser[buddy.id] || [];
@@ -567,49 +669,17 @@ function buildBuddyCards(buddyJournalsByUser, myJournalData, buddyProfiles) {
 
         if (!buddyGigs.length) return;
 
-        // ── BUDDY TOGETHER ─────────────────────────────────────────────────
-        // My on-this-day anniversaries where the buddy was also there.
-        const myOnThisDay = myJournalData.filter(g => {
-            if (g.Date.split('/').length !== 3) return false;
-            const d = parseDate(g.Date);
-            return d && d < today &&
-                   gigDay(g) === todayDay &&
-                   gigMonth(g) === todayMonth &&
-                   gigYear(g) < thisYear;
-        });
-
-        myOnThisDay.forEach(myGig => {
-            const key = myGig['Journal Key'];
-            if (!sharedKeySet.has(key)) return;
-
-            const yearsAgo = thisYear - gigYear(myGig);
-            togetherKeys.add(key);
-
-            cards.push({
-                type:        'buddy_together',
-                score:       95,
-                gig:         myGig,
-                allGigs:     [myGig],
-                buddy,
-                buddyName,
-                headline:    myGig.Band,
-                subline:     `${myGig.OfficialVenue} · ${myGig.Date}`,
-                eyebrow:     `You and ${buddyName} were there`,
-                badge:       `${yearsAgo} Year${yearsAgo !== 1 ? 's' : ''} Ago`,
-                badgeColor:  'bg-rose-500',
-                journalKey:  `together_${buddy.id}_${key}`,
-            });
-        });
-
         // ── BUDDY ON THIS DAY ──────────────────────────────────────────────
-        // Buddy had a show on today's date that I didn't share.
+        // Buddy had a show in this calendar month, at least 5 years ago,
+        // that I didn't share. Month-wide rather than exact-day so there's a
+        // much bigger candidate pool per buddy — this is meant to keep the
+        // feed full, not to mark a single anniversary date.
         const buddyOnThisDay = buddyGigs.filter(g => {
             if (!g.Date || g.Date.split('/').length !== 3) return false;
             const d = parseDate(g.Date);
             return d && d < today &&
-                   gigDay(g) === todayDay &&
                    gigMonth(g) === todayMonth &&
-                   gigYear(g) < thisYear &&
+                   gigYear(g) <= thisYear - 5 &&
                    !sharedKeySet.has(g['Journal Key']);
         }).sort((a, b) => gigYear(b) - gigYear(a));
 
@@ -625,8 +695,8 @@ function buildBuddyCards(buddyJournalsByUser, myJournalData, buddyProfiles) {
                 buddyName,
                 headline:    bg.Band,
                 subline:     `${bg.OfficialVenue} · ${bg.Date}`,
-                eyebrow:     `${buddyName} · ${yearsAgo} year${yearsAgo !== 1 ? 's' : ''} ago today`,
-                badge:       'On This Day',
+                eyebrow:     `${buddyName} · ${yearsAgo} year${yearsAgo !== 1 ? 's' : ''} ago this month`,
+                badge:       'Throwback',
                 badgeColor:  'bg-rose-400',
                 journalKey:  `buddy_otd_${buddy.id}_${bg['Journal Key']}`,
             });
@@ -691,6 +761,102 @@ function buildBuddyCards(buddyJournalsByUser, myJournalData, buddyProfiles) {
     // Expose the set of "claimed" on-this-day keys so selectCards() can filter
     // the plain duplicates.
     window._feedTogetherKeys = togetherKeys;
+
+    return cards;
+}
+
+/**
+ * Two social collection card types, built from buddy collection data already
+ * in memory after fetchBuddyCollectionItems() runs. Mirrors the personal
+ * collection_band_story / collection_this_month logic, but cross-referenced
+ * against a buddy's collection instead of your own.
+ *
+ * buddy_collection_together:   Buddy has collection items for a band you've
+ *                               also seen live — shared fandom discovery.
+ *
+ * buddy_collection_this_month: Buddy added something to their collection this
+ *                               calendar month, in a past year.
+ */
+function buildBuddyCollectionCards(buddyCollectionItemsByUser, myJournalData, buddyProfiles) {
+    if (!buddyProfiles?.length || !Object.keys(buddyCollectionItemsByUser).length) return [];
+
+    const today     = new Date();
+    today.setHours(0, 0, 0, 0);
+    const thisMonth = today.getMonth() + 1;
+    const thisYear  = today.getFullYear();
+    const monthName = today.toLocaleString('default', { month: 'long' });
+
+    const gigBands = new Set(myJournalData.map(g => (g.Band || '').toLowerCase()));
+    const cards    = [];
+
+    buddyProfiles.forEach(buddy => {
+        const buddyName  = buddy.display_name || buddy.username || 'Your buddy';
+        const buddyItems = buddyCollectionItemsByUser[buddy.id] || [];
+        if (!buddyItems.length) return;
+
+        // ── BUDDY COLLECTION TOGETHER ────────────────────────────────────────
+        // Buddy owns collection items for a band you've also seen live.
+        const bandCounts = {};
+        buddyItems.forEach(item => {
+            if (!item.band_name) return;
+            bandCounts[item.band_name] = (bandCounts[item.band_name] || 0) + 1;
+        });
+
+        const crossoverBands = Object.entries(bandCounts)
+            .filter(([name]) => gigBands.has(name.toLowerCase()))
+            .sort((a, b) => b[1] - a[1]);
+
+        if (crossoverBands.length > 0) {
+            const [bandName, itemCount] = crossoverBands[0];
+            const bandItems = buddyItems.filter(i =>
+                (i.band_name || '').toLowerCase() === bandName.toLowerCase()
+            );
+
+            cards.push({
+                type:           'buddy_collection_together',
+                score:          65,
+                collectionItem: bandItems[0],
+                allItems:       bandItems,
+                buddy,
+                buddyName,
+                headline:       bandName,
+                subline:        `${buddyName} has ${itemCount} item${itemCount !== 1 ? 's' : ''} in their collection`,
+                eyebrow:        `${buddyName} · shared fandom`,
+                badge:          `${itemCount} Item${itemCount !== 1 ? 's' : ''}`,
+                badgeColor:     'bg-indigo-400',
+                journalKey:     `col_together_${buddy.id}_${bandName.replace(/[^a-z0-9]/gi, '_')}`,
+            });
+        }
+
+        // ── BUDDY COLLECTION THIS MONTH ──────────────────────────────────────
+        // Buddy acquired something this calendar month, in a past year.
+        const thisMonthItems = buddyItems.filter(item => {
+            if (!item.acquired_date) return false;
+            const parts = item.acquired_date.split('-');
+            return parseInt(parts[1] || '0', 10) === thisMonth &&
+                   parseInt(parts[0], 10) < thisYear;
+        }).sort((a, b) => (b.acquired_date || '').localeCompare(a.acquired_date || ''));
+
+        if (thisMonthItems.length > 0) {
+            const featured = thisMonthItems[0];
+            const yearsAgo = thisYear - parseInt(featured.acquired_date.split('-')[0], 10);
+
+            cards.push({
+                type:           'buddy_collection_this_month',
+                score:          55,
+                collectionItem: featured,
+                allItems:       thisMonthItems,
+                buddy,
+                buddyName,
+                headline:       featured.title,
+                subline:        `${featured.band_name ? featured.band_name + ' · ' : ''}${buddyName} added ${_formatAcquiredDate(featured.acquired_date)}`,
+                eyebrow:        `${buddyName} · ${yearsAgo} year${yearsAgo !== 1 ? 's' : ''} ago this month`,
+                badge:          `${monthName} Pick`,
+                badgeColor:     'bg-amber-400',
+                journalKey:     `col_buddy_month_${buddy.id}_${featured.id}`,
+            });
+        }
+    });
 
     return cards;
 }
@@ -808,22 +974,58 @@ async function resolveCollectionHeroImage(item, imgEl, cardIndex) {
 /**
  * Renders a tiny inline avatar + name pill for the card eyebrow.
  * Falls back to initials if the avatar URL fails to load.
+ *
+ * Accepts either a single buddy or an array of buddies (buddy_together cards
+ * with multiple attendees) — arrays render as a stacked, overlapping group
+ * capped at 3 visible avatars plus a "+N" overflow badge.
  */
-function buddyAvatarPill(buddy) {
-    if (!buddy) return '';
-    const name     = buddy.display_name || buddy.username || '';
-    const initials = name.slice(0, 2).toUpperCase();
-    const imgTag   = buddy.avatar_url
-        ? `<img src="${buddy.avatar_url}"
-                alt="${name}"
-                class="w-5 h-5 rounded-full object-cover flex-shrink-0"
-                onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+function buddyAvatarPill(buddyOrBuddies) {
+    const buddies = (Array.isArray(buddyOrBuddies) ? buddyOrBuddies : [buddyOrBuddies]).filter(Boolean);
+    if (!buddies.length) return '';
+
+    const visible  = buddies.slice(0, 3);
+    const overflow = buddies.length - visible.length;
+    const stacked   = buddies.length > 1;
+
+    const avatarHtml = visible.map((buddy, i) => {
+        const name     = buddy.display_name || buddy.username || '';
+        const initials = name.slice(0, 2).toUpperCase();
+        const ringClass = stacked ? 'ring-2 ring-slate-900' : '';
+        const imgTag   = buddy.avatar_url
+            ? `<img src="${buddy.avatar_url}"
+                    alt="${name}"
+                    class="w-5 h-5 rounded-full object-cover flex-shrink-0 ${ringClass}"
+                    onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+            : '';
+        const fallback = `<span class="w-5 h-5 rounded-full bg-indigo-200 text-indigo-700 text-[8px] font-black
+                               flex items-center justify-center flex-shrink-0 ${ringClass}
+                               ${buddy.avatar_url ? 'hidden' : ''}">${initials}</span>`;
+        return `<span class="inline-flex ${stacked && i > 0 ? '-ml-2' : ''}">${imgTag}${fallback}</span>`;
+    }).join('');
+
+    const overflowHtml = overflow > 0
+        ? `<span class="w-5 h-5 rounded-full bg-slate-700 text-white text-[8px] font-black
+                   flex items-center justify-center flex-shrink-0 ring-2 ring-slate-900 -ml-2">+${overflow}</span>`
         : '';
-    const fallback = `<span class="w-5 h-5 rounded-full bg-indigo-200 text-indigo-700 text-[8px] font-black
-                           flex items-center justify-center flex-shrink-0
-                           ${buddy.avatar_url ? 'hidden' : ''}">${initials}</span>`;
-    return `<span class="inline-flex items-center gap-1 mr-1">${imgTag}${fallback}</span>`;
+
+    return `<span class="inline-flex items-center mr-1.5">${avatarHtml}${overflowHtml}</span>`;
 }
+
+// ─── BUDDY COLLECTION NAVIGATION ──────────────────────────────────────────────
+
+/**
+ * Tap target for buddy_collection_together / buddy_collection_this_month
+ * cards. There's no read-only single-item viewer for a buddy's collection
+ * item, so instead of trying to build one, this reuses the existing buddy
+ * drill-in panel and jumps straight to its Collection tab.
+ */
+window._feedOpenBuddyCollection = (buddyId, buddyName) => {
+    if (!buddyId || typeof window.openBuddyDrillIn !== 'function') return;
+    window.openBuddyDrillIn(buddyId, buddyName);
+    if (typeof window._buddySwitchTab === 'function') {
+        window._buddySwitchTab('collection');
+    }
+};
 
 // ─── RENDERING ────────────────────────────────────────────────────────────────
 
@@ -858,6 +1060,13 @@ const EXPANDABLE_TYPES = new Set([
 // Social card types — rendered with a coloured top border + buddy avatar
 const SOCIAL_TYPES = new Set([
     'buddy_together', 'buddy_on_this_day', 'buddy_venue_echo',
+    'buddy_collection_together', 'buddy_collection_this_month',
+]);
+
+// Buddy collection cards tap through to the buddy's drill-in Collection tab
+// rather than the gig modal — they have no journalKey gig to open.
+const BUDDY_COLLECTION_TYPES = new Set([
+    'buddy_collection_together', 'buddy_collection_this_month',
 ]);
 
 // ─── CARD TEMPLATE ────────────────────────────────────────────────────────────
@@ -871,34 +1080,42 @@ function renderCard(card, index) {
     const isSocial  = SOCIAL_TYPES.has(card.type);
 
     // Social cards get the buddy avatar woven into the eyebrow
-    const eyebrowHtml = isSocial && card.buddy
+    const eyebrowHtml = isSocial && (card.buddies?.length || card.buddy)
         ? `<span class="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-white/60 mb-2">
-               ${buddyAvatarPill(card.buddy)}${card.eyebrow}
+               ${buddyAvatarPill(card.buddies || card.buddy)}${card.eyebrow}
            </span>`
         : `<span class="text-[9px] font-black uppercase tracking-widest text-white/60 mb-2 block">
                ${card.eyebrow}
            </span>`;
 
     // Top accent stripe colour for social cards
-    const socialStripeClass = card.type === 'buddy_venue_echo'
-        ? 'bg-cyan-500'
-        : 'bg-rose-500';
+    const socialStripeClass =
+        card.type === 'buddy_venue_echo'            ? 'bg-cyan-500'  :
+        card.type === 'buddy_collection_together'   ? 'bg-indigo-400' :
+        card.type === 'buddy_collection_this_month' ? 'bg-amber-400'  :
+                                                        'bg-rose-500';
 
     // Primary tap action
     const primaryAction = hasDetail
         ? `window._feedToggleDetail('${safeKey}', '${card.type}')`
         : `window.viewGigDetails('${(card.journalKey || '').replace(/'/g, "\\'")}')`;
 
-    // For social cards the tap opens the gig modal (read-only for buddy cards)
+    // For gig-based social cards the tap opens the gig modal (read-only for buddy cards).
+    // Buddy collection cards have no gig — they open the buddy's Collection tab instead.
     const socialAction = `window.viewGigDetails('${(card.gig?.['Journal Key'] || '').replace(/'/g, "\\'")}')`;
+    const buddyCollectionAction = `window._feedOpenBuddyCollection('${card.buddy?.id || ''}', '${(card.buddyName || '').replace(/'/g, "\\'")}')`;
 
-    const tapAction = isSocial ? socialAction : primaryAction;
+    const tapAction = BUDDY_COLLECTION_TYPES.has(card.type)
+        ? buddyCollectionAction
+        : (isSocial ? socialAction : primaryAction);
 
     // CTA label
     const ctaLabel = (() => {
         if (card.type === 'buddy_together')    return 'View your show';
         if (card.type === 'buddy_on_this_day') return `See ${card.buddyName}'s show`;
         if (card.type === 'buddy_venue_echo')  return 'View your show';
+        if (card.type === 'buddy_collection_together')   return `See ${card.buddyName}'s collection`;
+        if (card.type === 'buddy_collection_this_month') return `See ${card.buddyName}'s collection`;
         if (card.type === 'season_flashback')  return `See all ${card.allGigs?.length} shows`;
         if (card.type === 'venue_chapter')     return `See all ${card.allGigs?.length} visits`;
         if (card.type === 'collection_band_story') return `See ${card.allItems?.length} item${card.allItems?.length !== 1 ? 's' : ''}`;
@@ -1242,14 +1459,16 @@ window._openFeedGame = (gameType) => {
  * Called when the Feed tab is activated.
  *
  * Fetch order:
- *   1. Collection items  — Supabase, own user
- *   2. Buddy journals    — Supabase, all buddies, 5 fields only
+ *   1. Collection items       — Supabase, own user
+ *   2. Buddy journals         — Supabase, all buddies, 5 fields only
+ *   2b. Buddy collection items — Supabase, all buddies, 6 fields only
  *   3. Build + score all card types
  *   4. Seeded selection
  *   5. Render + async image resolution
  *
  * SessionStorage cache key includes date + journal length + collection count +
- * buddy count so it invalidates correctly when any data set changes.
+ * buddy count + buddy collection item count so it invalidates correctly when
+ * any data set changes.
  */
 export async function init(journalData, performanceData, _ignored = []) {
     const container = document.getElementById('feed-cards-container');
@@ -1271,12 +1490,14 @@ export async function init(journalData, performanceData, _ignored = []) {
     }
     window._collectionItems = collectionItems;
 
-    // 2. Buddy journals
-    const buddyJournalsByUser = await fetchBuddyJournals();
-    const buddyProfiles       = window._following || [];
+    // 2. Buddy journals + buddy collections
+    const buddyJournalsByUser        = await fetchBuddyJournals();
+    const buddyCollectionItemsByUser = await fetchBuddyCollectionItems();
+    const buddyProfiles              = window._following || [];
 
     // 3. Cache check
-    const cacheKey   = `giglist_feed_${new Date().toDateString()}_j${journalData.length}_c${collectionItems.length}_b${buddyProfiles.length}`;
+    const buddyCollectionCount = Object.values(buddyCollectionItemsByUser).reduce((n, items) => n + items.length, 0);
+    const cacheKey   = `giglist_feed_${new Date().toDateString()}_j${journalData.length}_c${collectionItems.length}_b${buddyProfiles.length}_bc${buddyCollectionCount}`;
     const cachedHtml = sessionStorage.getItem(cacheKey);
     const cachedJson = sessionStorage.getItem(`${cacheKey}_cards`);
 
@@ -1297,7 +1518,10 @@ export async function init(journalData, performanceData, _ignored = []) {
     // 4. Build all card pools
     const gigCards   = buildCards(journalData, performanceData);
     const colCards   = buildCollectionCards(collectionItems, journalData);
-    const buddyCards = buildBuddyCards(buddyJournalsByUser, journalData, buddyProfiles);
+    const buddyCards = [
+        ...buildBuddyCards(buddyJournalsByUser, journalData, buddyProfiles),
+        ...buildBuddyCollectionCards(buddyCollectionItemsByUser, journalData, buddyProfiles),
+    ];
     const scored     = selectCards(gigCards, colCards, buddyCards);
 
     // Inject tip_discovery cards — at most 2 per render, after pinned content

@@ -1,7 +1,7 @@
 /**
  * GigList - Data Module
  */
-import { parseDate } from './utils.js';
+import { parseDate, isFestivalRow, getOwnFestivalLineup, normalizeArtist, scopeFestivalPerformances } from './utils.js';
 import { supabase } from './supabase.js';
 
 /**
@@ -385,8 +385,8 @@ export const getUniqueSongCount = (filteredGigs) => {
 
     const currentArtist = (window.currentArtist || '').toLowerCase();
 
-    const activeKeys = new Set(
-        filteredGigs.map(g => (g['Journal Key'] || g['JournalKey'] || "").trim())
+    const gigsByKey = new Map(
+        filteredGigs.map(g => [(g['Journal Key'] || g['JournalKey'] || "").trim(), g])
     );
 
     const uniqueSongs = new Set();
@@ -394,15 +394,24 @@ export const getUniqueSongCount = (filteredGigs) => {
     perfs.forEach(perf => {
         const perfKey    = (perf['Journal Key'] || perf['JournalKey'] || "").trim();
         const perfArtist = (perf['Artist'] || perf['Band'] || "").toLowerCase();
+        const row        = gigsByKey.get(perfKey);
 
-        if (activeKeys.has(perfKey) && perfArtist === currentArtist) {
-            const setlistStr = perf['Setlist'] || "";
-            if (setlistStr) {
-                setlistStr.split('|').forEach(s => {
-                    const clean = s.trim();
-                    if (clean) uniqueSongs.add(clean);
-                });
-            }
+        if (!row || perfArtist !== currentArtist) return;
+
+        // At a festival, performanceData is a pool shared with every other
+        // user who logged the same Journal Key — only count this artist's
+        // songs if the row's own attendee logged seeing them (see utils.js).
+        if (isFestivalRow(row)) {
+            const ownLineup = getOwnFestivalLineup(row);
+            if (ownLineup.size > 0 && !ownLineup.has(normalizeArtist(perfArtist))) return;
+        }
+
+        const setlistStr = perf['Setlist'] || "";
+        if (setlistStr) {
+            setlistStr.split('|').forEach(s => {
+                const clean = s.trim();
+                if (clean) uniqueSongs.add(clean);
+            });
         }
     });
 
@@ -436,7 +445,11 @@ export const filterGigs = (query, data, includeFuture = false) => {
         const lineup      = (row['Festival Lineups'] || "").toLowerCase();
         const notableSupp = (row['Notable Support'] || "").toLowerCase();
         const journalKey  = row['Journal Key'];
-        const perfsForKey = perfByKey.get(journalKey) || [];
+        // At a festival, perfByKey is pooled across every user who logged the
+        // same Journal Key — scope it to this row's own Festival Lineups so
+        // a search doesn't match on (or surface setlists from) a band another
+        // attendee saw but this row's own user didn't (see utils.js).
+        const perfsForKey = scopeFestivalPerformances(row, perfByKey.get(journalKey) || []);
 
         const hasSongMatch = q.length > 2 && perfsForKey.some(p =>
             (p['Setlist'] || "").toLowerCase().includes(q)
