@@ -288,9 +288,18 @@
 
     <!-- ── STATS VIEW ─────────────────────────────────────────────────── -->
     <section id="view-stats" class="view-section hidden space-y-4" role="region" aria-label="Stats" aria-hidden="true">
-        <div>
-            <h2 class="font-display text-5xl italic tracking-tight text-slate-900">Stats</h2>
-            <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-0.5">Your live music history, charted</p>
+        <div class="flex items-start justify-between gap-3">
+            <div>
+                <h2 class="font-display text-5xl italic tracking-tight text-slate-900">Stats</h2>
+                <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-0.5">Your live music history, charted</p>
+            </div>
+            <button onclick="window._statsOpenShare(window.journalData)"
+                    aria-label="Share your stats"
+                    class="flex-shrink-0 mt-1 w-11 h-11 flex items-center justify-center bg-white border border-slate-200 rounded-2xl text-slate-500 hover:border-indigo-400 hover:text-indigo-600 transition-all shadow-sm">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/>
+                </svg>
+            </button>
         </div>
 
         <div class="flex gap-2 items-center">
@@ -1720,6 +1729,7 @@
     import { initCollectionEditor, openCollectionEditor } from './js/modules/collection-editor.js';
     import { openCapture, closeCaptureModal, openAddShowFork } from './js/modules/capture.js';
     import { initWishlist } from './js/modules/wishlist.js';
+    import './js/modules/stats-share.js';
     initWishlist();
 window._initCollectionEditor = initCollectionEditor;
 window.openCollectionEditor  = openCollectionEditor;

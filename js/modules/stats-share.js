@@ -1,0 +1,618 @@
+/**
+ * GigList — Stats Share Module
+ * v1.1.0 — Sep 2026
+ *
+ * Generates a shareable 1080×1080 canvas stats card from the user's
+ * journal data. Two variants, named to match the existing achievement
+ * fan-type labels so the vocabulary stays consistent across the app:
+ *
+ *   • explorer — shows / venues / cities / countries + flag row, on top
+ *                of a static map render of the user's venues
+ *                (the Momento-passport competitor)
+ *   • devotee  — top artist, times seen, first show, on top of the
+ *                artist's Spotify image
+ *
+ * Background images are fetched through a small Cloudflare Worker
+ * (see static-map-worker.js) rather than the live Leaflet/OSM map,
+ * because OSM's tile servers don't send CORS headers — drawing them
+ * straight onto this canvas would taint it and break Save/Share the
+ * moment someone actually uses the button. See that file's header
+ * comment for the full explanation. MAP_WORKER_URL below needs to
+ * point at wherever that Worker ends up deployed.
+ *
+ * More variants (lifer, festivarian, etc.) can follow the same pattern
+ * later — deliberately kept to two for now while we test whether the
+ * feature earns its keep before investing further (e.g. the UK home
+ * nation flag split is parked until then — see countryToFlag in utils.js).
+ *
+ * Public API (window helpers), mirroring collection-collage.js:
+ *   window._statsOpenShare(journalData)   — open the modal
+ *   window._statsCloseShare()             — close and clean up
+ *   window._statsSetVariant(variant)      — switch variant, re-render
+ *   window._statsShareDownload()          — save PNG
+ *   window._statsShareShare()             — Web Share API
+ */
+
+import { buildBadgeDefs, deriveFanType } from './achievements.js';
+import { countryToFlag } from './utils.js';
+
+// ─── CONSTANTS ────────────────────────────────────────────────────────────────
+// Palette kept in sync with collection-collage.js so share images feel like
+// one family of assets rather than two competing visual styles.
+
+const CANVAS_SIZE  = 1080;
+const CANVAS_SCALE = 2;
+const GOLD         = '#c8a050';
+const DARK         = '#111008';
+const OFF_WHITE    = '#f0deb0';
+const FOOTER_H     = 96;
+
+const VARIANTS = ['explorer', 'devotee'];
+
+const MAP_WORKER_URL = 'https://static-map-worker.richard-lipscombe.workers.dev/';
+
+// ─── STATE ────────────────────────────────────────────────────────────────────
+
+let _modalEl       = null;
+let _canvasEl      = null;
+let _activeVariant = 'explorer';
+let _journalData   = [];
+let _cardStats     = null;              // computed once per open — see _computeCardStats
+let _bgImages      = { explorer: null, devotee: null };   // cached per open, null = not loaded / failed
+
+// ─── MODAL SCAFFOLD ───────────────────────────────────────────────────────────
+
+function _ensureModal() {
+    if (document.getElementById('stats-share-modal')) return;
+
+    const el = document.createElement('div');
+    el.id = 'stats-share-modal';
+    el.setAttribute('aria-modal', 'true');
+    el.setAttribute('role', 'dialog');
+    el.setAttribute('aria-label', 'Share your stats');
+
+    el.innerHTML = `
+        <style>
+            #stats-share-modal {
+                position: fixed;
+                inset: 0;
+                z-index: 500;
+                background: rgba(0,0,0,0.85);
+                backdrop-filter: blur(12px);
+                -webkit-backdrop-filter: blur(12px);
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: flex-end;
+                padding-bottom: env(safe-area-inset-bottom, 0px);
+                opacity: 0;
+                transition: opacity 0.25s ease;
+            }
+            #stats-share-modal.visible { opacity: 1; }
+            #stats-share-sheet {
+                background: #111008;
+                border-radius: 2rem 2rem 0 0;
+                width: 100%;
+                max-width: 28rem;
+                max-height: 92dvh;
+                overflow-y: auto;
+                overflow-x: hidden;
+                transform: translateY(40px);
+                transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+                padding-bottom: 2rem;
+            }
+            #stats-share-modal.visible #stats-share-sheet { transform: translateY(0); }
+            #stats-share-canvas-wrap {
+                margin: 0 1.25rem 1rem;
+                border-radius: 1rem;
+                overflow: hidden;
+                aspect-ratio: 1;
+                background: #000;
+                position: relative;
+                box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+            }
+            #stats-share-canvas { width: 100%; height: 100%; display: block; }
+            #stats-share-spinner {
+                position: absolute; inset: 0;
+                display: flex; align-items: center; justify-content: center;
+                background: #111008;
+                transition: opacity 0.3s ease;
+            }
+            #stats-share-spinner.hidden { opacity: 0; pointer-events: none; }
+            .stats-spinner-ring {
+                width: 36px; height: 36px;
+                border: 3px solid rgba(200,160,80,0.2);
+                border-top-color: #c8a050;
+                border-radius: 50%;
+                animation: stats-spin 0.8s linear infinite;
+            }
+            @keyframes stats-spin { to { transform: rotate(360deg); } }
+            .stats-variant-btn {
+                flex: 1;
+                padding: 0.5rem 0;
+                font-size: 10px;
+                font-weight: 900;
+                letter-spacing: 0.1em;
+                text-transform: uppercase;
+                border-radius: 0.625rem;
+                border: 1px solid transparent;
+                transition: all 0.15s ease;
+                cursor: pointer;
+                color: #6b7280;
+                background: transparent;
+            }
+            .stats-variant-btn.active {
+                background: rgba(200,160,80,0.15);
+                border-color: rgba(200,160,80,0.5);
+                color: #c8a050;
+            }
+            .stats-action-btn {
+                flex: 1;
+                display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+                padding: 0.875rem 0;
+                font-size: 11px;
+                font-weight: 900;
+                letter-spacing: 0.08em;
+                text-transform: uppercase;
+                border-radius: 1rem;
+                cursor: pointer;
+                border: none;
+                transition: all 0.15s ease;
+                -webkit-tap-highlight-color: transparent;
+            }
+            .stats-action-btn:active { transform: scale(0.97); }
+            .stats-action-btn.primary   { background: #c8a050; color: #111008; }
+            .stats-action-btn.secondary { background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.7); }
+            .stats-action-btn:disabled  { opacity: 0.4; pointer-events: none; }
+        </style>
+
+        <div id="stats-share-sheet" onclick="event.stopPropagation()">
+
+            <div style="padding: 1rem 1.25rem 0.75rem;">
+                <div style="width:2.25rem;height:0.25rem;background:rgba(255,255,255,0.15);border-radius:9999px;margin:0 auto;"></div>
+            </div>
+
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:0 1.25rem 1rem;">
+                <div>
+                    <p style="font-size:18px;font-weight:900;color:#fff;line-height:1.1;">Share your stats</p>
+                    <p style="font-size:10px;font-weight:700;color:rgba(255,255,255,0.4);margin-top:3px;text-transform:uppercase;letter-spacing:0.08em;">
+                        Pick a style
+                    </p>
+                </div>
+                <button onclick="window._statsCloseShare()"
+                        aria-label="Close"
+                        style="width:2.25rem;height:2.25rem;border-radius:0.75rem;background:rgba(255,255,255,0.08);
+                               border:none;color:rgba(255,255,255,0.5);cursor:pointer;display:flex;
+                               align-items:center;justify-content:center;font-size:16px;flex-shrink:0;">
+                    ✕
+                </button>
+            </div>
+
+            <div id="stats-share-canvas-wrap">
+                <canvas id="stats-share-canvas"
+                        width="${CANVAS_SIZE * CANVAS_SCALE}"
+                        height="${CANVAS_SIZE * CANVAS_SCALE}"></canvas>
+                <div id="stats-share-spinner">
+                    <div class="stats-spinner-ring"></div>
+                </div>
+            </div>
+
+            <div style="display:flex;gap:0.5rem;padding:0 1.25rem 1rem;">
+                <button class="stats-variant-btn active" id="stats-variant-explorer"
+                        onclick="window._statsSetVariant('explorer')">Explorer</button>
+                <button class="stats-variant-btn" id="stats-variant-devotee"
+                        onclick="window._statsSetVariant('devotee')">Devotee</button>
+            </div>
+
+            <div style="display:flex;gap:0.75rem;padding:0 1.25rem;">
+                <button id="stats-share-share-btn"
+                        class="stats-action-btn secondary"
+                        onclick="window._statsShareShare()"
+                        style="display:none;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/>
+                    </svg>
+                    Share
+                </button>
+                <button id="stats-share-download-btn"
+                        class="stats-action-btn primary"
+                        onclick="window._statsShareDownload()">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                    Save Image
+                </button>
+            </div>
+
+        </div>
+    `;
+
+    el.addEventListener('click', (e) => {
+        if (e.target === el) window._statsCloseShare();
+    });
+
+    document.body.appendChild(el);
+    _modalEl  = el;
+    _canvasEl = document.getElementById('stats-share-canvas');
+
+    if (navigator.share && navigator.canShare) {
+        document.getElementById('stats-share-share-btn').style.display = 'flex';
+    }
+}
+
+// ─── STATS COMPUTATION ────────────────────────────────────────────────────────
+
+/**
+ * Everything the two card variants need, computed once per open.
+ * Venue enrichment (country/city) mirrors the lookup pattern used in
+ * achievements.js's renderBandBadges — window.allVenues keyed by venue name.
+ *
+ * NOTE: renderMap() in ui.js reads lat/lng from window.venueLookup, while
+ * renderBandBadges() in achievements.js reads country from window.allVenues.
+ * This falls back across both in case they're not the same object — worth
+ * confirming with Rich whether these are actually two names for one lookup
+ * or genuinely separate, since duplicated venue lookups are an easy source
+ * of drift later.
+ */
+function _venueLookup() {
+    return window.venueLookup || window.allVenues || {};
+}
+
+function _computeCardStats(journalData) {
+    const { statsData } = buildBadgeDefs(journalData);   // totalGigs, topArtist, maxArtistShows, ...
+    const lookup = _venueLookup();
+
+    const citySet    = new Set();
+    const countrySet = new Set();
+    const venuePoints = new Map();   // venue name -> {lat, lng}, deduped
+
+    journalData.forEach(entry => {
+        const vName    = entry.OfficialVenue || entry.Venue || '';
+        const enriched = lookup[vName];
+        if (!enriched) return;
+
+        if (enriched.city) citySet.add(enriched.city);
+
+        // Use the nation field once populated, falling back to country —
+        // see utils.js countryToFlag for why (UK home-nation split, parked for now).
+        const countryKey = enriched.nation || enriched.country;
+        if (countryKey) countrySet.add(countryKey);
+
+        if (!isNaN(enriched.lat) && !isNaN(enriched.lng) && !venuePoints.has(vName)) {
+            venuePoints.set(vName, { lat: enriched.lat, lng: enriched.lng });
+        }
+    });
+
+    // First time the top artist was seen, for the Devotee card.
+    const topArtistShows = journalData
+        .filter(g => g.Band === statsData.topArtist)
+        .sort((a, b) => (new Date(a.Date.split('/').reverse().join('-'))) - (new Date(b.Date.split('/').reverse().join('-'))));
+    const firstTopArtistShow = topArtistShows[0] || null;
+    const topArtistSpotifyUrl = topArtistShows.find(g => g.SpotifyImageUrl)?.SpotifyImageUrl || null;
+
+    return {
+        totalGigs:       statsData.totalGigs,
+        uniqueVenues:    statsData.uniqueVenues,
+        uniqueCities:    citySet.size,
+        uniqueCountries: countrySet.size,
+        countries:       [...countrySet],
+        venuePoints:     [...venuePoints.values()],
+        topArtist:       statsData.topArtist,
+        maxArtistShows:  statsData.maxArtistShows,
+        firstTopArtistShow,
+        topArtistSpotifyUrl,
+    };
+}
+
+// ─── BACKGROUND IMAGE LOADING ─────────────────────────────────────────────────
+
+/**
+ * Load an image with crossOrigin='anonymous' so canvas can read it back
+ * for export. Resolves null on any failure — callers fall back to a flat
+ * background rather than breaking the card. Mirrors the same pattern
+ * collection-collage.js uses for collection photos.
+ */
+function _loadImage(url) {
+    return new Promise((resolve) => {
+        if (!url) { resolve(null); return; }
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload  = () => resolve(img);
+        img.onerror = () => resolve(null);
+        img.src = url;
+    });
+}
+
+async function _loadExplorerBackground(stats) {
+    if (_bgImages.explorer !== null) return _bgImages.explorer;
+    if (!stats.venuePoints.length || MAP_WORKER_URL.includes('REPLACE-ME')) {
+        _bgImages.explorer = false;   // false = "tried, nothing to show" (vs null = "not tried yet")
+        return false;
+    }
+
+    const markers = stats.venuePoints.map(p => `${p.lat},${p.lng}`).join('|');
+    const mapUrl  = `${MAP_WORKER_URL}?markers=${encodeURIComponent(markers)}&size=${CANVAS_SIZE}x${CANVAS_SIZE}`;
+
+    const img = await _loadImage(mapUrl);
+    _bgImages.explorer = img || false;
+    return _bgImages.explorer;
+}
+
+async function _loadDevoteeBackground(stats) {
+    if (_bgImages.devotee !== null) return _bgImages.devotee;
+    const img = await _loadImage(stats.topArtistSpotifyUrl);
+    _bgImages.devotee = img || false;
+    return _bgImages.devotee;
+}
+
+/**
+ * Cover-fit an image into the full canvas, then lay a dark scrim over it
+ * so the gold/off-white text on top stays legible regardless of what's
+ * in the photo. Same cover-fit math as collection-collage.js's photo tiles.
+ */
+function _drawCoverImage(ctx, img, size, s) {
+    const iw = img.naturalWidth, ih = img.naturalHeight;
+    const scale = Math.max(size / iw, size / ih);
+    const dw = iw * scale, dh = ih * scale;
+    const ox = (size - dw) / 2, oy = (size - dh) / 2;
+    ctx.drawImage(img, ox * s, oy * s, dw * s, dh * s);
+
+    const gradient = ctx.createLinearGradient(0, 0, 0, size * s);
+    gradient.addColorStop(0,   'rgba(17,16,8,0.55)');
+    gradient.addColorStop(0.5, 'rgba(17,16,8,0.72)');
+    gradient.addColorStop(1,   'rgba(17,16,8,0.92)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, size * s, size * s);
+}
+
+// ─── SHARED DRAW HELPERS ──────────────────────────────────────────────────────
+
+function _drawFooterBar(ctx, size, s, label) {
+    const fy = size - FOOTER_H;
+
+    ctx.fillStyle = DARK;
+    ctx.globalAlpha = 0.85;   // slightly transparent so a busy background still reads through
+    ctx.fillRect(0, fy * s, size * s, FOOTER_H * s);
+    ctx.globalAlpha = 1;
+
+    ctx.fillStyle = GOLD;
+    ctx.globalAlpha = 0.35;
+    ctx.fillRect(0, fy * s, size * s, 1.5 * s);
+    ctx.globalAlpha = 1;
+
+    const midY = fy + FOOTER_H / 2;
+
+    ctx.fillStyle    = GOLD;
+    ctx.font         = `900 ${22 * s}px 'Plus Jakarta Sans', sans-serif`;
+    ctx.textAlign    = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.letterSpacing = `${2 * s}px`;
+    ctx.fillText('GIGLIST', 28 * s, (midY - 11) * s);
+
+    ctx.fillStyle    = OFF_WHITE;
+    ctx.font         = `700 ${11 * s}px 'Plus Jakarta Sans', sans-serif`;
+    ctx.letterSpacing = `${1.5 * s}px`;
+    ctx.fillText(label.toUpperCase(), 28 * s, (midY + 13) * s);
+}
+
+function _drawFlatBackground(ctx, size, s) {
+    ctx.clearRect(0, 0, size * s, size * s);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, size * s, size * s);
+}
+
+// ─── VARIANT: EXPLORER ────────────────────────────────────────────────────────
+
+function _renderExplorer(ctx, size, s, stats) {
+    const contentH = size - FOOTER_H;
+    const padRight = size - 72; // Anchor x-position for right alignment
+
+    ctx.textAlign    = 'right';
+    ctx.textBaseline = 'alphabetic';
+
+    // --- Headline: Total Shows ---
+    ctx.fillStyle = OFF_WHITE;
+    ctx.font      = `900 ${220 * s}px 'Plus Jakarta Sans', sans-serif`;
+    ctx.fillText(String(stats.totalGigs), padRight * s, (contentH * 0.36) * s);
+
+    ctx.fillStyle     = GOLD;
+    ctx.font          = `800 ${32 * s}px 'Plus Jakarta Sans', sans-serif`;
+    ctx.letterSpacing = `${2.5 * s}px`;
+    ctx.fillText('SHOWS LOGGED', padRight * s, (contentH * 0.36 + 48) * s);
+
+    // --- Secondary Stats: Venues / Cities / Countries ---
+    // Scaled up values to balance visually against the main 220px total shows text
+    const statY = contentH * 0.60;
+    const cols  = [
+        { label: 'VENUES',    value: stats.uniqueVenues },
+        { label: 'CITIES',    value: stats.uniqueCities },
+        { label: 'COUNTRIES', value: stats.uniqueCountries },
+    ];
+
+    // Spread column centers back from the right margin
+    const colSpacing = 280;
+
+    cols.reverse().forEach((c, i) => {
+        const cx = padRight - (colSpacing * i);
+
+        ctx.fillStyle     = OFF_WHITE;
+        ctx.font          = `900 ${100 * s}px 'Plus Jakarta Sans', sans-serif`; // Increased to 100px
+        ctx.letterSpacing = '0px';
+        ctx.fillText(String(c.value), cx * s, statY * s);
+
+        ctx.fillStyle     = 'rgba(240,222,176,0.8)';
+        ctx.font          = `800 ${18 * s}px 'Plus Jakarta Sans', sans-serif`;
+        ctx.letterSpacing = `${1.5 * s}px`;
+        ctx.fillText(c.label, cx * s, (statY + 42) * s);
+    });
+
+    // --- Flag Row ---
+    const flags = stats.countries.map(countryToFlag).filter(Boolean).join('  ');
+    if (flags) {
+        ctx.font = `${96 * s}px serif`; // Extra large flag row aligned right
+        ctx.fillText(flags, padRight * s, (contentH * 0.84) * s);
+    }
+
+    _drawFooterBar(ctx, size, s, 'Explorer');
+}
+
+// ─── VARIANT: DEVOTEE ─────────────────────────────────────────────────────────
+
+function _renderDevotee(ctx, size, s, stats) {
+    const contentH = size - FOOTER_H;
+    const padRight = size - 72; // Anchor x-position for right alignment
+
+    ctx.textAlign    = 'right';
+    ctx.textBaseline = 'alphabetic';
+
+    // --- Subtitle Header ---
+    ctx.fillStyle     = GOLD;
+    ctx.font          = `800 ${28 * s}px 'Plus Jakarta Sans', sans-serif`;
+    ctx.letterSpacing = `${2.5 * s}px`;
+    ctx.fillText('MOST SEEN ARTIST', padRight * s, (contentH * 0.18) * s);
+
+    // --- Artist Name ---
+    let artistSize = 96;
+    ctx.font = `900 ${artistSize * s}px 'Plus Jakarta Sans', sans-serif`;
+    while (ctx.measureText(stats.topArtist || '').width > (size - 144) * s && artistSize > 44) {
+        artistSize -= 4;
+        ctx.font = `900 ${artistSize * s}px 'Plus Jakarta Sans', sans-serif`;
+    }
+    ctx.fillStyle     = OFF_WHITE;
+    ctx.letterSpacing = '0px';
+    ctx.fillText(stats.topArtist || '—', padRight * s, (contentH * 0.30) * s);
+
+    // --- Times Seen Stat ---
+    ctx.fillStyle     = OFF_WHITE;
+    ctx.font          = `900 ${220 * s}px 'Plus Jakarta Sans', sans-serif`; // Matched to Explorer's headline
+    ctx.fillText(String(stats.maxArtistShows), padRight * s, (contentH * 0.62) * s);
+
+    ctx.fillStyle     = GOLD;
+    ctx.font          = `800 ${32 * s}px 'Plus Jakarta Sans', sans-serif`;
+    ctx.letterSpacing = `${2.5 * s}px`;
+    ctx.fillText('TIMES SEEN', padRight * s, (contentH * 0.62 + 48) * s);
+
+    // --- First Seen Detail ---
+    if (stats.firstTopArtistShow) {
+        const venue = stats.firstTopArtistShow.OfficialVenue || stats.firstTopArtistShow.Venue || '';
+        const date  = stats.firstTopArtistShow.Date || '';
+        ctx.fillStyle     = 'rgba(240,222,176,0.85)';
+        ctx.font          = `600 ${24 * s}px 'Plus Jakarta Sans', sans-serif`;
+        ctx.letterSpacing = '0px';
+        ctx.fillText(`First seen ${date} — ${venue}`, padRight * s, (contentH * 0.84) * s);
+    }
+
+    _drawFooterBar(ctx, size, s, 'Devotee');
+}
+
+// ─── CORE RENDER ──────────────────────────────────────────────────────────────
+
+async function _render(variant) {
+    if (!_canvasEl || !_cardStats) return;
+
+    const s    = CANVAS_SCALE;
+    const ctx  = _canvasEl.getContext('2d');
+    const size = CANVAS_SIZE;
+
+    const bg = variant === 'devotee'
+        ? await _loadDevoteeBackground(_cardStats)
+        : await _loadExplorerBackground(_cardStats);
+
+    _drawFlatBackground(ctx, size, s);
+    if (bg) _drawCoverImage(ctx, bg, size, s);
+
+    if (variant === 'devotee') {
+        _renderDevotee(ctx, size, s, _cardStats);
+    } else {
+        _renderExplorer(ctx, size, s, _cardStats);
+    }
+
+    const spinner = document.getElementById('stats-share-spinner');
+    if (spinner) spinner.classList.add('hidden');
+}
+
+// ─── PUBLIC API ───────────────────────────────────────────────────────────────
+
+window._statsOpenShare = async (journalData) => {
+    _journalData = journalData || [];
+    _cardStats   = _computeCardStats(_journalData);
+    _bgImages    = { explorer: null, devotee: null };   // reset cache per open
+
+    const { groups, statsData } = buildBadgeDefs(_journalData);
+    const derived = deriveFanType(groups, statsData);
+    _activeVariant = (derived && VARIANTS.includes(derived.type)) ? derived.type : 'explorer';
+
+    _ensureModal();
+
+    VARIANTS.forEach(v => {
+        document.getElementById(`stats-variant-${v}`)?.classList.toggle('active', v === _activeVariant);
+    });
+
+    const spinner  = document.getElementById('stats-share-spinner');
+    const dlBtn    = document.getElementById('stats-share-download-btn');
+    const shareBtn = document.getElementById('stats-share-share-btn');
+    if (spinner)  spinner.classList.remove('hidden');
+    if (dlBtn)    dlBtn.disabled = true;
+    if (shareBtn) shareBtn.disabled = true;
+
+    const modal = document.getElementById('stats-share-modal');
+    modal.style.display = 'flex';
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => modal.classList.add('visible'));
+    });
+
+    await _render(_activeVariant);
+
+    if (dlBtn)    dlBtn.disabled = false;
+    if (shareBtn) shareBtn.disabled = false;
+};
+
+window._statsCloseShare = () => {
+    const modal = document.getElementById('stats-share-modal');
+    if (!modal) return;
+    modal.classList.remove('visible');
+    setTimeout(() => { modal.style.display = 'none'; }, 300);
+};
+
+window._statsSetVariant = (variant) => {
+    _activeVariant = variant;
+
+    VARIANTS.forEach(v => {
+        document.getElementById(`stats-variant-${v}`)?.classList.toggle('active', v === variant);
+    });
+
+    const spinner = document.getElementById('stats-share-spinner');
+    if (spinner) spinner.classList.remove('hidden');
+    _render(variant);
+};
+
+window._statsShareDownload = () => {
+    if (!_canvasEl) return;
+    const date  = new Date().toISOString().slice(0, 10);
+    const fname = `giglist-stats-${_activeVariant}-${date}.png`;
+
+    const link  = document.createElement('a');
+    link.download = fname;
+    link.href     = _canvasEl.toDataURL('image/png');
+    link.click();
+};
+
+window._statsShareShare = async () => {
+    if (!_canvasEl || !navigator.share) return;
+
+    try {
+        const blob = await new Promise(resolve => _canvasEl.toBlob(resolve, 'image/png'));
+        if (!blob) return;
+
+        const date = new Date().toISOString().slice(0, 10);
+        const file = new File([blob], `giglist-stats-${_activeVariant}-${date}.png`, { type: 'image/png' });
+
+        if (navigator.canShare({ files: [file] })) {
+            await navigator.share({ files: [file], title: 'My GigList stats' });
+        } else {
+            await navigator.share({ title: 'My GigList stats' });
+        }
+    } catch (e) {
+        if (e.name !== 'AbortError') console.warn('[StatsShare] share failed:', e.message);
+    }
+};

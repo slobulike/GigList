@@ -163,6 +163,51 @@ export const getGlobalSeenCount = (bandName, data) => {
 };
 
 /**
+ * Maps a country name, ISO 3166-1 alpha-2 code, or UK home nation
+ * ("England" / "Scotland" / "Wales" / "Northern Ireland") to its flag
+ * emoji. Home nations use their own literal flag glyphs (England/Scotland/
+ * Wales have dedicated Unicode tag-sequence flags; Northern Ireland has no
+ * standard flag emoji, so it falls back to the Union Jack) — these can't be
+ * derived from a 2-letter code the way ordinary country flags can.
+ * Falls back to '' if unrecognised, so callers can skip the flag rather
+ * than render a broken glyph.
+ */
+const HOME_NATION_FLAGS = {
+    'england':          '🏴󠁧󠁢󠁥󠁮󠁧󠁿',
+    'scotland':         '🏴󠁧󠁢󠁳󠁣󠁴󠁿',
+    'wales':            '🏴󠁧󠁢󠁷󠁬󠁳󠁿',
+    'northern ireland': '🇬🇧',
+};
+
+const COUNTRY_NAME_TO_ISO2 = {
+    'united states': 'US', 'usa': 'US', 'united states of america': 'US',
+    'united kingdom': 'GB', 'uk': 'GB', 'great britain': 'GB',
+    'canada': 'CA',
+    'ireland': 'IE', 'republic of ireland': 'IE',
+    'france': 'FR', 'germany': 'DE', 'spain': 'ES', 'italy': 'IT',
+    'netherlands': 'NL', 'belgium': 'BE', 'australia': 'AU',
+    'new zealand': 'NZ', 'japan': 'JP', 'sweden': 'SE', 'norway': 'NO',
+    'denmark': 'DK', 'portugal': 'PT', 'switzerland': 'CH', 'austria': 'AT',
+    'poland': 'PL', 'czech republic': 'CZ', 'czechia': 'CZ',
+    'india': 'IN',
+};
+
+export const countryToFlag = (country) => {
+    if (!country) return '';
+    const trimmed = country.trim();
+    const homeNation = HOME_NATION_FLAGS[trimmed.toLowerCase()];
+    if (homeNation) return homeNation;
+    const iso2 = /^[A-Za-z]{2}$/.test(trimmed)
+        ? trimmed.toUpperCase()
+        : COUNTRY_NAME_TO_ISO2[trimmed.toLowerCase()];
+    if (!iso2) return '';
+    return String.fromCodePoint(...[...iso2].map(c => 0x1F1E6 + c.charCodeAt(0) - 65));
+};
+
+/**
+ * Builds the image fallback chain for a gig:
+
+/**
  * Builds the image fallback chain for a gig:
  * 1. Personal scrapbook photo  2. Artist stock photo  3. Unsplash default
  */
