@@ -1,9 +1,9 @@
 /**
  * GigList Core Engine
- * v8.3.0 — 2026-09-11
+ * v8.3.1 — 2026-09-12
  * ------------------------------------------------------------------
- * ✅ Fixed filter for festival artists across all touch points (charts, achievements, data)
- * ✅ Enhanced feed to include additional cards for buddy collection items and single card for show cards with multiple buddies
+ * ✅ Security patches
+ * ✅ Fixed spotify playlist generation for future shows
  */
 
 import * as Data from './modules/data.js';
@@ -39,7 +39,7 @@ import { openPhotoCropModal } from './modules/photo-crop.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "8.3.0";
+const APP_VERSION = "8.3.1";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 

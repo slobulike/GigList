@@ -22,6 +22,7 @@
 
 import { supabase } from './supabase.js';
 import { enrichNewArtist } from './artist-enrichment.js';
+import { escapeHtml } from './utils.js';
 const PUSH_WORKER_URL = 'https://giglist-push.richard-lipscombe.workers.dev';
 
 // ─── STATE ────────────────────────────────────────────────────────────────────
@@ -80,7 +81,6 @@ const FORMAT_SUGGESTIONS = {
 
 const _get  = (id)        => document.getElementById(id)?.value?.trim() || '';
 const _val  = (id, v)     => { const el = document.getElementById(id); if (el) el.value = v; };
-const _esc  = (str)       => (str || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
 
 function _showError(msg) {
     const el = document.getElementById('col-editor-error');
@@ -124,8 +124,8 @@ function _renderLabels() {
     if (!container) return;
     container.innerHTML = _labels.map((l, i) => `
         <span class="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-700">
-            ${l}
-            <button type="button" onclick="window.colEditorRemoveLabel(${i})" aria-label="Remove label ${l}" class="hover:text-red-500 transition-colors leading-none">×</button>
+            ${escapeHtml(l)}
+            <button type="button" onclick="window.colEditorRemoveLabel(${i})" aria-label="Remove label ${escapeHtml(l)}" class="hover:text-red-500 transition-colors leading-none">×</button>
         </span>`).join('');
 }
 
@@ -150,15 +150,28 @@ function _wireLabelInput() {
 
             dropdown.innerHTML = [
                 ...matches.map(m => `<li class="px-4 py-2.5 text-sm font-bold text-slate-700 cursor-pointer hover:bg-amber-50 transition-colors"
-                                         onmousedown="event.preventDefault();window.colEditorAddLabel('${_esc(m)}')">${m}</li>`),
+                                         data-add-label="${escapeHtml(m)}">${escapeHtml(m)}</li>`),
                 addNew ? `<li class="px-4 py-2.5 text-sm font-bold text-amber-600 cursor-pointer hover:bg-amber-50 transition-colors"
-                              onmousedown="event.preventDefault();window.colEditorAddLabel('${_esc(input.value.trim())}')"
-                              >+ Add "${input.value.trim()}"</li>` : '',
+                              data-add-label="${escapeHtml(input.value.trim())}"
+                              >+ Add "${escapeHtml(input.value.trim())}"</li>` : '',
             ].join('');
 
             dropdown.classList.toggle('hidden', !matches.length && !addNew);
         }, 200);
     });
+
+    // One delegated listener for every dropdown item (label text comes from
+    // this user's saved labels, but those get shown to buddies elsewhere —
+    // treat as untrusted the same as any other stored field).
+    if (!dropdown._addLabelWired) {
+        dropdown._addLabelWired = true;
+        dropdown.addEventListener('mousedown', (e) => {
+            const li = e.target.closest('[data-add-label]');
+            if (!li) return;
+            e.preventDefault();
+            window.colEditorAddLabel(li.dataset.addLabel);
+        });
+    }
 
     input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && input.value.trim()) {
@@ -196,7 +209,7 @@ function _wireFormatSuggestions(subtype) {
             : opts.slice(0, 6);
         dropdown.innerHTML = matches.map(m =>
             `<li class="px-4 py-2.5 text-sm font-bold text-slate-700 cursor-pointer hover:bg-slate-50 transition-colors"
-                 onmousedown="event.preventDefault();document.getElementById('col-editor-format').value='${_esc(m)}';document.getElementById('col-editor-format-list').classList.add('hidden')">${m}</li>`
+                 onmousedown="event.preventDefault();document.getElementById('col-editor-format').value='${escapeHtml(m)}';document.getElementById('col-editor-format-list').classList.add('hidden')">${m}</li>`
         ).join('');
         dropdown.classList.toggle('hidden', !matches.length);
     });
@@ -205,7 +218,7 @@ function _wireFormatSuggestions(subtype) {
         if (!input.value) {
             dropdown.innerHTML = opts.slice(0, 6).map(m =>
                 `<li class="px-4 py-2.5 text-sm font-bold text-slate-700 cursor-pointer hover:bg-slate-50 transition-colors"
-                     onmousedown="event.preventDefault();document.getElementById('col-editor-format').value='${_esc(m)}';document.getElementById('col-editor-format-list').classList.add('hidden')">${m}</li>`
+                     onmousedown="event.preventDefault();document.getElementById('col-editor-format').value='${escapeHtml(m)}';document.getElementById('col-editor-format-list').classList.add('hidden')">${m}</li>`
             ).join('');
             dropdown.classList.toggle('hidden', !opts.length);
         }
@@ -233,7 +246,7 @@ function _wireConditionSuggestions() {
     const _show = (opts) => {
         dropdown.innerHTML = opts.map(m =>
             `<li class="px-4 py-2.5 text-sm font-bold text-slate-700 cursor-pointer hover:bg-slate-50 transition-colors"
-                 onmousedown="event.preventDefault();document.getElementById('col-editor-condition').value='${_esc(m)}';document.getElementById('col-editor-condition-list').classList.add('hidden')">${m}</li>`
+                 onmousedown="event.preventDefault();document.getElementById('col-editor-condition').value='${escapeHtml(m)}';document.getElementById('col-editor-condition-list').classList.add('hidden')">${m}</li>`
         ).join('');
         dropdown.classList.toggle('hidden', !opts.length);
     };
@@ -763,11 +776,11 @@ function _wireBandCombobox() {
     const _showDropdown = (matches) => {
         dropdown.innerHTML = [
             `<li class="px-4 py-2.5 text-sm font-bold text-slate-400 cursor-pointer hover:bg-slate-50 transition-colors italic"
-                 onmousedown="event.preventDefault();document.getElementById('col-editor-band-input').value='';document.getElementById('col-editor-band-dropdown').classList.add('hidden')">
+                 data-band-name="">
                  — No band —</li>`,
             ...matches.map(m =>
                 `<li class="px-4 py-2.5 text-sm font-bold text-slate-700 cursor-pointer hover:bg-amber-50 transition-colors"
-                     onmousedown="event.preventDefault();document.getElementById('col-editor-band-input').value='${_esc(m)}';document.getElementById('col-editor-band-dropdown').classList.add('hidden')">${m}</li>`
+                     data-band-name="${escapeHtml(m)}">${escapeHtml(m)}</li>`
             ),
         ].join('');
         if (matches.length > 0 || !input.value.trim()) {
@@ -776,6 +789,21 @@ function _wireBandCombobox() {
             dropdown.classList.add('hidden');
         }
     };
+
+    // One delegated listener — band names come from the shared `artists`
+    // table (Ticketmaster/setlist.fm sync, band-request approvals), so
+    // unlike the format/condition suggestion lists above this is real
+    // cross-user data and needs the same quote-safe handling as item titles.
+    if (!dropdown._bandSelectWired) {
+        dropdown._bandSelectWired = true;
+        dropdown.addEventListener('mousedown', (e) => {
+            const li = e.target.closest('[data-band-name]');
+            if (!li) return;
+            e.preventDefault();
+            input.value = li.dataset.bandName;
+            dropdown.classList.add('hidden');
+        });
+    }
 
     input.addEventListener('focus', () => {
         const q = input.value.trim().toLowerCase();

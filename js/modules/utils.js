@@ -64,6 +64,33 @@ export const slugify = (text) => {
 };
 
 /**
+ * Escapes HTML special characters so untrusted strings (item titles,
+ * usernames, band names, anything that came from a user, not just "the
+ * current user") can be safely interpolated into innerHTML template text.
+ *
+ * This is the ONE canonical HTML escaper for the app — collection.js,
+ * collection-editor.js, and onboarding.js each used to define their own
+ * local `_esc()`, and two of the three only escaped quote characters
+ * (fine for JS-string-literal contexts, not safe for HTML text/attributes).
+ * Import this instead of writing a new one.
+ *
+ * NOT sufficient by itself inside inline event-handler attributes like
+ * onclick="fn('${...}')" — that's a JS string literal nested inside an
+ * HTML attribute, and needs escaping for both layers. Prefer the
+ * data-attribute + delegated-listener pattern (see collection.js) over
+ * inline onclick handlers so this doesn't come up.
+ */
+export const escapeHtml = (val) => {
+    if (val == null) return '';
+    return String(val)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+};
+
+/**
  * Normalizes an artist name for case/whitespace-insensitive comparison.
  */
 export const normalizeArtist = (s) => (s || '').toLowerCase().trim().replace(/\s+/g, ' ');

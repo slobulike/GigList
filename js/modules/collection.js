@@ -24,6 +24,7 @@ import { supabase } from './supabase.js';
 import { updateRank } from './ui.js';
 import './collection-collage.js';
 import { renderEmptyStateTips } from './tip-nudges.js';
+import { escapeHtml } from './utils.js';
 
 // ─── STATE ────────────────────────────────────────────────────────────────────
 
@@ -85,10 +86,6 @@ function _hashColor(str) {
     let h = 0;
     for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) >>> 0;
     return SPINE_PALETTES[h % SPINE_PALETTES.length];
-}
-
-function _esc(str) {
-    return (str || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
 }
 
 function _yearsSpan(items) {
@@ -350,7 +347,7 @@ function _renderCurationStrip(items, containerId, activeKey) {
     if (!el) return;
     const chips = _buildCurationChips(items);
     el.innerHTML = chips.map(c => `
-        <button onclick="window._colSetCuration('${_esc(c.key)}')"
+        <button onclick="window._colSetCuration('${escapeHtml(c.key)}')"
                 class="col-curation-chip flex-shrink-0 text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-full border transition-all whitespace-nowrap
                        ${c.key === activeKey
                             ? 'bg-[#111008] border-[#c8a050] text-[#c8a050]'
@@ -404,7 +401,7 @@ function _renderShelfItem(item) {
     const heroUrl   = heroPath ? _signedUrlCache.get(heroPath) : null;
 
     const coverInner = heroUrl
-        ? `<img src="${heroUrl}" alt="${_esc(item.title)}"
+        ? `<img src="${heroUrl}" alt="${escapeHtml(item.title)}"
                 class="w-full h-full object-cover"
                 style="border-radius:${radius}"
                 onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`+
@@ -412,13 +409,13 @@ function _renderShelfItem(item) {
         : `<span style="font-size:22px">${icon}</span>`;
 
     return `
-        <div class="flex-shrink-0 cursor-pointer" style="width:${coverW}" onclick="window._colOpenItem('${_esc(item.id)}')">
+        <div class="flex-shrink-0 cursor-pointer" style="width:${coverW}" data-col-item-id="${escapeHtml(item.id)}">
             <div class="relative flex items-center justify-center overflow-hidden"
                  style="width:${coverW};height:${coverH};border-radius:${radius};background:${bg};">
                 ${coverInner}
                 ${hasStory}
             </div>
-            <p class="text-[11px] font-black text-slate-700 mt-1.5 leading-tight truncate" style="max-width:${coverW}">${item.title}</p>
+            <p class="text-[11px] font-black text-slate-700 mt-1.5 leading-tight truncate" style="max-width:${coverW}">${escapeHtml(item.title)}</p>
             <p class="text-[10px] text-slate-400 truncate" style="max-width:${coverW}">${item.item_date || ''}</p>
         </div>`;
 }
@@ -464,15 +461,15 @@ function _renderMemoryCard(item) {
         : (item.item_date ? item.item_date.slice(0, 4) : '');
     const preview = (item.body || '').slice(0, 120) + (item.body?.length > 120 ? '…' : '');
     return `
-        <div onclick="window._colOpenItem('${_esc(item.id)}')"
+        <div data-col-item-id="${escapeHtml(item.id)}"
              class="bg-white rounded-[1.5rem] border border-slate-100 shadow-sm p-4 cursor-pointer
                     border-l-4 hover:border-l-[#c8a050] transition-all active:scale-[0.99]"
              style="border-left-color:rgba(200,160,80,0.5)">
             ${dateLabel ? `<p class="text-[9px] font-black uppercase tracking-widest mb-1" style="color:#c8a050">${dateLabel}</p>` : ''}
-            <h3 class="text-sm font-black text-slate-800 leading-snug mb-1">${item.title}</h3>
-            ${preview ? `<p class="text-[11px] text-slate-500 leading-relaxed italic">${preview}</p>` : ''}
+            <h3 class="text-sm font-black text-slate-800 leading-snug mb-1">${escapeHtml(item.title)}</h3>
+            ${preview ? `<p class="text-[11px] text-slate-500 leading-relaxed italic">${escapeHtml(preview)}</p>` : ''}
             ${(item.labels || []).map(l =>
-                `<span class="inline-block text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full bg-slate-100 text-slate-400 mr-1 mt-2">${l}</span>`
+                `<span class="inline-block text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full bg-slate-100 text-slate-400 mr-1 mt-2">${escapeHtml(l)}</span>`
             ).join('')}
         </div>`;
 }
@@ -637,6 +634,9 @@ function _renderCollectionTab() {
     // Wire shelf swipe
     _initShelfSwipe();
 
+    // Wire item-open clicks (delegated — see _handleCollectionClick)
+    _wireCollectionClicks(container);
+
     if (window.lucide) lucide.createIcons();
 }
 
@@ -681,14 +681,14 @@ function _renderSpine(item) {
     const w = ['poster', 'magazine', 'book', 'tab_book'].includes(item.subtype) ? 14 : 18;
 
     return `
-        <div onclick="window._colOpenItem('${_esc(item.id)}')"
-             title="${item.title}"
+        <div data-col-item-id="${escapeHtml(item.id)}"
+             title="${escapeHtml(item.title)}"
              class="flex-shrink-0 rounded-sm cursor-pointer transition-transform hover:-translate-y-1 active:scale-95"
              style="height:120px;width:${w}px;background:${bg};">
             <span style="writing-mode:vertical-rl;transform:rotate(180deg);font-size:10px;font-weight:700;color:${text};
                          display:block;height:100%;padding:4px 2px;overflow:hidden;white-space:nowrap;
                          text-overflow:ellipsis;max-height:112px;letter-spacing:0.3px;">
-                ${item.title}
+                ${escapeHtml(item.title)}
             </span>
         </div>`;
 }
@@ -701,20 +701,20 @@ function _renderGridCard(item) {
     const heroUrl  = heroPath ? _signedUrlCache.get(heroPath) : null;
 
     const coverInner = heroUrl
-        ? `<img src="${heroUrl}" alt="${_esc(item.title)}"
+        ? `<img src="${heroUrl}" alt="${escapeHtml(item.title)}"
                 class="w-full h-full object-cover absolute inset-0"
                 onerror="this.style.display='none'">`
         : `<span class="text-3xl">${icon}</span>`;
 
     return `
-        <div onclick="window._colOpenItem('${_esc(item.id)}')"
+        <div data-col-item-id="${escapeHtml(item.id)}"
              class="bg-white rounded-[1.5rem] border border-slate-100 shadow-sm overflow-hidden cursor-pointer active:scale-[0.98] transition-all">
             <div class="w-full aspect-square flex items-center justify-center relative overflow-hidden" style="background:${bg}">
                 ${coverInner}
             </div>
             <div class="p-3">
-                <p class="text-[12px] font-black text-slate-800 truncate leading-tight">${item.title}</p>
-                <p class="text-[10px] text-slate-400 mt-0.5">${year}${item.format ? ' · ' + item.format : ''}</p>
+                <p class="text-[12px] font-black text-slate-800 truncate leading-tight">${escapeHtml(item.title)}</p>
+                <p class="text-[10px] text-slate-400 mt-0.5">${year}${item.format ? ' · ' + escapeHtml(item.format) : ''}</p>
                 ${item.body ? `<span class="inline-block text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full mt-2" style="background:rgba(200,160,80,0.12);color:#c8a050">Story</span>` : ''}
                 ${item.signed_by ? `<span class="inline-block text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full mt-2 ml-1 bg-slate-100 text-slate-400">Signed</span>` : ''}
             </div>
@@ -800,12 +800,12 @@ function _renderDrillDown(subtype) {
         <div class="flex gap-2 overflow-x-auto px-4 py-3 border-b border-slate-100" style="scrollbar-width:none">
             ${['all', 'has_story', 'signed', ...(subtype === 'all' ? [] : formats)].map(f => {
                 const flabel = f === 'all' ? 'All' : f === 'has_story' ? 'Has story' : f === 'signed' ? 'Signed' : f;
-                return `<button onclick="window._colSetDrillFilter('${_esc(f)}')"
+                return `<button data-col-drill-filter="${escapeHtml(f)}"
                                  class="flex-shrink-0 text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-full border transition-all whitespace-nowrap
                                         ${f === _drillFilter
                                             ? 'bg-[#111008] border-[#c8a050] text-[#c8a050]'
                                             : 'bg-white border-slate-200 text-slate-500'}">
-                            ${flabel}
+                            ${escapeHtml(flabel)}
                         </button>`;
             }).join('')}
         </div>
@@ -836,6 +836,9 @@ function _renderDrillDown(subtype) {
     panel.classList.remove('translate-x-full');
     panel.setAttribute('aria-hidden', 'false');
 
+    // Wire item-open / drill-filter clicks (delegated — see _handleCollectionClick)
+    _wireCollectionClicks(panel);
+
     if (window.lucide) lucide.createIcons();
 }
 
@@ -865,7 +868,7 @@ function _renderItemDetail(item) {
     ].filter(Boolean);
 
     const labelsHtml = (item.labels || []).map(l =>
-        `<span class="inline-block text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 mr-1">${l}</span>`
+        `<span class="inline-block text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 mr-1">${escapeHtml(l)}</span>`
     ).join('');
 
     // Tagged buddies — resolve names from _buddyOptions cache or show IDs
@@ -876,7 +879,7 @@ function _renderItemDetail(item) {
             const known = (window._buddyNamesCache || {})[uid];
             return `<span class="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700">
                 <span aria-hidden="true">👤</span>
-                <span data-buddy-id="${uid}">${known || '…'}</span>
+                <span data-buddy-id="${uid}">${known ? escapeHtml(known) : '…'}</span>
             </span>`;
         }).join('')
         : '';
@@ -892,7 +895,7 @@ const allPhotoUrls = (item.photos || []).map(p => _signedUrlCache.get(p)).filter
             <!-- Sticky handle + close bar — never scrolls -->
             <div class="flex-shrink-0 flex items-center justify-between px-5 pt-4 pb-3">
                 <span class="text-[11px] font-black uppercase tracking-widest text-slate-400">
-                    ${item.band_name || item.artist_context || typeLabel}
+                    ${escapeHtml(item.band_name || item.artist_context || typeLabel)}
                 </span>
                 <button onclick="window._colCloseItem()"
                         aria-label="Close"
@@ -908,10 +911,10 @@ const allPhotoUrls = (item.photos || []).map(p => _signedUrlCache.get(p)).filter
             <!-- Header: artwork + title + edit pencil -->
             <div class="flex gap-4 px-5 mb-4 items-start">
                 ${heroUrl ? `
-                    <button onclick="window._colOpenLightbox('${heroUrl.replace(/'/g,"\'")}', ${allPhotoUrls.length})"
+                    <button data-col-lightbox-url="${escapeHtml(heroUrl)}" data-col-lightbox-total="${allPhotoUrls.length}"
                             class="w-16 h-16 rounded-xl overflow-hidden flex-shrink-0 active:scale-95 transition-transform focus:outline-none"
                             aria-label="View photo">
-                        <img src="${heroUrl}" alt="${_esc(item.title)}" class="w-full h-full object-cover">
+                        <img src="${heroUrl}" alt="${escapeHtml(item.title)}" class="w-full h-full object-cover">
                     </button>
                 ` : `
                     <div class="w-16 h-16 rounded-xl flex items-center justify-center text-2xl flex-shrink-0"
@@ -919,13 +922,13 @@ const allPhotoUrls = (item.photos || []).map(p => _signedUrlCache.get(p)).filter
                 `}
 
                 <div class="flex-1 min-w-0">
-                    <h2 class="text-lg font-black text-slate-900 leading-tight">${item.title}</h2>
-                    <p class="text-[11px] text-slate-400 mt-0.5">${year}${item.label ? ' · ' + item.label : ''}</p>
+                    <h2 class="text-lg font-black text-slate-900 leading-tight">${escapeHtml(item.title)}</h2>
+                    <p class="text-[11px] text-slate-400 mt-0.5">${year}${item.label ? ' · ' + escapeHtml(item.label) : ''}</p>
                     <span class="inline-block text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full mt-1.5"
-                          style="background:rgba(200,160,80,0.12);color:#c8a050">${typeLabel}</span>
+                          style="background:rgba(200,160,80,0.12);color:#c8a050">${escapeHtml(typeLabel)}</span>
                 </div>
                 ${window.currentUser?.id === item.user_id ? `
-                <button onclick="window.openCollectionEditor(null, '${_esc(item.id)}')"
+                <button data-col-edit-id="${escapeHtml(item.id)}"
                         aria-label="Edit item"
                         class="flex-shrink-0 mt-1 w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center transition-all">
                     <i data-lucide="pencil" class="w-4 h-4" aria-hidden="true"></i>
@@ -938,7 +941,7 @@ const allPhotoUrls = (item.photos || []).map(p => _signedUrlCache.get(p)).filter
                 ${detailRows.map(r => `
                 <div class="flex justify-between py-2.5">
                     <span class="text-[11px] text-slate-400 font-bold">${r.label}</span>
-                    <span class="text-[12px] text-slate-800 font-bold text-right max-w-[60%]">${r.value}</span>
+                    <span class="text-[12px] text-slate-800 font-bold text-right max-w-[60%]">${escapeHtml(r.value)}</span>
                 </div>`).join('')}
             </div>` : ''}
 
@@ -947,7 +950,7 @@ const allPhotoUrls = (item.photos || []).map(p => _signedUrlCache.get(p)).filter
             <div class="mx-5 mb-4 p-4 rounded-2xl bg-amber-50 border border-amber-100"
                  style="border-left:3px solid rgba(200,160,80,0.5)">
                 <p class="text-[9px] font-black uppercase tracking-widest mb-2" style="color:#c8a050">The story</p>
-                <p class="text-[13px] text-slate-600 leading-relaxed italic">${item.body}</p>
+                <p class="text-[13px] text-slate-600 leading-relaxed italic">${escapeHtml(item.body)}</p>
             </div>` : ''}
 
             <!-- Labels -->
@@ -965,7 +968,7 @@ ${allPhotoUrls.length > 0 ? `
     ${allPhotoUrls.length > 1 ? `<p class="text-[9px] font-black uppercase tracking-widest mb-2 text-slate-400">Photos</p>` : ''}
     <div class="flex gap-2 overflow-x-auto pb-1" style="scrollbar-width:none">
         ${allPhotoUrls.map((url, i) => `
-            <button onclick="window._colOpenLightbox('${url.replace(/'/g,"\\'")}', ${allPhotoUrls.length})"
+            <button data-col-lightbox-url="${escapeHtml(url)}" data-col-lightbox-total="${allPhotoUrls.length}"
                     class="flex-shrink-0 w-24 h-24 rounded-xl overflow-hidden border border-slate-100 active:scale-95 transition-transform focus:outline-none focus:ring-2 focus:ring-amber-400"
                     aria-label="View photo ${i + 1}">
                 <img src="${url}" alt="Photo ${i + 1}" class="w-full h-full object-cover">
@@ -980,6 +983,14 @@ ${allPhotoUrls.length > 0 ? `
 
     sheet.classList.remove('translate-y-full');
     sheet.setAttribute('aria-hidden', 'false');
+
+    // Wire edit/lightbox clicks (delegated — see _handleCollectionClick).
+    // Attached to the inner card, not `sheet` itself: the inner card's own
+    // onclick="event.stopPropagation()" (used to keep backdrop-tap-to-close
+    // from firing on inner taps) would stop a listener on `sheet` from ever
+    // seeing these clicks. The inner card is rebuilt fresh every open, so
+    // no wired-guard is needed here (old node and its listener are discarded).
+    sheet.querySelector('.col-item-sheet-inner')?.addEventListener('click', _handleCollectionClick);
 
     if (window.lucide) lucide.createIcons();
 
@@ -1061,6 +1072,35 @@ window._colOpenLightbox = (url, _total) => {
     document.body.appendChild(lb);
     if (window.lucide) lucide.createIcons();
 };
+
+// ─── CLICK DELEGATION ────────────────────────────────────────────────────────
+// Item cards use data-col-*-id/url attributes + this one delegated listener
+// instead of onclick="fn('${...}')" strings, so a value with a quote in it
+// can't break out of an inline JS-string-in-HTML-attribute context.
+// Wire this once per persistent container (guarded) — see call sites below.
+
+function _handleCollectionClick(e) {
+    const openEl = e.target.closest('[data-col-item-id]');
+    if (openEl) { window._colOpenItem(openEl.dataset.colItemId); return; }
+
+    const editEl = e.target.closest('[data-col-edit-id]');
+    if (editEl) { window.openCollectionEditor(null, editEl.dataset.colEditId); return; }
+
+    const lightboxEl = e.target.closest('[data-col-lightbox-url]');
+    if (lightboxEl) {
+        window._colOpenLightbox(lightboxEl.dataset.colLightboxUrl, Number(lightboxEl.dataset.colLightboxTotal || 0));
+        return;
+    }
+
+    const filterEl = e.target.closest('[data-col-drill-filter]');
+    if (filterEl) { window._colSetDrillFilter(filterEl.dataset.colDrillFilter); return; }
+}
+
+function _wireCollectionClicks(root) {
+    if (!root || root._colClickWired) return;
+    root._colClickWired = true;
+    root.addEventListener('click', _handleCollectionClick);
+}
 
 // ─── WINDOW HELPERS ──────────────────────────────────────────────────────────
 
@@ -1344,10 +1384,10 @@ async function _renderBuddyCollection(userId, container) {
                     <div class="w-[72px] h-[72px] flex items-center justify-center overflow-hidden text-xl"
                          style="background:${bg};border-radius:${isRound ? '50%' : '8px'}">
                         ${heroUrl
-                            ? `<img src="${heroUrl}" alt="${_esc(item.title)}" class="w-full h-full object-cover" style="border-radius:${isRound ? '50%' : '8px'}">`
+                            ? `<img src="${heroUrl}" alt="${escapeHtml(item.title)}" class="w-full h-full object-cover" style="border-radius:${isRound ? '50%' : '8px'}">`
                             : icon}
                     </div>
-                    <p class="text-[9px] font-bold text-slate-600 mt-1 leading-tight truncate">${item.title}</p>
+                    <p class="text-[9px] font-bold text-slate-600 mt-1 leading-tight truncate">${escapeHtml(item.title)}</p>
                 </div>`;
         }).join('');
 
@@ -1378,7 +1418,7 @@ async function _renderBuddyCollection(userId, container) {
                     <div class="bg-white rounded-[1.5rem] border border-slate-100 shadow-sm p-4 border-l-4"
                          style="border-left-color:rgba(200,160,80,0.5)">
                         ${year ? `<p class="text-[9px] font-black uppercase tracking-widest mb-0.5" style="color:#c8a050">${year}</p>` : ''}
-                        <p class="text-sm font-black text-slate-800">${item.title}</p>
+                        <p class="text-sm font-black text-slate-800">${escapeHtml(item.title)}</p>
                     </div>`;
                 }).join('')}
                 ${memories.length > 5 ? `<p class="text-[10px] text-slate-400 text-center">+${memories.length - 5} more memories</p>` : ''}

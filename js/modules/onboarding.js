@@ -33,6 +33,7 @@
  */
 
 import { supabase } from './supabase.js';
+import { escapeHtml } from './utils.js';
 
 // ─── A) NEW USER ONBOARDING ───────────────────────────────────────────────────
 
@@ -107,19 +108,19 @@ function renderClaimPanel(currentUser, matches) {
 
         return `
         <div class="flex items-start gap-3 py-2.5 border-b border-slate-100 last:border-0"
-             data-key="${_esc(row.journal_key)}">
+             data-key="${escapeHtml(row.journal_key)}">
             <input type="checkbox" checked
-                   id="claim-${_esc(row.journal_key)}"
+                   id="claim-${escapeHtml(row.journal_key)}"
                    class="mt-1 w-4 h-4 rounded accent-indigo-600 flex-shrink-0 cursor-pointer">
-            <label for="claim-${_esc(row.journal_key)}" class="flex-1 min-w-0 cursor-pointer">
-                <span class="block text-sm font-black text-slate-900 truncate">${_esc(displayBand)}</span>
+            <label for="claim-${escapeHtml(row.journal_key)}" class="flex-1 min-w-0 cursor-pointer">
+                <span class="block text-sm font-black text-slate-900 truncate">${escapeHtml(displayBand)}</span>
                 <span class="block text-[10px] text-slate-400 font-bold mt-0.5 truncate">
-                    ${_esc(row.date)} · ${_esc(row.official_venue)}
+                    ${escapeHtml(row.date)} · ${escapeHtml(row.official_venue)}
                 </span>
-                ${subline ? `<span class="block text-[10px] text-indigo-400 font-bold truncate">${_esc(subline)}</span>` : ''}
+                ${subline ? `<span class="block text-[10px] text-indigo-400 font-bold truncate">${escapeHtml(subline)}</span>` : ''}
             </label>
             <span class="text-[9px] font-black text-slate-300 uppercase tracking-widest flex-shrink-0 pt-1 text-right">
-                via ${_esc(viaLabel)}
+                via ${escapeHtml(viaLabel)}
             </span>
         </div>`;
     }).join('');
@@ -361,30 +362,49 @@ function _renderCompanionTagsBanner(matches, currentUser) {
 
     list.innerHTML = matches.map(m => {
         const declineLabel = _isFutureShow(m.date) ? 'Not going' : "Didn't go";
-        const journalKeyJs = _esc(m.journal_key).replace(/'/g, "\\'");
 
         return `
         <div class="flex items-start justify-between gap-3 py-2 border-b border-slate-100 last:border-0"
-             data-journal-key="${_esc(m.journal_key)}">
+             data-journal-key="${escapeHtml(m.journal_key)}">
             <div class="flex-1 min-w-0">
-                <p class="text-sm font-black text-slate-900 truncate">${_esc(m.band)}</p>
+                <p class="text-sm font-black text-slate-900 truncate">${escapeHtml(m.band)}</p>
                 <p class="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
-                    ${_esc(m.official_venue)}${m.date ? ' &mdash; ' + _esc(m.date) : ''}
-                    &mdash; added by <strong class="text-slate-700">${_esc(m.owner_username)}</strong>
+                    ${escapeHtml(m.official_venue)}${m.date ? ' &mdash; ' + escapeHtml(m.date) : ''}
+                    &mdash; added by <strong class="text-slate-700">${escapeHtml(m.owner_username)}</strong>
                 </p>
             </div>
             <div class="flex flex-col items-end gap-1.5 flex-shrink-0 ml-2">
-                <button onclick="window.openCompanionPrefillModal('${m.journal_id}', '${m.owner_username.replace(/'/g, "\\'")}')"
+                <button data-companion-view-id="${escapeHtml(m.journal_id)}" data-companion-view-username="${escapeHtml(m.owner_username)}"
                         class="bg-slate-900 text-white text-[10px] font-black px-3 py-1.5 rounded-full hover:bg-slate-700 transition-all active:scale-95 uppercase tracking-widest">
                     View
                 </button>
-                <button onclick="window.declineCompanionTag('${journalKeyJs}', this.closest('[data-journal-key]'))"
+                <button data-companion-decline-key="${escapeHtml(m.journal_key)}"
                         class="text-[9px] font-bold text-slate-300 hover:text-red-400 transition-colors uppercase tracking-widest">
                     ${declineLabel}
                 </button>
             </div>
         </div>`;
     }).join('');
+
+    // One delegated listener instead of onclick="fn('${...}')" strings — a
+    // username or journal key containing a quote used to break out of the
+    // inline handler (HTML-attribute entity decoding happens before the
+    // browser compiles onclick="..." as JS, so escaping quotes as entities
+    // doesn't protect this context; data attributes sidestep it entirely).
+    if (!list._companionClickWired) {
+        list._companionClickWired = true;
+        list.addEventListener('click', (e) => {
+            const viewBtn = e.target.closest('[data-companion-view-id]');
+            if (viewBtn) {
+                window.openCompanionPrefillModal(viewBtn.dataset.companionViewId, viewBtn.dataset.companionViewUsername);
+                return;
+            }
+            const declineBtn = e.target.closest('[data-companion-decline-key]');
+            if (declineBtn) {
+                window.declineCompanionTag(declineBtn.dataset.companionDeclineKey, declineBtn.closest('[data-journal-key]'));
+            }
+        });
+    }
 
     banner.classList.remove('hidden');
 
@@ -534,15 +554,3 @@ export function maybeShowFirstGigToast(journalData) {
 }
 
 window.maybeShowFirstGigToast = maybeShowFirstGigToast;
-
-// ─── HELPER ──────────────────────────────────────────────────────────────────
-
-function _esc(val) {
-    if (val == null) return '';
-    return String(val)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}

@@ -93,7 +93,7 @@ window.createRelivePlaylist = async (journalKey, artistName, gigDate, venueName)
 
     const { data: artistRow } = await supabase
         .from('artists')
-        .select('spotify_id')
+        .select('spotify_artist_id')
         .ilike('name', artistName)
         .maybeSingle();
 
@@ -104,7 +104,7 @@ window.createRelivePlaylist = async (journalKey, artistName, gigDate, venueName)
             body: JSON.stringify({
                 setlist:          performance.Setlist,
                 artistName,
-                artistSpotifyId:  artistRow?.spotify_id || null,
+                artistSpotifyId:  artistRow?.spotify_artist_id || null,
                 gigDate,
                 venueName,
                 mode:             'relive',
@@ -248,7 +248,7 @@ window.createGigReadyPlaylist = async (journalKey, artistName, gigDate, venueNam
 
     const { data: artistRow } = await supabase
         .from('artists')
-        .select('mbid, spotify_id')
+        .select('mbid, spotify_artist_id')
         .ilike('name', artistName)
         .maybeSingle();
 
@@ -295,7 +295,7 @@ window.createGigReadyPlaylist = async (journalKey, artistName, gigDate, venueNam
             body: JSON.stringify({
                 setlist:         songs.join(' | '),
                 artistName,
-                artistSpotifyId: artistRow?.spotify_id || null,
+                artistSpotifyId: artistRow?.spotify_artist_id || null,
                 gigDate,
                 venueName,
                 mode:            'gig_ready',
