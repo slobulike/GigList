@@ -22,6 +22,39 @@ export const deriveType = (gig) => {
 };
 
 /**
+ * Companion list for a single journal row — the one place every
+ * companion-counting feature (dashboard chart, achievement buddy count,
+ * Squad share card) should read from, instead of each independently
+ * checking field names and re-implementing the "nan"/"Alone" exclusion
+ * and comma/slash/ampersand splitting rules.
+ *
+ * Prefers structured gig_companions tags (attached as row.ResolvedCompanions
+ * by loadAppData) when present, so a confirmed tag also carries a real
+ * userId for avatar/profile lookups. Falls back to splitting the legacy
+ * free-text 'Went With' field when there's no structured tag for this row,
+ * so pre-migration journal entries still count toward the same totals.
+ *
+ * Returns an array of { name, userId } — userId is null for untagged or
+ * unconfirmed legacy-text companions.
+ */
+export const getCompanionsForGig = (row) => {
+    if (row.ResolvedCompanions?.length) {
+        return row.ResolvedCompanions.map(c => ({
+            name:   c.name,
+            userId: c.isConfirmed ? c.userId : null,
+        }));
+    }
+
+    const raw = row['Went With'] || row.went_with || '';
+    if (!raw || raw === 'nan' || raw === 'Alone') return [];
+
+    return raw.split(/[,/&]/)
+        .map(s => s.trim())
+        .filter(Boolean)
+        .map(name => ({ name, userId: null }));
+};
+
+/**
  * Sorts an array of gig objects
  */
 export const sortGigs = (data, column, ascending = true) => {
@@ -143,7 +176,40 @@ if (journalBands.length) {
     });
 }
 
-    // ── Step 2: Performances + Venues in parallel ─────────────────────────────
+// ── Step 1c: Companion tags (gig_companions) ──────────────────────────────
+// Bulk-fetch structured companion tags for these journal rows so every
+// companion-counting feature (dashboard chart, achievement buddy count,
+// Squad share card) can read one merged source via getCompanionsForGig
+// below, instead of each independently falling back to the legacy
+// free-text 'Went With' field. Scoped to the same owner as the journals
+// query above — own id, the friend being viewed, or skipped entirely for
+// band mode, where per-gig companions aren't a meaningful concept.
+const companionOwnerId = user.Type === 'Band' ? null : (user.Type === 'Friend' ? user.friendId : user.id);
+const journalIds = [...new Set(journalData.map(r => r.id).filter(v => v != null))];
+
+const companionsByJournalId = {};
+if (journalIds.length && companionOwnerId) {
+    const { data: companionRows, error: companionErr } = await supabase
+        .from('gig_companions')
+        .select('journal_id, companion_name, companion_user_id, status')
+        .eq('owner_id', companionOwnerId)
+        .in('journal_id', journalIds);
+
+    if (companionErr) {
+        console.warn('loadAppData: companion tag fetch failed:', companionErr.message);
+    } else {
+        (companionRows || []).forEach(c => {
+            if (!c.companion_name) return;
+            (companionsByJournalId[c.journal_id] = companionsByJournalId[c.journal_id] || []).push({
+                name:        c.companion_name,
+                userId:      c.companion_user_id || null,
+                isConfirmed: c.status === 'confirmed',
+            });
+        });
+    }
+}
+
+// ── Step 2: Performances + Venues in parallel ─────────────────────────────
     // Both are scoped to the user's journal content to keep payloads minimal.
     // Performances are scoped by journal_key (not artist) so festival shows
     // return all acts on the lineup regardless of whether those artists appear
@@ -227,6 +293,13 @@ if (journalBands.length) {
          // Artist enrichment from canonical artists table
         SpotifyArtistId:    artistLookup[row.band]?.spotify_artist_id || null,
         SpotifyImageUrl:    artistLookup[row.band]?.spotify_image_url || null,
+        // Structured companion tags for this row, if any — see
+        // getCompanionsForGig below for how this merges with the legacy
+        // free-text 'Went With' field. null (not []) when there's no
+        // companion_id fetch at all (e.g. band mode) vs genuinely tagged
+        // with zero companions, though in practice gig_companions rows
+        // are never created empty.
+        ResolvedCompanions: companionsByJournalId[row.id] || null,
     }));
 
     performanceData = performanceData.map(p => ({
@@ -475,7 +548,7 @@ export const filterGigs = (query, data, includeFuture = false) => {
             row.Date          || "",
             band,
             row.OfficialVenue || "",
-            row.Companion     || row['Went With'] || "",
+            getCompanionsForGig(row).map(c => c.name).join(" "),
             row.City          || "",
             row.Country       || ""
         ].join(" ").toLowerCase().includes(q);

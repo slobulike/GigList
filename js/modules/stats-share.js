@@ -17,16 +17,18 @@
  *                Year bucketing mirrors renderYearChart in charts.js so
  *                the numbers match the real Stats tab chart.
  *   • squad    — top companion + shows together, on top of their buddy
- *                avatar when one can be matched. Companion parsing mirrors
- *                renderCompanionChart in charts.js (reads Companion/
- *                WentWith/went_with/'Went With' defensively, since those
- *                two files don't currently agree on one canonical field
- *                name — worth consolidating later). Avatar match is a
- *                case-insensitive name lookup against window._following
- *                (see _buddyAvatarByName) — same approach social.js's
+ *                avatar when one can be matched. Companion data comes from
+ *                getCompanionsForGig (data.js) — the merged source shared
+ *                with the dashboard's companion chart and the achievement
+ *                buddy count, which prefers structured gig_companions tags
+ *                over the legacy free-text 'Went With' field per row. A
+ *                confirmed tag's userId is matched directly against
+ *                window._following for the avatar; legacy free-text
+ *                companions fall back to a case-insensitive name match
+ *                (_buddyAvatarByName) — the same approach social.js's
  *                resolveCompanionTags uses to promote legacy companion
- *                tags to confirmed buddies. No match, or no buddy avatar
- *                at all, just falls back to the flat background.
+ *                tags to confirmed buddies. No match, or no avatar at all,
+ *                just falls back to the flat background.
  *
  * Background images are fetched through a small Cloudflare Worker
  * (see static-map-worker.js) rather than the live Leaflet/OSM map,
@@ -48,6 +50,7 @@
  */
 
 import { buildBadgeDefs, deriveFanType } from './achievements.js';
+import { getCompanionsForGig } from './data.js';
 import { countryToFlag } from './utils.js';
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
@@ -317,9 +320,9 @@ function _computeCardStats(journalData) {
     const topArtistSpotifyUrl = topArtistShows.find(g => g.SpotifyImageUrl)?.SpotifyImageUrl || null;
 
     const { gigsPerYear, busiestYear, busiestYearCount } = _computeGigsPerYear(journalData);
-    const { topCompanion, topCompanionCount, firstTopCompanionShow } = _computeTopCompanion(journalData);
+    const { topCompanion, topCompanionCount, firstTopCompanionShow, topCompanionUserId } = _computeTopCompanion(journalData);
     const geekArtistUrl  = _computeSecondArtistImage(journalData, statsData.topArtist);
-    const squadAvatarUrl = _buddyAvatarByName(topCompanion);
+    const squadAvatarUrl = _squadAvatarUrl(topCompanion, topCompanionUserId);
 
     return {
         totalGigs:       statsData.totalGigs,
@@ -407,37 +410,44 @@ function _computeGigsPerYear(journalData) {
 }
 
 /**
- * Top companion for the Squad card. Mirrors renderCompanionChart's own
- * splitting/exclusion rules in charts.js (drop "nan"/"Alone", split on
- * commas/slashes/ampersands for multi-companion entries) so the count
- * matches the dashboard's companion doughnut. Field name is read
- * defensively — achievements.js and charts.js don't currently agree on
- * one canonical name (Companion vs WentWith vs went_with vs 'Went With').
+ * Top companion for the Squad card. Uses the same merged companion source
+ * (getCompanionsForGig, from data.js) as the dashboard's companion chart
+ * and the achievement buddy count, so all three agree — structured
+ * gig_companions tags take priority over the legacy free-text field per
+ * row, with the legacy field as a fallback for pre-migration entries.
+ * Also surfaces topCompanionUserId when a confirmed tag supplies one, so
+ * Squad's avatar lookup can use a real account match instead of only
+ * ever guessing by name.
  */
 function _computeTopCompanion(journalData) {
-    const companionCounts = {};
+    const companionCounts  = {};
     const companionShows   = {};   // name -> array of shows they appear in, for first-together lookup
+    const companionUserIds = {};   // name -> first confirmed userId seen for that name, if any
 
     journalData.forEach(gig => {
-        const val = gig.Companion || gig.WentWith || gig.went_with || gig['Went With'] || '';
-        if (!val || val === 'nan' || val === 'Alone') return;
-
-        val.split(/[,/&]/).map(c => c.trim()).filter(Boolean).forEach(c => {
-            companionCounts[c] = (companionCounts[c] || 0) + 1;
-            (companionShows[c] = companionShows[c] || []).push(gig);
+        getCompanionsForGig(gig).forEach(({ name, userId }) => {
+            if (!name) return;
+            companionCounts[name] = (companionCounts[name] || 0) + 1;
+            (companionShows[name] = companionShows[name] || []).push(gig);
+            if (userId && !companionUserIds[name]) companionUserIds[name] = userId;
         });
     });
 
     const sorted = Object.entries(companionCounts).sort((a, b) => b[1] - a[1]);
     if (sorted.length === 0) {
-        return { topCompanion: null, topCompanionCount: 0, firstTopCompanionShow: null };
+        return { topCompanion: null, topCompanionCount: 0, firstTopCompanionShow: null, topCompanionUserId: null };
     }
 
     const [topCompanion, topCompanionCount] = sorted[0];
     const firstTopCompanionShow = [...companionShows[topCompanion]]
         .sort((a, b) => (new Date(a.Date.split('/').reverse().join('-'))) - (new Date(b.Date.split('/').reverse().join('-'))))[0] || null;
 
-    return { topCompanion, topCompanionCount, firstTopCompanionShow };
+    return {
+        topCompanion,
+        topCompanionCount,
+        firstTopCompanionShow,
+        topCompanionUserId: companionUserIds[topCompanion] || null,
+    };
 }
 
 /**
@@ -448,6 +458,10 @@ function _computeTopCompanion(journalData) {
  * resolveCompanionTags uses to promote legacy companion tags to confirmed
  * buddy links. A miss (nickname mismatch, or the companion just isn't an
  * accepted buddy) is expected and simply means no avatar.
+ *
+ * This is now the fallback path — _squadAvatarUrl below prefers a direct
+ * userId match (from a confirmed gig_companions tag) when one's available,
+ * since that's a real account link rather than a name guess.
  */
 function _buddyAvatarByName(name) {
     if (!name) return null;
@@ -460,6 +474,22 @@ function _buddyAvatarByName(name) {
     );
 
     return match?.avatar_url || null;
+}
+
+/**
+ * Squad's background image source. Prefers a direct userId match (from a
+ * confirmed gig_companions tag, via _computeTopCompanion) against
+ * window._following, since that's an actual account link rather than a
+ * guess. Falls back to name-matching for legacy free-text companions with
+ * no structured tag at all.
+ */
+function _squadAvatarUrl(topCompanion, topCompanionUserId) {
+    if (topCompanionUserId) {
+        const following = window._following || [];
+        const byId = following.find(b => b.id === topCompanionUserId);
+        if (byId?.avatar_url) return byId.avatar_url;
+    }
+    return _buddyAvatarByName(topCompanion);
 }
 
 // ─── BACKGROUND IMAGE LOADING ─────────────────────────────────────────────────
@@ -725,7 +755,7 @@ function _renderDevotee(ctx, size, s, stats) {
  */
 function _drawBarChart(ctx, s, { x, y, w, h }, bars, highlightYear) {
     const maxCount = Math.max(...bars.map(b => b.count), 1);
-    const gap      = 8;
+    const gap      = bars.length > 20 ? 3 : 8;   // tighter gaps once there are a lot of years to fit
     const barW     = (w - gap * (bars.length - 1)) / bars.length;
 
     bars.forEach((bar, i) => {
@@ -777,11 +807,12 @@ function _renderGeek(ctx, size, s, stats) {
     ctx.fillText(`${stats.busiestYearCount} SHOWS`, padRight * s, (contentH * 0.32 + 44) * s);
 
     // --- Gigs-per-year bar chart ---
-    // Capped to the most recent 12 years so bars stay wide enough to read;
-    // busiestYear may fall outside this window for long-running journals,
-    // in which case the chart just won't highlight anything — acceptable
-    // for a decorative card visual.
-    const bars = stats.gigsPerYear.slice(-12);
+    // Full career history, not just recent years — a 12-year cap used to be
+    // applied here for bar width, but that meant a long-running journal's
+    // busiest year could fall outside the visible window entirely (as
+    // Rich's 2005 did). Sparse tick labels (first/last/busiest year, see
+    // _drawBarChart) keep it legible even with a lot of bars.
+    const bars = stats.gigsPerYear;
     if (bars.length > 0) {
         _drawBarChart(ctx, s, {
             x: padLeft,

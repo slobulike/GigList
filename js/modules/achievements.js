@@ -1,4 +1,5 @@
 import { parseDate, isFestivalRow, getOwnFestivalLineup, normalizeArtist } from './utils.js';
+import { getCompanionsForGig } from './data.js';
 
 // ─── CONSECUTIVE MONTHS STREAK ────────────────────────────────────────────────
 
@@ -91,10 +92,7 @@ export function buildBadgeDefs(journalData) {
 
     const buddySet = new Set();
     journalData.forEach(entry => {
-        const raw = entry.WentWith || entry.went_with || entry['Went With'] || '';
-        if (raw && raw !== 'nan' && raw !== 'Alone') {
-            raw.split(/[,\/&]/).map(s => s.trim()).filter(Boolean).forEach(n => buddySet.add(n.toLowerCase()));
-        }
+        getCompanionsForGig(entry).forEach(({ name }) => buddySet.add(name.toLowerCase()));
     });
     const uniqueBuddies   = buddySet.size;
     const collectionCount = window._collectionCount  ?? 0;

@@ -12,6 +12,7 @@ import { sortGigs, deriveType } from './data.js';
 import { getUniqueSongCount } from './data.js';
 import { initModalTips, teardownModalTips } from './modal-tips.js';
 import { renderEmptyStateTips } from './tip-nudges.js';
+import { renderSpotifyEmbedPlaceholder, renderHomeAudioAction } from './spotify.js';
 
 let gigMap = null;
 let markerLayer = null;
@@ -217,6 +218,8 @@ export const renderOTDBanner = (data) => {
 
     if (matches.length === 0) {
         banner.classList.add('hidden');
+        window._homeOtdAudioCandidate = null;
+        syncHomeAudioSlot();
         return;
     }
 
@@ -237,6 +240,12 @@ export const renderOTDBanner = (data) => {
 
     banner.classList.remove('hidden');
     if (window.lucide) lucide.createIcons();
+
+    // On This Day and Next/Last show share a single audio slot between them
+    // (see syncHomeAudioSlot) so the two banners never both expand to fit a
+    // playlist CTA at once. OTD takes priority when both apply.
+    window._homeOtdAudioCandidate = gig;
+    syncHomeAudioSlot();
 };
 
 export const updateTicker = (data) => {
@@ -268,7 +277,7 @@ export const updateTicker = (data) => {
 
         if (days === 0) {
             // ── SHOW DAY ─────────────────────────────────────────────────────
-            card.className = 'relative overflow-hidden bg-gradient-to-br from-amber-400 via-orange-400 to-pink-500 rounded-[1.5rem] p-4 flex items-center justify-between cursor-pointer';
+            card.className = 'relative overflow-hidden bg-gradient-to-br from-amber-400 via-orange-400 to-pink-500 rounded-[1.5rem] p-4 cursor-pointer';
             if (eyebrowEl) { eyebrowEl.textContent = 'Tonight 🎉'; eyebrowEl.className = 'text-[9px] font-black text-amber-900/70 uppercase tracking-widest mb-1'; }
             if (mainEl)    { mainEl.textContent = mainText;  mainEl.className = 'text-lg font-black text-white leading-tight drop-shadow'; }
             if (subEl)     { subEl.textContent = subText;    subEl.className = 'text-[10px] font-bold text-amber-900/60 mt-0.5'; }
@@ -282,14 +291,16 @@ export const updateTicker = (data) => {
                 window._confettiFired = true;
                 setTimeout(() => fireConfetti(), 400);
             }
+            window._homeTickerAudioCandidate = { entry: nextGig, gigIsPast: false };
         } else {
             // ── UPCOMING ─────────────────────────────────────────────────────
-            card.className = 'bg-indigo-600 rounded-[1.5rem] p-4 flex items-center justify-between';
+            card.className = 'bg-indigo-600 rounded-[1.5rem] p-4';
             if (eyebrowEl) { eyebrowEl.textContent = 'Next show'; eyebrowEl.className = 'text-[9px] font-black text-indigo-300 uppercase tracking-widest mb-1'; }
             if (mainEl)    { mainEl.textContent = mainText; mainEl.className = 'text-lg font-black text-white leading-tight'; }
             if (subEl)     { subEl.textContent = subText;   subEl.className = 'text-[10px] font-bold text-indigo-300 mt-0.5'; }
             if (numEl)     { numEl.textContent = days;      numEl.className = 'text-4xl font-black text-white leading-none tracking-tighter'; }
             if (unitEl)    { unitEl.textContent = days === 1 ? 'day' : 'days'; unitEl.className = 'text-[9px] font-black text-indigo-300 uppercase tracking-widest'; }
+            window._homeTickerAudioCandidate = { entry: nextGig, gigIsPast: false };
         }
 
     } else if (lastGig) {
@@ -299,7 +310,7 @@ export const updateTicker = (data) => {
             ? lastGig.Date
             : `${lastGig.OfficialVenue} · ${lastGig.Date}`;
 
-        card.className = 'bg-slate-700 rounded-[1.5rem] p-4 flex items-center justify-between cursor-pointer';
+        card.className = 'bg-slate-700 rounded-[1.5rem] p-4 cursor-pointer';
         if (eyebrowEl) { eyebrowEl.textContent = 'Last show'; eyebrowEl.className = 'text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1'; }
         if (mainEl)    { mainEl.textContent = mainText; mainEl.className = 'text-lg font-black text-white leading-tight'; }
         if (subEl)     { subEl.textContent = subText;   subEl.className = 'text-[10px] font-bold text-slate-400 mt-0.5'; }
@@ -307,6 +318,31 @@ export const updateTicker = (data) => {
         if (unitEl)    { unitEl.textContent = days === 1 ? 'day ago' : 'days ago'; unitEl.className = 'text-[9px] font-black text-slate-400 uppercase tracking-widest'; }
         const lastGigKey = lastGig['Journal Key']?.toString().trim();
         if (lastGigKey) card.onclick = () => window.viewGigDetails(lastGigKey);
+        // No next show — this is the most recent one, so it's a Relive candidate.
+        window._homeTickerAudioCandidate = { entry: lastGig, gigIsPast: true };
+    } else {
+        window._homeTickerAudioCandidate = null;
+    }
+};
+
+// On This Day and Next/Last show share a single audio slot between them so
+// the two banners never both expand to fit a playlist CTA at once — OTD
+// takes priority when both apply. Only called from renderOTDBanner, which
+// always runs immediately after updateTicker (see app.js call sites), so
+// by the time this runs both candidates are current.
+const syncHomeAudioSlot = () => {
+    const otdEntry = window._homeOtdAudioCandidate;
+    const ticker   = window._homeTickerAudioCandidate;
+
+    const otdSlot     = document.getElementById('otd-spotify-slot');
+    const tickerSlot  = document.getElementById('countdown-spotify-slot');
+    if (otdSlot)    otdSlot.innerHTML = '';
+    if (tickerSlot) tickerSlot.innerHTML = '';
+
+    if (otdEntry) {
+        renderHomeAudioAction('otd-spotify-slot', otdEntry, true);
+    } else if (ticker) {
+        renderHomeAudioAction('countdown-spotify-slot', ticker.entry, ticker.gigIsPast);
     }
 };
 
@@ -1078,9 +1114,6 @@ export const openGigModal = (key, journalData, performanceData) => {
     const scrapbookPath = `assets/scrapbook/${formattedDate}-${cleanVenue}.jpg`;
     const artistPath = `assets/artists/${entry.Band.toLowerCase().replace(/ /g, '_')}_stock_photo.jpg`;
     const youtubeLink = `https://www.youtube.com/results?search_query=${encodeURIComponent(`${entry.Band} live ${entry.OfficialVenue} ${entry.Date}`)}`;
-    const spotifyLink = entry.SpotifyArtistId
-        ? `https://open.spotify.com/artist/${entry.SpotifyArtistId}`
-        : `https://open.spotify.com/search/${encodeURIComponent(entry.Band)}`;
 
 // --- SPOTIFY PLAYLIST ---
 const headlineSet = sets.find(s => (s.Artist || '').toLowerCase() === entry.Band.toLowerCase());
@@ -1088,6 +1121,10 @@ const hasSetlistData = headlineSet?.Setlist &&
     headlineSet.Setlist !== 'NOT_FOUND' &&
     headlineSet.Setlist.trim().length > 0;
 const isAdmin = window.currentUser?.is_admin === true;
+// Setlist is the default open section, but only when there's actually
+// something to show there — otherwise Actions opens instead so the modal
+// doesn't land on an empty strip.
+const defaultOpenSection = hasSetlistData ? 'setlist' : 'actions';
 const gigIsPast = (() => {
     const [dd, mm, yy] = entry.Date.split('/');
     return new Date(`${yy}-${mm}-${dd}`) <= new Date();
@@ -1176,7 +1213,7 @@ const gigIsPast = (() => {
 // that real scroll container, or the browser anchors "sticky" to the wrong
 // box and it silently stops working — that's why the rounding/clipping was
 // moved onto the sticky wrapper itself rather than a plain parent div.
-    window._gigModalOpenSections = new Set(['setlist']);
+    window._gigModalOpenSections = new Set([defaultOpenSection]);
     modalContent.innerHTML = `
         <div class="bg-white">
             <div class="sticky top-0 z-30 bg-white rounded-t-[2.5rem] overflow-hidden">
@@ -1233,13 +1270,13 @@ const gigIsPast = (() => {
 
             <button type="button"
                     onclick="window._toggleGigModalSection('actions')"
-                    aria-expanded="false"
+                    aria-expanded="${defaultOpenSection === 'actions'}"
                     aria-controls="gig-panel-actions"
                     class="w-full flex items-center justify-between px-6 py-3 border-b border-slate-100 hover:bg-slate-50 transition-colors">
                 <span class="text-[10px] font-black uppercase tracking-widest text-slate-500">Actions</span>
-                <i id="gig-chevron-actions" data-lucide="chevron-down" class="w-4 h-4 text-slate-400 transition-transform duration-200" aria-hidden="true"></i>
+                <i id="gig-chevron-actions" data-lucide="chevron-down" class="w-4 h-4 text-slate-400 transition-transform duration-200" style="${defaultOpenSection === 'actions' ? 'transform:rotate(180deg)' : ''}" aria-hidden="true"></i>
             </button>
-            <div id="gig-panel-actions" class="border-b border-slate-100" style="display:grid;grid-template-rows:0fr;transition:grid-template-rows 0.25s ease">
+            <div id="gig-panel-actions" class="border-b border-slate-100" style="display:grid;grid-template-rows:${defaultOpenSection === 'actions' ? '1fr' : '0fr'};transition:grid-template-rows 0.25s ease">
                 <div style="overflow:hidden;min-height:0">
                     <div class="px-6 py-4">
                         <div class="flex items-center gap-2 mb-3 flex-wrap">
@@ -1254,10 +1291,6 @@ const gigIsPast = (() => {
                                     class="bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 text-slate-500 text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
                                 <i data-lucide="pencil" class="w-3.5 h-3.5" aria-hidden="true"></i> EDIT
                             </button>
-                            <a href="${spotifyLink}" target="_blank" rel="noopener"
-                               class="bg-emerald-500 hover:bg-emerald-600 text-white text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
-                                <i data-lucide="music-2" class="w-3.5 h-3.5" aria-hidden="true"></i> SPOTIFY
-                            </a>
                             ${window.currentUser?.isAuthUser && (hasSetlistData && gigIsPast || !gigIsPast) ? `
                                 <button id="${gigIsPast ? 'relive' : 'gig-ready'}-btn-${entry['Journal Key']?.replace(/[^a-z0-9]/gi,'_')}"
                                         data-tip="playlist"
@@ -1273,6 +1306,7 @@ const gigIsPast = (() => {
                             </button>
                             <span id="modal-archive-btn-wrap-${entry['Journal Key']?.replace(/[^a-z0-9]/gi,'_')}"></span>
                         </div>
+                        ${renderSpotifyEmbedPlaceholder(entry['Journal Key'], entry.SpotifyArtistId, entry.Band)}
                         ${(hasPhotos || hasReview || hasSetlist) ? `
                         <div class="flex items-center gap-4">
                             ${hasPhotos ? `<a href="${photosUrl}" target="_blank" rel="noopener"
@@ -1301,13 +1335,13 @@ const gigIsPast = (() => {
 
             <button type="button"
                     onclick="window._toggleGigModalSection('setlist')"
-                    aria-expanded="true"
+                    aria-expanded="${defaultOpenSection === 'setlist'}"
                     aria-controls="gig-panel-setlist"
                     class="w-full flex items-center justify-between px-6 py-3 border-b border-slate-100 hover:bg-slate-50 transition-colors">
                 <span class="text-[10px] font-black uppercase tracking-widest text-slate-500">Setlist</span>
-                <i id="gig-chevron-setlist" data-lucide="chevron-down" class="w-4 h-4 text-slate-400 transition-transform duration-200" style="transform:rotate(180deg)" aria-hidden="true"></i>
+                <i id="gig-chevron-setlist" data-lucide="chevron-down" class="w-4 h-4 text-slate-400 transition-transform duration-200" style="${defaultOpenSection === 'setlist' ? 'transform:rotate(180deg)' : ''}" aria-hidden="true"></i>
             </button>
-            <div id="gig-panel-setlist" class="border-b border-slate-100" style="display:grid;grid-template-rows:1fr;transition:grid-template-rows 0.25s ease">
+            <div id="gig-panel-setlist" class="border-b border-slate-100" style="display:grid;grid-template-rows:${defaultOpenSection === 'setlist' ? '1fr' : '0fr'};transition:grid-template-rows 0.25s ease">
                 <div style="overflow:hidden;min-height:0">
                     <div class="px-6 py-4">
                         <div class="${isFestival ? 'grid grid-cols-1 md:grid-cols-2 gap-4' : 'flex flex-col gap-4'}">

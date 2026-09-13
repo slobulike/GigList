@@ -2,6 +2,7 @@
  * GigList - Charts Module
  */
 import { isFestivalRow, getOwnFestivalLineup, scopeFestivalArtistMap, normalizeArtist } from './utils.js';
+import { getCompanionsForGig } from './data.js';
 
 let modalChartInstance      = null;
 let dashboardYearChart      = null;
@@ -35,12 +36,9 @@ export const renderCompanionChart = (data, canvasId, isModal = false) => {
     const companionCounts = {};
 
     data.forEach(gig => {
-        const val = gig.Companion || gig['Went With'] || "";
-        if (val && val !== "nan" && val !== "Alone") {
-            val.split(/[,\/&]/).map(c => c.trim()).forEach(c => {
-                if (c) companionCounts[c] = (companionCounts[c] || 0) + 1;
-            });
-        }
+        getCompanionsForGig(gig).forEach(({ name }) => {
+            if (name) companionCounts[name] = (companionCounts[name] || 0) + 1;
+        });
     });
 
     const sortedCompanions = Object.entries(companionCounts)
@@ -908,12 +906,8 @@ export const renderAverageMetricsChart = (journalData, venuesData = {}, homeLoca
             yearBuckets[year].distances.push(miles);
         }
 
-        // Buddies — same companion parsing as renderCompanionChart
-        const companionVal = g.Companion || g['Went With'] || g.went_with || "";
-        let buddyCount = 0;
-        if (companionVal && companionVal !== "nan" && companionVal !== "Alone") {
-            buddyCount = companionVal.split(/[,\/&]/).map(c => c.trim()).filter(Boolean).length;
-        }
+        // Buddies — same companion source as renderCompanionChart
+        const buddyCount = getCompanionsForGig(g).length;
         yearBuckets[year].buddies.push(buddyCount);
     });
 

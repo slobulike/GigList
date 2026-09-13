@@ -885,6 +885,9 @@ export const openCollectionEditor = async (type = null, itemId = null) => {
         _renderTypeToggle();
         _renderSubtypeSelector();
         _wireFormatSuggestions(_selectedSubtype);
+        _wireConditionSuggestions(); // idempotent (guarded by input._condWired) — must run
+        // here too, not just in _populateForm/initCollectionEditor, in case the modal's
+        // markup wasn't in the DOM yet when initCollectionEditor() ran on page load.
         _renderLabels();
         _renderPhotoPreviews();
         _updateFieldVisibility();
