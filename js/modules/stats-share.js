@@ -1,9 +1,9 @@
 /**
  * GigList — Stats Share Module
- * v1.1.0 — Sep 2026
+ * v1.2.0 — Sep 2026
  *
  * Generates a shareable 1080×1080 canvas stats card from the user's
- * journal data. Two variants, named to match the existing achievement
+ * journal data. Four variants, named to match the existing achievement
  * fan-type labels so the vocabulary stays consistent across the app:
  *
  *   • explorer — shows / venues / cities / countries + flag row, on top
@@ -11,6 +11,22 @@
  *                (the Momento-passport competitor)
  *   • devotee  — top artist, times seen, first show, on top of the
  *                artist's Spotify image
+ *   • geek     — gigs-per-year bar chart + busiest year, on top of the
+ *                second-most-seen artist's Spotify image (kept distinct
+ *                from Devotee, which already features the top artist).
+ *                Year bucketing mirrors renderYearChart in charts.js so
+ *                the numbers match the real Stats tab chart.
+ *   • squad    — top companion + shows together, on top of their buddy
+ *                avatar when one can be matched. Companion parsing mirrors
+ *                renderCompanionChart in charts.js (reads Companion/
+ *                WentWith/went_with/'Went With' defensively, since those
+ *                two files don't currently agree on one canonical field
+ *                name — worth consolidating later). Avatar match is a
+ *                case-insensitive name lookup against window._following
+ *                (see _buddyAvatarByName) — same approach social.js's
+ *                resolveCompanionTags uses to promote legacy companion
+ *                tags to confirmed buddies. No match, or no buddy avatar
+ *                at all, just falls back to the flat background.
  *
  * Background images are fetched through a small Cloudflare Worker
  * (see static-map-worker.js) rather than the live Leaflet/OSM map,
@@ -20,10 +36,8 @@
  * comment for the full explanation. MAP_WORKER_URL below needs to
  * point at wherever that Worker ends up deployed.
  *
- * More variants (lifer, festivarian, etc.) can follow the same pattern
- * later — deliberately kept to two for now while we test whether the
- * feature earns its keep before investing further (e.g. the UK home
- * nation flag split is parked until then — see countryToFlag in utils.js).
+ * The UK home nation flag split is parked until there's a stronger
+ * signal the whole feature is a keeper — see countryToFlag in utils.js.
  *
  * Public API (window helpers), mirroring collection-collage.js:
  *   window._statsOpenShare(journalData)   — open the modal
@@ -47,9 +61,14 @@ const DARK         = '#111008';
 const OFF_WHITE    = '#f0deb0';
 const FOOTER_H     = 96;
 
-const VARIANTS = ['explorer', 'devotee'];
+const VARIANTS = ['explorer', 'devotee', 'geek', 'squad'];
 
 const MAP_WORKER_URL = 'https://static-map-worker.richard-lipscombe.workers.dev/';
+
+// Geoapify (and URL length generally) start to strain with too many markers
+// in one request, so we cap how many venue pins we send. Kept as a named
+// constant so it's easy to tune later without hunting through the function.
+const MAX_MAP_MARKERS = 80;
 
 // ─── STATE ────────────────────────────────────────────────────────────────────
 
@@ -58,7 +77,7 @@ let _canvasEl      = null;
 let _activeVariant = 'explorer';
 let _journalData   = [];
 let _cardStats     = null;              // computed once per open — see _computeCardStats
-let _bgImages      = { explorer: null, devotee: null };   // cached per open, null = not loaded / failed
+let _bgImages      = { explorer: null, devotee: null, geek: null, squad: null };   // cached per open, null = not loaded / failed
 
 // ─── MODAL SCAFFOLD ───────────────────────────────────────────────────────────
 
@@ -202,6 +221,10 @@ function _ensureModal() {
                         onclick="window._statsSetVariant('explorer')">Explorer</button>
                 <button class="stats-variant-btn" id="stats-variant-devotee"
                         onclick="window._statsSetVariant('devotee')">Devotee</button>
+                <button class="stats-variant-btn" id="stats-variant-geek"
+                        onclick="window._statsSetVariant('geek')">Geek</button>
+                <button class="stats-variant-btn" id="stats-variant-squad"
+                        onclick="window._statsSetVariant('squad')">Squad</button>
             </div>
 
             <div style="display:flex;gap:0.75rem;padding:0 1.25rem;">
@@ -264,7 +287,7 @@ function _computeCardStats(journalData) {
 
     const citySet    = new Set();
     const countrySet = new Set();
-    const venuePoints = new Map();   // venue name -> {lat, lng}, deduped
+    const venuePoints = new Map();   // venue name -> {lat, lng, country}, deduped
 
     journalData.forEach(entry => {
         const vName    = entry.OfficialVenue || entry.Venue || '';
@@ -279,7 +302,10 @@ function _computeCardStats(journalData) {
         if (countryKey) countrySet.add(countryKey);
 
         if (!isNaN(enriched.lat) && !isNaN(enriched.lng) && !venuePoints.has(vName)) {
-            venuePoints.set(vName, { lat: enriched.lat, lng: enriched.lng });
+            // country falls back to a single bucket for uncategorised venues,
+            // so they still get fair round-robin treatment in _selectDiverseMarkers
+            // rather than silently being favoured or starved.
+            venuePoints.set(vName, { lat: enriched.lat, lng: enriched.lng, country: countryKey || '__unknown__' });
         }
     });
 
@@ -289,6 +315,11 @@ function _computeCardStats(journalData) {
         .sort((a, b) => (new Date(a.Date.split('/').reverse().join('-'))) - (new Date(b.Date.split('/').reverse().join('-'))));
     const firstTopArtistShow = topArtistShows[0] || null;
     const topArtistSpotifyUrl = topArtistShows.find(g => g.SpotifyImageUrl)?.SpotifyImageUrl || null;
+
+    const { gigsPerYear, busiestYear, busiestYearCount } = _computeGigsPerYear(journalData);
+    const { topCompanion, topCompanionCount, firstTopCompanionShow } = _computeTopCompanion(journalData);
+    const geekArtistUrl  = _computeSecondArtistImage(journalData, statsData.topArtist);
+    const squadAvatarUrl = _buddyAvatarByName(topCompanion);
 
     return {
         totalGigs:       statsData.totalGigs,
@@ -301,7 +332,134 @@ function _computeCardStats(journalData) {
         maxArtistShows:  statsData.maxArtistShows,
         firstTopArtistShow,
         topArtistSpotifyUrl,
+        gigsPerYear,
+        busiestYear,
+        busiestYearCount,
+        geekArtistUrl,
+        topCompanion,
+        topCompanionCount,
+        firstTopCompanionShow,
+        squadAvatarUrl,
     };
+}
+
+/**
+ * Background image for the Geek card: the second-most-seen artist (by
+ * show count) with an available Spotify image, rather than reusing the
+ * top artist — Devotee already puts that artist front and center, so
+ * reusing it here would make the two cards look near-identical when
+ * flipping between styles in the picker. Falls back to the top artist's
+ * image if there's no second artist with a usable image, and to no image
+ * at all (flat background) if neither does.
+ */
+function _computeSecondArtistImage(journalData, topArtist) {
+    const artistCounts = {};
+    journalData.forEach(entry => {
+        if (entry.Band) artistCounts[entry.Band] = (artistCounts[entry.Band] || 0) + 1;
+    });
+
+    const ranked = Object.entries(artistCounts)
+        .sort((a, b) => b[1] - a[1])
+        .map(([name]) => name);
+
+    for (const name of ranked) {
+        if (name === topArtist) continue;
+        const withImage = journalData.find(g => g.Band === name && g.SpotifyImageUrl);
+        if (withImage) return withImage.SpotifyImageUrl;
+    }
+
+    // No usable second artist — fall back to the top artist's own image.
+    const topWithImage = journalData.find(g => g.Band === topArtist && g.SpotifyImageUrl);
+    return topWithImage?.SpotifyImageUrl || null;
+}
+
+/**
+ * Gigs-per-year buckets for the Geek card's bar chart. Deliberately mirrors
+ * renderYearChart's own DD/MM/YYYY-or-YYYY-MM-DD parsing in charts.js so
+ * this card's numbers can't drift from what the real Stats tab chart shows.
+ */
+function _computeGigsPerYear(journalData) {
+    const yearCounts = {};
+    journalData.forEach(g => {
+        if (!g.Date) return;
+        const parts = g.Date.includes('/') ? g.Date.split('/') : g.Date.split('-');
+        if (parts.length !== 3) return;
+        const year = parts[2].length === 4 ? parts[2] : parts[0];
+        if (year) yearCounts[year] = (yearCounts[year] || 0) + 1;
+    });
+
+    const allYears = Object.keys(yearCounts).map(Number).filter(y => !isNaN(y));
+    if (allYears.length === 0) {
+        return { gigsPerYear: [], busiestYear: null, busiestYearCount: 0 };
+    }
+
+    const startYear = Math.min(...allYears);
+    const endYear   = new Date().getFullYear();
+
+    const gigsPerYear = [];
+    for (let y = startYear; y <= endYear; y++) {
+        gigsPerYear.push({ year: y, count: yearCounts[y.toString()] || 0 });
+    }
+
+    const busiest = gigsPerYear.reduce((best, cur) => (cur.count > best.count ? cur : best), gigsPerYear[0]);
+
+    return { gigsPerYear, busiestYear: busiest.year, busiestYearCount: busiest.count };
+}
+
+/**
+ * Top companion for the Squad card. Mirrors renderCompanionChart's own
+ * splitting/exclusion rules in charts.js (drop "nan"/"Alone", split on
+ * commas/slashes/ampersands for multi-companion entries) so the count
+ * matches the dashboard's companion doughnut. Field name is read
+ * defensively — achievements.js and charts.js don't currently agree on
+ * one canonical name (Companion vs WentWith vs went_with vs 'Went With').
+ */
+function _computeTopCompanion(journalData) {
+    const companionCounts = {};
+    const companionShows   = {};   // name -> array of shows they appear in, for first-together lookup
+
+    journalData.forEach(gig => {
+        const val = gig.Companion || gig.WentWith || gig.went_with || gig['Went With'] || '';
+        if (!val || val === 'nan' || val === 'Alone') return;
+
+        val.split(/[,/&]/).map(c => c.trim()).filter(Boolean).forEach(c => {
+            companionCounts[c] = (companionCounts[c] || 0) + 1;
+            (companionShows[c] = companionShows[c] || []).push(gig);
+        });
+    });
+
+    const sorted = Object.entries(companionCounts).sort((a, b) => b[1] - a[1]);
+    if (sorted.length === 0) {
+        return { topCompanion: null, topCompanionCount: 0, firstTopCompanionShow: null };
+    }
+
+    const [topCompanion, topCompanionCount] = sorted[0];
+    const firstTopCompanionShow = [...companionShows[topCompanion]]
+        .sort((a, b) => (new Date(a.Date.split('/').reverse().join('-'))) - (new Date(b.Date.split('/').reverse().join('-'))))[0] || null;
+
+    return { topCompanion, topCompanionCount, firstTopCompanionShow };
+}
+
+/**
+ * Match the top companion's free-text name against accepted buddies in
+ * window._following (populated by social.js's initSocial) to find an
+ * avatar for Squad's background. Case-insensitive match against either
+ * display_name or username — the same style of match social.js's
+ * resolveCompanionTags uses to promote legacy companion tags to confirmed
+ * buddy links. A miss (nickname mismatch, or the companion just isn't an
+ * accepted buddy) is expected and simply means no avatar.
+ */
+function _buddyAvatarByName(name) {
+    if (!name) return null;
+    const target    = name.trim().toLowerCase();
+    const following = window._following || [];
+
+    const match = following.find(b =>
+        (b.display_name || '').trim().toLowerCase() === target ||
+        (b.username || '').trim().toLowerCase() === target
+    );
+
+    return match?.avatar_url || null;
 }
 
 // ─── BACKGROUND IMAGE LOADING ─────────────────────────────────────────────────
@@ -323,6 +481,44 @@ function _loadImage(url) {
     });
 }
 
+/**
+ * Cap the venue points sent to the map worker at MAX_MAP_MARKERS while
+ * keeping country spread rather than whatever order journalData happened
+ * to produce (which otherwise skews toward whichever country has the most
+ * logged venues — typically the user's home country). Round-robins one
+ * venue per country per pass, so every country gets a pin before any
+ * country gets a second one. If there are more countries than the cap,
+ * the countries reached last (Map iteration = first-seen order in
+ * journalData) simply don't get a pin — an accepted edge case for now.
+ */
+function _selectDiverseMarkers(venuePoints, max = MAX_MAP_MARKERS) {
+    if (venuePoints.length <= max) return venuePoints;
+
+    const byCountry = new Map();
+    venuePoints.forEach(p => {
+        if (!byCountry.has(p.country)) byCountry.set(p.country, []);
+        byCountry.get(p.country).push(p);
+    });
+
+    const buckets  = [...byCountry.values()];
+    const selected = [];
+    let round = 0;
+
+    while (selected.length < max) {
+        const before = selected.length;
+        for (const bucket of buckets) {
+            if (round < bucket.length) {
+                selected.push(bucket[round]);
+                if (selected.length >= max) break;
+            }
+        }
+        if (selected.length === before) break;   // every bucket exhausted before hitting max
+        round++;
+    }
+
+    return selected;
+}
+
 async function _loadExplorerBackground(stats) {
     if (_bgImages.explorer !== null) return _bgImages.explorer;
     if (!stats.venuePoints.length || MAP_WORKER_URL.includes('REPLACE-ME')) {
@@ -330,7 +526,8 @@ async function _loadExplorerBackground(stats) {
         return false;
     }
 
-    const markers = stats.venuePoints.map(p => `${p.lat},${p.lng}`).join('|');
+    const points  = _selectDiverseMarkers(stats.venuePoints);
+    const markers = points.map(p => `${p.lat},${p.lng}`).join('|');
     const mapUrl  = `${MAP_WORKER_URL}?markers=${encodeURIComponent(markers)}&size=${CANVAS_SIZE}x${CANVAS_SIZE}`;
 
     const img = await _loadImage(mapUrl);
@@ -343,6 +540,20 @@ async function _loadDevoteeBackground(stats) {
     const img = await _loadImage(stats.topArtistSpotifyUrl);
     _bgImages.devotee = img || false;
     return _bgImages.devotee;
+}
+
+async function _loadGeekBackground(stats) {
+    if (_bgImages.geek !== null) return _bgImages.geek;
+    const img = await _loadImage(stats.geekArtistUrl);
+    _bgImages.geek = img || false;
+    return _bgImages.geek;
+}
+
+async function _loadSquadBackground(stats) {
+    if (_bgImages.squad !== null) return _bgImages.squad;
+    const img = await _loadImage(stats.squadAvatarUrl);
+    _bgImages.squad = img || false;
+    return _bgImages.squad;
 }
 
 /**
@@ -505,6 +716,140 @@ function _renderDevotee(ctx, size, s, stats) {
     _drawFooterBar(ctx, size, s, 'Devotee');
 }
 
+// ─── VARIANT: GEEK ────────────────────────────────────────────────────────────
+
+/**
+ * Draws a plain vertical bar chart into the given rect. No axis labels
+ * beyond a sparse set of year ticks — this is a card decoration, not a
+ * drill-down chart, so it favours legibility at small size over precision.
+ */
+function _drawBarChart(ctx, s, { x, y, w, h }, bars, highlightYear) {
+    const maxCount = Math.max(...bars.map(b => b.count), 1);
+    const gap      = 8;
+    const barW     = (w - gap * (bars.length - 1)) / bars.length;
+
+    bars.forEach((bar, i) => {
+        const barH = bar.count === 0 ? 2 : Math.max((bar.count / maxCount) * h, 4);
+        const bx   = x + i * (barW + gap);
+        const by   = y + h - barH;
+
+        ctx.fillStyle = bar.year === highlightYear ? GOLD : 'rgba(240,222,176,0.35)';
+        ctx.fillRect(bx * s, by * s, barW * s, barH * s);
+    });
+
+    // Sparse year ticks — first, last, and the highlighted year if it isn't
+    // already one of those, so the axis stays readable without clutter.
+    const tickYears = new Set([bars[0].year, bars[bars.length - 1].year, highlightYear]);
+    ctx.fillStyle     = 'rgba(240,222,176,0.6)';
+    ctx.font          = `700 ${16 * s}px 'Plus Jakarta Sans', sans-serif`;
+    ctx.textAlign     = 'center';
+    ctx.letterSpacing = '0px';
+    bars.forEach((bar, i) => {
+        if (!tickYears.has(bar.year)) return;
+        const bx = x + i * (barW + gap) + barW / 2;
+        ctx.fillText(String(bar.year), bx * s, (y + h + 26) * s);
+    });
+}
+
+function _renderGeek(ctx, size, s, stats) {
+    const contentH = size - FOOTER_H;
+    const padRight = size - 72;
+    const padLeft  = 72;
+
+    ctx.textAlign    = 'right';
+    ctx.textBaseline = 'alphabetic';
+
+    // --- Subtitle Header ---
+    ctx.fillStyle     = GOLD;
+    ctx.font          = `800 ${28 * s}px 'Plus Jakarta Sans', sans-serif`;
+    ctx.letterSpacing = `${2.5 * s}px`;
+    ctx.fillText('BUSIEST YEAR', padRight * s, (contentH * 0.18) * s);
+
+    // --- Headline: Busiest Year + Count ---
+    ctx.fillStyle     = OFF_WHITE;
+    ctx.font          = `900 ${140 * s}px 'Plus Jakarta Sans', sans-serif`;
+    ctx.letterSpacing = '0px';
+    ctx.fillText(stats.busiestYear ? String(stats.busiestYear) : '—', padRight * s, (contentH * 0.32) * s);
+
+    ctx.fillStyle     = GOLD;
+    ctx.font          = `800 ${32 * s}px 'Plus Jakarta Sans', sans-serif`;
+    ctx.letterSpacing = `${2.5 * s}px`;
+    ctx.fillText(`${stats.busiestYearCount} SHOWS`, padRight * s, (contentH * 0.32 + 44) * s);
+
+    // --- Gigs-per-year bar chart ---
+    // Capped to the most recent 12 years so bars stay wide enough to read;
+    // busiestYear may fall outside this window for long-running journals,
+    // in which case the chart just won't highlight anything — acceptable
+    // for a decorative card visual.
+    const bars = stats.gigsPerYear.slice(-12);
+    if (bars.length > 0) {
+        _drawBarChart(ctx, s, {
+            x: padLeft,
+            y: contentH * 0.52,
+            w: padRight - padLeft,
+            h: contentH * 0.28,
+        }, bars, stats.busiestYear);
+    }
+
+    // --- Total shows footer stat ---
+    ctx.textAlign     = 'right';
+    ctx.fillStyle     = 'rgba(240,222,176,0.85)';
+    ctx.font          = `600 ${24 * s}px 'Plus Jakarta Sans', sans-serif`;
+    ctx.letterSpacing = '0px';
+    ctx.fillText(`${stats.totalGigs} shows logged in total`, padRight * s, (contentH * 0.94) * s);
+
+    _drawFooterBar(ctx, size, s, 'Geek');
+}
+
+// ─── VARIANT: SQUAD ───────────────────────────────────────────────────────────
+
+function _renderSquad(ctx, size, s, stats) {
+    const contentH = size - FOOTER_H;
+    const padRight = size - 72;
+
+    ctx.textAlign    = 'right';
+    ctx.textBaseline = 'alphabetic';
+
+    // --- Subtitle Header ---
+    ctx.fillStyle     = GOLD;
+    ctx.font          = `800 ${28 * s}px 'Plus Jakarta Sans', sans-serif`;
+    ctx.letterSpacing = `${2.5 * s}px`;
+    ctx.fillText('TOP COMPANION', padRight * s, (contentH * 0.18) * s);
+
+    // --- Companion Name (auto-shrink, same approach as Devotee's artist name) ---
+    let nameSize = 96;
+    ctx.font = `900 ${nameSize * s}px 'Plus Jakarta Sans', sans-serif`;
+    while (ctx.measureText(stats.topCompanion || '').width > (size - 144) * s && nameSize > 44) {
+        nameSize -= 4;
+        ctx.font = `900 ${nameSize * s}px 'Plus Jakarta Sans', sans-serif`;
+    }
+    ctx.fillStyle     = OFF_WHITE;
+    ctx.letterSpacing = '0px';
+    ctx.fillText(stats.topCompanion || '—', padRight * s, (contentH * 0.30) * s);
+
+    // --- Times Together Stat ---
+    ctx.fillStyle     = OFF_WHITE;
+    ctx.font          = `900 ${220 * s}px 'Plus Jakarta Sans', sans-serif`;
+    ctx.fillText(String(stats.topCompanionCount), padRight * s, (contentH * 0.62) * s);
+
+    ctx.fillStyle     = GOLD;
+    ctx.font          = `800 ${32 * s}px 'Plus Jakarta Sans', sans-serif`;
+    ctx.letterSpacing = `${2.5 * s}px`;
+    ctx.fillText('SHOWS TOGETHER', padRight * s, (contentH * 0.62 + 48) * s);
+
+    // --- First Show Together Detail ---
+    if (stats.firstTopCompanionShow) {
+        const venue = stats.firstTopCompanionShow.OfficialVenue || stats.firstTopCompanionShow.Venue || '';
+        const date  = stats.firstTopCompanionShow.Date || '';
+        ctx.fillStyle     = 'rgba(240,222,176,0.85)';
+        ctx.font          = `600 ${24 * s}px 'Plus Jakarta Sans', sans-serif`;
+        ctx.letterSpacing = '0px';
+        ctx.fillText(`First together ${date} — ${venue}`, padRight * s, (contentH * 0.84) * s);
+    }
+
+    _drawFooterBar(ctx, size, s, 'Squad');
+}
+
 // ─── CORE RENDER ──────────────────────────────────────────────────────────────
 
 async function _render(variant) {
@@ -514,15 +859,28 @@ async function _render(variant) {
     const ctx  = _canvasEl.getContext('2d');
     const size = CANVAS_SIZE;
 
+    // Squad's avatar background depends on the companion matching an
+    // accepted buddy by name (see _buddyAvatarByName) — no match just
+    // means _loadSquadBackground resolves false and we stay flat.
     const bg = variant === 'devotee'
         ? await _loadDevoteeBackground(_cardStats)
-        : await _loadExplorerBackground(_cardStats);
+        : variant === 'explorer'
+        ? await _loadExplorerBackground(_cardStats)
+        : variant === 'geek'
+        ? await _loadGeekBackground(_cardStats)
+        : variant === 'squad'
+        ? await _loadSquadBackground(_cardStats)
+        : false;
 
     _drawFlatBackground(ctx, size, s);
     if (bg) _drawCoverImage(ctx, bg, size, s);
 
     if (variant === 'devotee') {
         _renderDevotee(ctx, size, s, _cardStats);
+    } else if (variant === 'geek') {
+        _renderGeek(ctx, size, s, _cardStats);
+    } else if (variant === 'squad') {
+        _renderSquad(ctx, size, s, _cardStats);
     } else {
         _renderExplorer(ctx, size, s, _cardStats);
     }
@@ -536,7 +894,7 @@ async function _render(variant) {
 window._statsOpenShare = async (journalData) => {
     _journalData = journalData || [];
     _cardStats   = _computeCardStats(_journalData);
-    _bgImages    = { explorer: null, devotee: null };   // reset cache per open
+    _bgImages    = { explorer: null, devotee: null, geek: null, squad: null };   // reset cache per open
 
     const { groups, statsData } = buildBadgeDefs(_journalData);
     const derived = deriveFanType(groups, statsData);
