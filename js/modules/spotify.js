@@ -36,28 +36,11 @@ const hasUsableSetlist = (setlist) => {
     return trimmed.length > 0 && !NO_SETLIST_SENTINELS.has(trimmed.toUpperCase());
 };
 
-// ─── ARTIST EMBED (gig modal, on demand) ───────────────────────────────────────
-// Renders a compact tap-to-load row rather than mounting an iframe immediately.
-// Browsing several gigs in one session should never load more than one
-// Spotify iframe at a time.
-
-export const renderSpotifyEmbedPlaceholder = (journalKey, spotifyArtistId, artistName) => {
-    if (!spotifyArtistId) return '';
-    const wrapId = `spotify-embed-${journalKey.replace(/[^a-z0-9]/gi, '_')}`;
-    return `
-        <div id="${wrapId}" class="mt-3">
-            <button onclick="window.loadSpotifyEmbed('${wrapId}', 'artist/${escAttr(spotifyArtistId)}')"
-                    class="w-full flex items-center gap-2.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl px-3 py-2.5 transition-colors text-left">
-                <span class="w-8 h-8 rounded-md bg-slate-200 flex items-center justify-center flex-shrink-0" aria-hidden="true">
-                    <i data-lucide="play-circle" class="w-4 h-4 text-slate-500"></i>
-                </span>
-                <span class="flex-1 min-w-0">
-                    <span class="block text-[11px] font-bold text-slate-700 truncate">${(artistName || 'Listen on Spotify').replace(/</g, '&lt;')}</span>
-                    <span class="block text-[9px] text-slate-400 uppercase tracking-widest">Tap to load player</span>
-                </span>
-            </button>
-        </div>`;
-};
+// ─── ARTIST/PLAYLIST EMBED (on demand) ─────────────────────────────────────────
+// Home and the gig modal both render a tap-to-load row rather than mounting
+// an iframe immediately, so browsing several gigs in one session never
+// loads more than one Spotify iframe at a time (see paintAudioSlot below,
+// and window.loadSpotifyEmbed which mounts the real iframe on tap).
 
 // Swaps a placeholder for the real iframe. embedPath is whatever comes after
 // open.spotify.com/embed/ — e.g. 'artist/{id}' or 'playlist/{id}'. Kept as a
@@ -90,20 +73,33 @@ window.loadSpotifyEmbed = (wrapId, embedPath) => {
 
 const playlistIdFromUrl = (url) => (url || '').match(/playlist\/([a-zA-Z0-9]+)/)?.[1] || null;
 
-// The two Home slots sit on very different backgrounds — the amber-50 OTD
-// banner needs dark-on-light styling, the indigo/slate countdown card needs
-// the white-on-dark styling. Derived from slotId rather than threaded through
-// every call site since there are only ever these two slots.
-const homeSlotTheme = (slotId) => slotId === 'otd-spotify-slot'
-    ? { action: 'bg-white hover:bg-amber-50 border border-amber-200 text-amber-800', icon: 'text-amber-600', loading: 'text-amber-700' }
-    : { action: 'bg-white/10 hover:bg-white/15 text-white', icon: 'text-white', loading: 'text-white/70' };
+// Home's two slots and the gig modal's slot all sit on different
+// backgrounds — amber-50 (OTD), indigo/slate (countdown card), and white
+// (modal). Derived from slotId rather than threaded through every call site.
+// Spotify's own green so these read as "the Spotify action" at a glance,
+// regardless of which banner/modal background they're sitting on.
+const MODAL_THEME   = { action: 'bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700', icon: 'text-emerald-600', loading: 'text-emerald-600' };
+const OTD_THEME     = { action: 'bg-white hover:bg-emerald-50 border border-emerald-200 text-emerald-700', icon: 'text-emerald-600', loading: 'text-emerald-700' };
+const TICKER_THEME  = { action: 'bg-white/10 hover:bg-white/15 text-white', icon: 'text-emerald-400', loading: 'text-emerald-300' };
+const slotTheme = (slotId) => {
+    if (slotId === 'otd-spotify-slot') return OTD_THEME;
+    if (slotId === 'countdown-spotify-slot') return TICKER_THEME;
+    return MODAL_THEME;
+};
 
 // Figures out what a gig has to offer, without touching the DOM: an
-// existing playlist to embed, a CTA to generate one, or nothing (past show,
-// no usable setlist). Kept separate from painting so syncHomeAudioSlots can
-// check OTD's content before committing to it, and fall back to the ticker
-// gig if OTD comes up empty.
-const resolveHomeAudioContent = async (entry, gigIsPast) => {
+// existing playlist to embed, a CTA to generate one, a generic artist embed
+// (modal only — see allowGenericFallback), or nothing. Kept separate from
+// painting so syncHomeAudioSlots can check OTD's content before committing
+// to it, and fall back to the ticker gig if OTD comes up empty.
+//
+// allowGenericFallback exists only for the gig modal: a past show with no
+// setlist can never generate a Relive playlist, but the modal still wants
+// to offer *something* to listen to (the artist's generic Spotify page)
+// rather than an empty slot. Home deliberately does NOT set this — an OTD
+// banner with nothing to offer should hand the slot to the ticker's gig
+// instead of settling for a generic artist embed (see syncHomeAudioSlots).
+const resolveAudioContent = async (entry, gigIsPast, { allowGenericFallback = false } = {}) => {
     if (!entry?.id || !window.currentUser?.isAuthUser) return null;
 
     const sourceType = gigIsPast ? 'own_setlist' : 'recent_artist_setlist';
@@ -116,7 +112,7 @@ const resolveHomeAudioContent = async (entry, gigIsPast) => {
         .maybeSingle();
 
     const playlistId = playlistIdFromUrl(existing?.playlist_url);
-    if (playlistId) return { kind: 'embed', playlistId, entry, gigIsPast };
+    if (playlistId) return { kind: 'embed', playlistId, entry, gigIsPast, allowGenericFallback };
 
     // A past show with no usable setlist can never generate a Relive
     // playlist (Get Gig Ready doesn't need one — it pulls a live setlist.fm
@@ -126,19 +122,24 @@ const resolveHomeAudioContent = async (entry, gigIsPast) => {
             p['Journal Key'] === entry['Journal Key'] &&
             (p.Artist || '').toLowerCase() === (entry.Band || '').toLowerCase()
         );
-        if (!hasUsableSetlist(performance?.Setlist)) return null;
+        if (!hasUsableSetlist(performance?.Setlist)) {
+            if (allowGenericFallback && entry.SpotifyArtistId) {
+                return { kind: 'generic', entry, gigIsPast, allowGenericFallback };
+            }
+            return null;
+        }
     }
 
-    return { kind: 'cta', entry, gigIsPast };
+    return { kind: 'cta', entry, gigIsPast, allowGenericFallback };
 };
 
-const paintHomeAudioSlot = (slotId, content) => {
+const paintAudioSlot = (slotId, content) => {
     const slot = document.getElementById(slotId);
     if (!slot) return;
     if (!content) { slot.innerHTML = ''; return; }
 
-    const theme = homeSlotTheme(slotId);
-    const { kind, entry, gigIsPast } = content;
+    const theme = slotTheme(slotId);
+    const { kind, entry, gigIsPast, allowGenericFallback } = content;
 
     if (kind === 'embed') {
         const wrapId = `${slotId}-embed`;
@@ -150,9 +151,24 @@ const paintHomeAudioSlot = (slotId, content) => {
                     <span class="text-[10px] font-black uppercase tracking-widest">Play ${gigIsPast ? 'relive the show' : 'get gig ready'} playlist</span>
                 </button>
             </div>`;
+    } else if (kind === 'generic') {
+        const wrapId = `${slotId}-embed`;
+        slot.innerHTML = `
+            <div id="${wrapId}" class="mt-3">
+                <button onclick="window.loadSpotifyEmbed('${wrapId}', 'artist/${entry.SpotifyArtistId}')"
+                        class="w-full flex items-center gap-2.5 ${theme.action} rounded-xl px-3 py-2.5 transition-colors text-left">
+                    <span class="w-8 h-8 rounded-md bg-emerald-100 flex items-center justify-center flex-shrink-0" aria-hidden="true">
+                        <i data-lucide="play-circle" class="w-4 h-4 ${theme.icon}"></i>
+                    </span>
+                    <span class="flex-1 min-w-0">
+                        <span class="block text-[11px] font-bold truncate">${(entry.Band || 'Listen on Spotify').replace(/</g, '&lt;')}</span>
+                        <span class="block text-[9px] uppercase tracking-widest opacity-70">No setlist yet &middot; tap to play artist</span>
+                    </span>
+                </button>
+            </div>`;
     } else {
         slot.innerHTML = `
-            <button onclick="window.generateHomePlaylist('${slotId}', '${escAttr(entry['Journal Key'])}', '${escAttr(entry.Band)}', '${escAttr(entry.Date)}', '${escAttr(entry.OfficialVenue)}', ${gigIsPast})"
+            <button onclick="window.generateSlotPlaylist('${slotId}', '${escAttr(entry['Journal Key'])}', '${escAttr(entry.Band)}', '${escAttr(entry.Date)}', '${escAttr(entry.OfficialVenue)}', ${gigIsPast}, ${!!allowGenericFallback})"
                     class="mt-3 w-full flex items-center justify-center gap-1.5 ${theme.action} text-[10px] font-black uppercase tracking-widest rounded-xl px-3 py-2.5 transition-colors">
                 <i data-lucide="${gigIsPast ? 'list-music' : 'zap'}" class="w-3.5 h-3.5 ${theme.icon}" aria-hidden="true"></i>
                 ${gigIsPast ? 'Generate relive playlist' : 'Get gig ready'}
@@ -168,23 +184,33 @@ const paintHomeAudioSlot = (slotId, content) => {
 // there's always a playlist/CTA presented somewhere rather than a dead OTD
 // banner with nothing underneath it.
 export const syncHomeAudioSlots = async (otdCandidate, tickerCandidate) => {
-    const otdContent = otdCandidate ? await resolveHomeAudioContent(otdCandidate.entry, otdCandidate.gigIsPast) : null;
+    const otdContent = otdCandidate ? await resolveAudioContent(otdCandidate.entry, otdCandidate.gigIsPast) : null;
 
     let winner = otdContent ? 'otd' : null;
     let tickerContent = null;
     if (!winner && tickerCandidate) {
-        tickerContent = await resolveHomeAudioContent(tickerCandidate.entry, tickerCandidate.gigIsPast);
+        tickerContent = await resolveAudioContent(tickerCandidate.entry, tickerCandidate.gigIsPast);
         if (tickerContent) winner = 'ticker';
     }
 
-    paintHomeAudioSlot('otd-spotify-slot', winner === 'otd' ? otdContent : null);
-    paintHomeAudioSlot('countdown-spotify-slot', winner === 'ticker' ? tickerContent : null);
+    paintAudioSlot('otd-spotify-slot', winner === 'otd' ? otdContent : null);
+    paintAudioSlot('countdown-spotify-slot', winner === 'ticker' ? tickerContent : null);
 };
 
-window.generateHomePlaylist = async (slotId, journalKey, artistName, gigDate, venueName, gigIsPast) => {
+// Gig modal's single audio slot — same resolve/paint pipeline as Home, but
+// with the generic-artist fallback enabled (see resolveAudioContent) since
+// there's no second banner to hand off to when a past show has no setlist.
+export const initModalAudioAction = async (journalKey, gigIsPast) => {
+    const entry = (window.journalData || []).find(g => g['Journal Key'] === journalKey);
+    if (!entry) return;
+    const slotId = `modal-spotify-slot-${journalKey.replace(/[^a-z0-9]/gi, '_')}`;
+    paintAudioSlot(slotId, await resolveAudioContent(entry, gigIsPast, { allowGenericFallback: true }));
+};
+
+window.generateSlotPlaylist = async (slotId, journalKey, artistName, gigDate, venueName, gigIsPast, allowGenericFallback = false) => {
     const slot = document.getElementById(slotId);
     if (slot) {
-        const theme = homeSlotTheme(slotId);
+        const theme = slotTheme(slotId);
         slot.innerHTML = `
             <div class="mt-3 flex items-center justify-center gap-1.5 ${theme.loading} text-[10px] font-black uppercase tracking-widest py-2.5">
                 <i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin" aria-hidden="true"></i> Generating…
@@ -199,7 +225,7 @@ window.generateHomePlaylist = async (slotId, journalKey, artistName, gigDate, ve
     }
 
     const entry = (window.journalData || []).find(g => g['Journal Key'] === journalKey);
-    if (entry) paintHomeAudioSlot(slotId, await resolveHomeAudioContent(entry, gigIsPast));
+    if (entry) paintAudioSlot(slotId, await resolveAudioContent(entry, gigIsPast, { allowGenericFallback }));
 };
 
 // ─── RELIVE THE SHOW ──────────────────────────────────────────────────────────

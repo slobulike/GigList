@@ -1,8 +1,8 @@
 /**
  * GigList Core Engine
- * v8.5.1 — 2026-09-14
+ * v8.5.2 — 2026-09-14
  * ------------------------------------------------------------------
- * ✅ Changed spotify widget on Home logic to always show an available playlist
+ * ✅ Improved spotify widget in gig modal to use home page logic to handle gig state (past, future, no setlist)
  */
 
 import * as Data from './modules/data.js';
@@ -29,7 +29,7 @@ import { initProfile } from './modules/profile.js';
 import { initBandMode } from './modules/band.js';
 import { applyFilters, buildSummaryLine, hasActiveFilters } from './modules/filters.js';
 import { initDeepLink, markAppReady } from './modules/deep-link.js';
-import { initPlaylistButton } from './modules/spotify.js';
+import { initModalAudioAction } from './modules/spotify.js';
 import { teardownModalTips } from './modules/modal-tips.js';
 import { checkNudgeTrigger, initExploreCard } from './modules/tip-nudges.js';
 import { openPhotoCropModal } from './modules/photo-crop.js';
@@ -38,7 +38,7 @@ import { openPhotoCropModal } from './modules/photo-crop.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "8.4.1";
+const APP_VERSION = "8.5.2";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
@@ -928,7 +928,7 @@ window.viewGigDetails = async (key) => {
         if (entry) setTimeout(() => initArchiveButton(entry), 150);
     }
 
-    setTimeout(() => initPlaylistButton(key, gigIsPast), 100);
+    setTimeout(() => initModalAudioAction(key, gigIsPast), 100);
 
     window.track('gig_modal_open', {
         band:  entry?.Band,

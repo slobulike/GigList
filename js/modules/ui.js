@@ -12,7 +12,7 @@ import { sortGigs, deriveType } from './data.js';
 import { getUniqueSongCount } from './data.js';
 import { initModalTips, teardownModalTips } from './modal-tips.js';
 import { renderEmptyStateTips } from './tip-nudges.js';
-import { renderSpotifyEmbedPlaceholder, syncHomeAudioSlots } from './spotify.js';
+import { syncHomeAudioSlots } from './spotify.js';
 
 let gigMap = null;
 let markerLayer = null;
@@ -1272,14 +1272,6 @@ const gigIsPast = (() => {
                                     class="bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 text-slate-500 text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
                                 <i data-lucide="pencil" class="w-3.5 h-3.5" aria-hidden="true"></i> EDIT
                             </button>
-                            ${window.currentUser?.isAuthUser && (hasSetlistData && gigIsPast || !gigIsPast) ? `
-                                <button id="${gigIsPast ? 'relive' : 'gig-ready'}-btn-${entry['Journal Key']?.replace(/[^a-z0-9]/gi,'_')}"
-                                        data-tip="playlist"
-                                        onclick="window.${gigIsPast ? 'createRelivePlaylist' : 'createGigReadyPlaylist'}('${entry['Journal Key']?.replace(/'/g, "\\'")}', '${entry.Band.replace(/'/g, "\\'")}', '${entry.Date}', '${entry.OfficialVenue?.replace(/'/g, "\\'")}')"
-                                        class="${gigIsPast ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-green-500 hover:bg-green-600'} text-white text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
-                                    <i data-lucide="${gigIsPast ? 'list-music' : 'zap'}" class="w-3.5 h-3.5" aria-hidden="true"></i>
-                                    ${gigIsPast ? 'RELIVE' : 'GET READY'}
-                                </button>` : ''}
                             <button onclick="window.shareGig(window.currentEditingGig)"
                                     data-tip="share"
                                     class="bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 text-slate-500 text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
@@ -1287,9 +1279,11 @@ const gigIsPast = (() => {
                             </button>
                             <span id="modal-archive-btn-wrap-${entry['Journal Key']?.replace(/[^a-z0-9]/gi,'_')}"></span>
                         </div>
-                        ${renderSpotifyEmbedPlaceholder(entry['Journal Key'], entry.SpotifyArtistId, entry.Band)}
+                        <!-- Populated by Spotify.initModalAudioAction: existing playlist embed,
+                             a generate CTA, or (past show with no setlist) a generic artist embed -->
+                        <div id="modal-spotify-slot-${entry['Journal Key']?.replace(/[^a-z0-9]/gi,'_')}"></div>
                         ${(hasPhotos || hasReview || hasSetlist) ? `
-                        <div class="flex items-center gap-4">
+                        <div class="flex items-center gap-4 mt-4">
                             ${hasPhotos ? `<a href="${photosUrl}" target="_blank" rel="noopener"
                                 class="flex items-center gap-1.5 text-[10px] font-black text-slate-400 hover:text-indigo-600 transition-colors"
                                 title="View photo album">
