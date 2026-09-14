@@ -142,6 +142,7 @@
             <div class="px-6 pt-7 pb-5 border-b border-slate-50">
                 <p class="text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-2">Live Show</p>
                 <h2 id="band-name" class="font-display text-6xl italic tracking-tight text-slate-900 leading-none uppercase">—</h2>
+                <p id="support-acts" class="hidden text-sm font-bold text-slate-400 mt-1.5">—</p>
             </div>
 
             <!-- Venue & Date meta row -->
@@ -357,16 +358,28 @@
         try {
             const rawKey = atob(encodedKey);
 
-            // 1. Performance record
-            const { data: perf, error: perfErr } = await supabase
+            // 1. Performance record(s) — a journal_key can have multiple rows
+            //    (Headline/Support billing, or many Festival rows), so fetch
+            //    them all and resolve which one is the headliner ourselves
+            //    rather than trusting an arbitrary single row back from the DB.
+            const { data: perfRows, error: perfErr } = await supabase
                 .from('performances')
                 .select('*')
                 .eq('journal_key', rawKey)
-                .limit(1)
-                .maybeSingle();
+                .order('artist', { ascending: true });
 
             if (perfErr) throw perfErr;
-            if (!perf)   throw new Error('Show not found.');
+            if (!perfRows || !perfRows.length) throw new Error('Show not found.');
+
+            // TODO: Festival journal_keys can have 10-20 rows (one per act on the
+            // bill) with no single headliner — these deserve a dedicated poster-style
+            // view rather than being squeezed into the single-artist layout below.
+            // For now we just deterministically pick one act (alphabetically first)
+            // so the page is at least stable rather than random.
+            const perf = perfRows.find(p => p.role === 'Headline') || perfRows[0];
+            const supportActs = perfRows
+                .filter(p => p.role === 'Support' && p.artist !== perf.artist)
+                .map(p => p.artist);
 
             // 2. Attendee count
             const { data: countData } = await supabase
@@ -381,6 +394,12 @@
             bandNameEl.textContent = perf.artist;
             venueEl.textContent    = perf.official_venue || 'Venue unknown';
             dateEl.textContent     = fmt(perf.date);
+
+            if (supportActs.length) {
+                const supportEl = document.getElementById('support-acts');
+                supportEl.textContent = `with ${supportActs.join(', ')}`;
+                supportEl.classList.remove('hidden');
+            }
 
             // 4. Social proof
             document.getElementById('attendee-count').textContent = attendeeCount;

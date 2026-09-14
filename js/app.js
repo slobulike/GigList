@@ -1,8 +1,8 @@
 /**
  * GigList Core Engine
- * v8.5.2 — 2026-09-14
+ * v8.5.3 — 2026-09-14
  * ------------------------------------------------------------------
- * ✅ Improved spotify widget in gig modal to use home page logic to handle gig state (past, future, no setlist)
+ * ✅ Fixed show.html sharing feature to always show the headliner
  */
 
 import * as Data from './modules/data.js';
@@ -38,7 +38,7 @@ import { openPhotoCropModal } from './modules/photo-crop.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "8.5.2";
+const APP_VERSION = "8.5.3";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
