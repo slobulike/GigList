@@ -98,10 +98,13 @@ const homeSlotTheme = (slotId) => slotId === 'otd-spotify-slot'
     ? { action: 'bg-white hover:bg-amber-50 border border-amber-200 text-amber-800', icon: 'text-amber-600', loading: 'text-amber-700' }
     : { action: 'bg-white/10 hover:bg-white/15 text-white', icon: 'text-white', loading: 'text-white/70' };
 
-export const renderHomeAudioAction = async (slotId, entry, gigIsPast) => {
-    const slot = document.getElementById(slotId);
-    if (!slot || !entry?.id || !window.currentUser?.isAuthUser) return;
-    const theme = homeSlotTheme(slotId);
+// Figures out what a gig has to offer, without touching the DOM: an
+// existing playlist to embed, a CTA to generate one, or nothing (past show,
+// no usable setlist). Kept separate from painting so syncHomeAudioSlots can
+// check OTD's content before committing to it, and fall back to the ticker
+// gig if OTD comes up empty.
+const resolveHomeAudioContent = async (entry, gigIsPast) => {
+    if (!entry?.id || !window.currentUser?.isAuthUser) return null;
 
     const sourceType = gigIsPast ? 'own_setlist' : 'recent_artist_setlist';
     const { data: existing } = await supabase
@@ -113,20 +116,7 @@ export const renderHomeAudioAction = async (slotId, entry, gigIsPast) => {
         .maybeSingle();
 
     const playlistId = playlistIdFromUrl(existing?.playlist_url);
-
-    if (playlistId) {
-        const wrapId = `${slotId}-embed`;
-        slot.innerHTML = `
-            <div id="${wrapId}" class="mt-3">
-                <button onclick="window.loadSpotifyEmbed('${wrapId}', 'playlist/${playlistId}')"
-                        class="w-full flex items-center gap-2.5 ${theme.action} rounded-xl px-3 py-2.5 transition-colors text-left">
-                    <i data-lucide="play-circle" class="w-4 h-4 ${theme.icon} flex-shrink-0" aria-hidden="true"></i>
-                    <span class="text-[10px] font-black uppercase tracking-widest">Play ${gigIsPast ? 'relive the show' : 'get gig ready'} playlist</span>
-                </button>
-            </div>`;
-        if (window.lucide) lucide.createIcons();
-        return;
-    }
+    if (playlistId) return { kind: 'embed', playlistId, entry, gigIsPast };
 
     // A past show with no usable setlist can never generate a Relive
     // playlist (Get Gig Ready doesn't need one — it pulls a live setlist.fm
@@ -136,19 +126,59 @@ export const renderHomeAudioAction = async (slotId, entry, gigIsPast) => {
             p['Journal Key'] === entry['Journal Key'] &&
             (p.Artist || '').toLowerCase() === (entry.Band || '').toLowerCase()
         );
-        if (!hasUsableSetlist(performance?.Setlist)) {
-            slot.innerHTML = '';
-            return;
-        }
+        if (!hasUsableSetlist(performance?.Setlist)) return null;
     }
 
-    slot.innerHTML = `
-        <button onclick="window.generateHomePlaylist('${slotId}', '${escAttr(entry['Journal Key'])}', '${escAttr(entry.Band)}', '${escAttr(entry.Date)}', '${escAttr(entry.OfficialVenue)}', ${gigIsPast})"
-                class="mt-3 w-full flex items-center justify-center gap-1.5 ${theme.action} text-[10px] font-black uppercase tracking-widest rounded-xl px-3 py-2.5 transition-colors">
-            <i data-lucide="${gigIsPast ? 'list-music' : 'zap'}" class="w-3.5 h-3.5 ${theme.icon}" aria-hidden="true"></i>
-            ${gigIsPast ? 'Generate relive playlist' : 'Get gig ready'}
-        </button>`;
+    return { kind: 'cta', entry, gigIsPast };
+};
+
+const paintHomeAudioSlot = (slotId, content) => {
+    const slot = document.getElementById(slotId);
+    if (!slot) return;
+    if (!content) { slot.innerHTML = ''; return; }
+
+    const theme = homeSlotTheme(slotId);
+    const { kind, entry, gigIsPast } = content;
+
+    if (kind === 'embed') {
+        const wrapId = `${slotId}-embed`;
+        slot.innerHTML = `
+            <div id="${wrapId}" class="mt-3">
+                <button onclick="window.loadSpotifyEmbed('${wrapId}', 'playlist/${content.playlistId}')"
+                        class="w-full flex items-center gap-2.5 ${theme.action} rounded-xl px-3 py-2.5 transition-colors text-left">
+                    <i data-lucide="play-circle" class="w-4 h-4 ${theme.icon} flex-shrink-0" aria-hidden="true"></i>
+                    <span class="text-[10px] font-black uppercase tracking-widest">Play ${gigIsPast ? 'relive the show' : 'get gig ready'} playlist</span>
+                </button>
+            </div>`;
+    } else {
+        slot.innerHTML = `
+            <button onclick="window.generateHomePlaylist('${slotId}', '${escAttr(entry['Journal Key'])}', '${escAttr(entry.Band)}', '${escAttr(entry.Date)}', '${escAttr(entry.OfficialVenue)}', ${gigIsPast})"
+                    class="mt-3 w-full flex items-center justify-center gap-1.5 ${theme.action} text-[10px] font-black uppercase tracking-widest rounded-xl px-3 py-2.5 transition-colors">
+                <i data-lucide="${gigIsPast ? 'list-music' : 'zap'}" class="w-3.5 h-3.5 ${theme.icon}" aria-hidden="true"></i>
+                ${gigIsPast ? 'Generate relive playlist' : 'Get gig ready'}
+            </button>`;
+    }
     if (window.lucide) lucide.createIcons();
+};
+
+// Coordinates the single shared Home audio slot. otdCandidate/tickerCandidate
+// are `{ entry, gigIsPast } | null`. OTD gets first refusal on the slot, but
+// only if it actually has something to show — if its gig has no playlist
+// and no usable setlist, we fall through to the ticker's gig instead, so
+// there's always a playlist/CTA presented somewhere rather than a dead OTD
+// banner with nothing underneath it.
+export const syncHomeAudioSlots = async (otdCandidate, tickerCandidate) => {
+    const otdContent = otdCandidate ? await resolveHomeAudioContent(otdCandidate.entry, otdCandidate.gigIsPast) : null;
+
+    let winner = otdContent ? 'otd' : null;
+    let tickerContent = null;
+    if (!winner && tickerCandidate) {
+        tickerContent = await resolveHomeAudioContent(tickerCandidate.entry, tickerCandidate.gigIsPast);
+        if (tickerContent) winner = 'ticker';
+    }
+
+    paintHomeAudioSlot('otd-spotify-slot', winner === 'otd' ? otdContent : null);
+    paintHomeAudioSlot('countdown-spotify-slot', winner === 'ticker' ? tickerContent : null);
 };
 
 window.generateHomePlaylist = async (slotId, journalKey, artistName, gigDate, venueName, gigIsPast) => {
@@ -169,7 +199,7 @@ window.generateHomePlaylist = async (slotId, journalKey, artistName, gigDate, ve
     }
 
     const entry = (window.journalData || []).find(g => g['Journal Key'] === journalKey);
-    if (entry) await renderHomeAudioAction(slotId, entry, gigIsPast);
+    if (entry) paintHomeAudioSlot(slotId, await resolveHomeAudioContent(entry, gigIsPast));
 };
 
 // ─── RELIVE THE SHOW ──────────────────────────────────────────────────────────

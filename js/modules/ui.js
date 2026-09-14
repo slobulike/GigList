@@ -12,7 +12,7 @@ import { sortGigs, deriveType } from './data.js';
 import { getUniqueSongCount } from './data.js';
 import { initModalTips, teardownModalTips } from './modal-tips.js';
 import { renderEmptyStateTips } from './tip-nudges.js';
-import { renderSpotifyEmbedPlaceholder, renderHomeAudioAction } from './spotify.js';
+import { renderSpotifyEmbedPlaceholder, syncHomeAudioSlots } from './spotify.js';
 
 let gigMap = null;
 let markerLayer = null;
@@ -219,7 +219,7 @@ export const renderOTDBanner = (data) => {
     if (matches.length === 0) {
         banner.classList.add('hidden');
         window._homeOtdAudioCandidate = null;
-        syncHomeAudioSlot();
+        syncHomeAudioSlots(null, window._homeTickerAudioCandidate);
         return;
     }
 
@@ -242,10 +242,12 @@ export const renderOTDBanner = (data) => {
     if (window.lucide) lucide.createIcons();
 
     // On This Day and Next/Last show share a single audio slot between them
-    // (see syncHomeAudioSlot) so the two banners never both expand to fit a
-    // playlist CTA at once. OTD takes priority when both apply.
-    window._homeOtdAudioCandidate = gig;
-    syncHomeAudioSlot();
+    // (see syncHomeAudioSlots in spotify.js) so the two banners never both
+    // expand to fit a playlist CTA at once. OTD takes priority when both
+    // apply — but only if OTD's own gig actually has something to show;
+    // syncHomeAudioSlots falls back to the ticker's gig otherwise.
+    window._homeOtdAudioCandidate = { entry: gig, gigIsPast: true };
+    syncHomeAudioSlots(window._homeOtdAudioCandidate, window._homeTickerAudioCandidate);
 };
 
 export const updateTicker = (data) => {
@@ -322,27 +324,6 @@ export const updateTicker = (data) => {
         window._homeTickerAudioCandidate = { entry: lastGig, gigIsPast: true };
     } else {
         window._homeTickerAudioCandidate = null;
-    }
-};
-
-// On This Day and Next/Last show share a single audio slot between them so
-// the two banners never both expand to fit a playlist CTA at once — OTD
-// takes priority when both apply. Only called from renderOTDBanner, which
-// always runs immediately after updateTicker (see app.js call sites), so
-// by the time this runs both candidates are current.
-const syncHomeAudioSlot = () => {
-    const otdEntry = window._homeOtdAudioCandidate;
-    const ticker   = window._homeTickerAudioCandidate;
-
-    const otdSlot     = document.getElementById('otd-spotify-slot');
-    const tickerSlot  = document.getElementById('countdown-spotify-slot');
-    if (otdSlot)    otdSlot.innerHTML = '';
-    if (tickerSlot) tickerSlot.innerHTML = '';
-
-    if (otdEntry) {
-        renderHomeAudioAction('otd-spotify-slot', otdEntry, true);
-    } else if (ticker) {
-        renderHomeAudioAction('countdown-spotify-slot', ticker.entry, ticker.gigIsPast);
     }
 };
 

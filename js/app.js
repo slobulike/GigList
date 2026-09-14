@@ -1,10 +1,8 @@
 /**
  * GigList Core Engine
- * v8.5.0 — 2026-09-13
+ * v8.5.1 — 2026-09-14
  * ------------------------------------------------------------------
- * ✅ Added spotify widget to Home and Gig Modal
- * ✅ Cleaned buddy count logic in achievements and charts
- * ✅ Bug fix to pick list in Collection Editor for "Condition" field
+ * ✅ Changed spotify widget on Home logic to always show an available playlist
  */
 
 import * as Data from './modules/data.js';
