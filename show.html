@@ -135,8 +135,20 @@
     <!-- Main scroll area -->
     <main class="max-w-md mx-auto px-4 pt-6 pb-36 space-y-5">
 
+        <!-- ── FESTIVAL POSTER HERO (shown instead of the standard hero above) ── -->
+        <div id="festival-hero" class="hidden fade-up rounded-[2rem] overflow-hidden relative shadow-sm min-h-[420px] flex flex-col justify-end">
+            <div id="festival-bg" class="absolute inset-0 bg-cover bg-center" style="background-image: linear-gradient(160deg, #312e81, #1e1b4b 60%, #0f172a);"></div>
+            <div class="absolute inset-0 bg-gradient-to-t from-slate-950/95 via-slate-950/75 to-slate-950/40"></div>
+            <div class="relative px-6 pt-6 pb-7 text-center">
+                <h2 id="festival-title" class="font-display text-4xl italic tracking-tight text-white leading-tight uppercase mb-1">—</h2>
+                <p id="festival-meta" class="text-xs font-bold text-slate-300 mb-6">—</p>
+                <div id="festival-lineup" class="flex flex-wrap items-center justify-center gap-x-2.5 gap-y-2 max-w-sm mx-auto"></div>
+                <p class="text-[10px] font-bold text-slate-400 mt-6 uppercase tracking-widest">Gig List users saw these bands here</p>
+            </div>
+        </div>
+
         <!-- ── HERO BLOCK ─────────────────────────────────────────────────── -->
-        <div class="fade-up bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden">
+        <div id="standard-hero" class="fade-up bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden">
 
             <!-- Band / artist name -->
             <div class="px-6 pt-7 pb-5 border-b border-slate-50">
@@ -180,7 +192,7 @@
         </div>
 
         <!-- ── SETLIST ────────────────────────────────────────────────────── -->
-        <div class="fade-up delay-2 bg-white rounded-[2rem] border border-slate-100 shadow-sm p-6">
+        <div id="setlist-card" class="fade-up delay-2 bg-white rounded-[2rem] border border-slate-100 shadow-sm p-6">
             <div class="flex items-center justify-between mb-4">
                 <p class="text-[10px] font-black uppercase tracking-widest text-slate-400">Setlist</p>
                 <div id="setlist-count" class="hidden bg-indigo-50 text-indigo-600 text-[10px] font-black px-2.5 py-1 rounded-full"></div>
@@ -372,10 +384,10 @@
             if (!perfRows || !perfRows.length) throw new Error('Show not found.');
 
             // TODO: Festival journal_keys can have 10-20 rows (one per act on the
-            // bill) with no single headliner — these deserve a dedicated poster-style
-            // view rather than being squeezed into the single-artist layout below.
-            // For now we just deterministically pick one act (alphabetically first)
-            // so the page is at least stable rather than random.
+            // bill), handled below via the dedicated poster view (renderFestivalPoster).
+            const festivalRows = perfRows.filter(p => p.role === 'Festival');
+            const isFestival   = festivalRows.length > 0;
+
             const perf = perfRows.find(p => p.role === 'Headline') || perfRows[0];
             const supportActs = perfRows
                 .filter(p => p.role === 'Support' && p.artist !== perf.artist)
@@ -386,60 +398,16 @@
                 .rpc('get_public_attendee_count', { p_journal_key: rawKey });
             const attendeeCount = Math.max(countData ?? 1, 1);
 
-            // 3. Populate hero
-            const bandNameEl = document.getElementById('band-name');
-            const venueEl    = document.getElementById('venue-name');
-            const dateEl     = document.getElementById('show-date');
-
-            bandNameEl.textContent = perf.artist;
-            venueEl.textContent    = perf.official_venue || 'Venue unknown';
-            dateEl.textContent     = fmt(perf.date);
-
-            if (supportActs.length) {
-                const supportEl = document.getElementById('support-acts');
-                supportEl.textContent = `with ${supportActs.join(', ')}`;
-                supportEl.classList.remove('hidden');
+            // 3. Populate hero — festival poster vs. standard headliner card
+            if (isFestival) {
+                await renderFestivalPoster(festivalRows, rawKey);
+            } else {
+                renderStandardShow(perf, supportActs);
             }
 
             // 4. Social proof
             document.getElementById('attendee-count').textContent = attendeeCount;
             document.getElementById('attendee-plural').textContent = attendeeCount === 1 ? '' : 's';
-
-            // 5. Review / notes
-            if (perf.notes) {
-                document.getElementById('review-text').textContent = perf.notes;
-                document.getElementById('review-card').classList.remove('hidden');
-            }
-
-            // 6. Setlist
-            if (perf.setlist) setlist_html(perf.setlist);
-
-            // 7. Setlist URL
-            if (perf.setlist_url) {
-                document.getElementById('setlist-url-link').href = perf.setlist_url;
-                document.getElementById('setlist-url-card').classList.remove('hidden');
-            }
-
-            // 8. Review URL
-            if (perf.review_url) {
-                document.getElementById('review-url-link').href    = perf.review_url;
-                document.getElementById('review-url-host').textContent = hostnameOf(perf.review_url);
-                document.getElementById('review-url-card').classList.remove('hidden');
-            }
-
-            // 9. Page meta
-            const pageTitle = `${perf.artist} at ${perf.official_venue}`;
-            const pageDesc  = `${fmt(perf.date)} · ${perf.official_venue} — tracked on Gig List`;
-            document.title = `${pageTitle} | Gig List`;
-            document.querySelector('meta[property="og:title"]')?.setAttribute('content', pageTitle);
-            document.querySelector('meta[property="og:description"]')?.setAttribute('content', pageDesc);
-
-            // 10. Share
-            setupShare(
-                pageTitle,
-                `${perf.artist} at ${perf.official_venue}, ${fmt(perf.date)} — tracked on Gig List`,
-                window.location.href
-            );
 
             // Show
             document.getElementById('loader').classList.add('hidden');
@@ -450,6 +418,142 @@
             console.error('Public page error:', err);
             showError(err.message);
         }
+    }
+
+    // ── Standard (Headline/Support) rendering ────────────────────────────────
+    function renderStandardShow(perf, supportActs) {
+        const bandNameEl = document.getElementById('band-name');
+        const venueEl    = document.getElementById('venue-name');
+        const dateEl     = document.getElementById('show-date');
+
+        bandNameEl.textContent = perf.artist;
+        venueEl.textContent    = perf.official_venue || 'Venue unknown';
+        dateEl.textContent     = fmt(perf.date);
+
+        if (supportActs.length) {
+            const supportEl = document.getElementById('support-acts');
+            supportEl.textContent = `with ${supportActs.join(', ')}`;
+            supportEl.classList.remove('hidden');
+        }
+
+        // Notes
+        if (perf.notes) {
+            document.getElementById('review-text').textContent = perf.notes;
+            document.getElementById('review-card').classList.remove('hidden');
+        }
+
+        // Setlist
+        if (perf.setlist) setlist_html(perf.setlist);
+
+        // Setlist URL
+        if (perf.setlist_url) {
+            document.getElementById('setlist-url-link').href = perf.setlist_url;
+            document.getElementById('setlist-url-card').classList.remove('hidden');
+        }
+
+        // Review URL
+        if (perf.review_url) {
+            document.getElementById('review-url-link').href    = perf.review_url;
+            document.getElementById('review-url-host').textContent = hostnameOf(perf.review_url);
+            document.getElementById('review-url-card').classList.remove('hidden');
+        }
+
+        // Page meta
+        const pageTitle = `${perf.artist} at ${perf.official_venue}`;
+        const pageDesc  = `${fmt(perf.date)} · ${perf.official_venue} — tracked on Gig List`;
+        document.title = `${pageTitle} | Gig List`;
+        document.querySelector('meta[property="og:title"]')?.setAttribute('content', pageTitle);
+        document.querySelector('meta[property="og:description"]')?.setAttribute('content', pageDesc);
+
+        setupShare(
+            pageTitle,
+            `${perf.artist} at ${perf.official_venue}, ${fmt(perf.date)} — tracked on Gig List`,
+            window.location.href
+        );
+    }
+
+    // ── Festival poster rendering ─────────────────────────────────────────────
+    // No billing/stage/day data exists yet for Festival rows (flat list of acts
+    // only), so this deliberately doesn't imply a real running order or lineup
+    // hierarchy — sizing below is purely to fit names tidily, not to rank acts.
+    function posterSizeClass(name) {
+        if (name.length <= 6)  return 'text-2xl';
+        if (name.length <= 14) return 'text-lg';
+        return 'text-sm';
+    }
+
+    async function renderFestivalPoster(festivalRows, rawKey) {
+        document.getElementById('standard-hero').classList.add('hidden');
+        document.getElementById('setlist-card').classList.add('hidden');
+        document.getElementById('festival-hero').classList.remove('hidden');
+
+        const titleRow = festivalRows[0];
+
+        // performances has no festival-name field (a gap worth adding there
+        // eventually) — for now, pull the real name from journals.band, which
+        // holds it for any journals row logged with festival = true.
+        let title = 'Festival Lineup';
+        const { data: journalRow } = await supabase
+            .from('journals')
+            .select('band')
+            .eq('journal_key', rawKey)
+            .eq('festival', true)
+            .limit(1)
+            .maybeSingle();
+        if (journalRow?.band) title = journalRow.band;
+
+        const venue    = titleRow.official_venue || 'Venue unknown';
+        const dateText = fmt(titleRow.date);
+
+        const lineupNames = [...new Set(festivalRows.map(p => p.artist))]
+            .sort((a, b) => a.localeCompare(b));
+
+        document.getElementById('festival-title').textContent = title;
+        document.getElementById('festival-meta').textContent  = `${venue} · ${dateText}`;
+
+        const lineupEl = document.getElementById('festival-lineup');
+        lineupNames.forEach((name, i) => {
+            if (i > 0) {
+                const dot = document.createElement('span');
+                dot.className = 'text-slate-500 text-sm';
+                dot.textContent = '·';
+                lineupEl.appendChild(dot);
+            }
+            const span = document.createElement('span');
+            span.className = `font-display italic uppercase text-white leading-none ${posterSizeClass(name)}`;
+            span.textContent = name;
+            lineupEl.appendChild(span);
+        });
+
+        // Background image: pulled from the artists table (spotify_image_url),
+        // keyed off whichever acts on this bill have an artist_id set. Picks the
+        // first (alphabetically) act with an image, purely for a deterministic
+        // stable background rather than any prominence signal.
+        const artistIds = [...new Set(festivalRows.map(p => p.artist_id).filter(Boolean))];
+        if (artistIds.length) {
+            const { data: artistRows } = await supabase
+                .from('artists')
+                .select('name, spotify_image_url')
+                .in('id', artistIds);
+
+            const withImages = (artistRows || [])
+                .filter(a => a.spotify_image_url)
+                .sort((a, b) => a.name.localeCompare(b.name));
+
+            if (withImages.length) {
+                document.getElementById('festival-bg').style.backgroundImage =
+                    `url('${withImages[0].spotify_image_url}')`;
+            }
+        }
+
+        // Page meta
+        const pageTitle = `${title} — Lineup`;
+        const pageDesc  = `${lineupNames.length} bands at ${venue}, ${dateText} — tracked on Gig List`;
+        document.title = `${pageTitle} | Gig List`;
+        document.querySelector('meta[property="og:title"]')?.setAttribute('content', pageTitle);
+        document.querySelector('meta[property="og:description"]')?.setAttribute('content', pageDesc);
+
+        setupShare(pageTitle, pageDesc, window.location.href);
     }
 
     function showError(msg) {

@@ -631,6 +631,39 @@ function showSetlistConfirmation(setlists) {
 
 // ─── SAVE ─────────────────────────────────────────────────────────────────────
 
+/**
+ * Ensures an `artists` row exists for the given name, creating one if
+ * needed. Returns the row's id (or null if the insert failed). Does NOT
+ * run enrichment itself — callers decide whether/when to call
+ * enrichNewArtist(name) alongside this, since some write paths (band-mode
+ * archive writes) intentionally skip enrichment.
+ */
+async function _ensureArtistId(name) {
+    if (!name) return null;
+
+    const { data: existingArtist } = await supabase
+        .from('artists')
+        .select('id')
+        .eq('name', name)
+        .maybeSingle();
+
+    if (existingArtist) return existingArtist.id;
+
+    const { data: newArtist, error } = await supabase
+        .from('artists')
+        .insert({ name })
+        .select('id')
+        .single();
+
+    if (error) {
+        console.warn(`Could not create artist row for "${name}":`, error.message);
+        return null;
+    }
+
+    invalidateArtistCache();
+    return newArtist.id;
+}
+
 window.saveGig = async () => {
     // Helper to get values
     const _get = (id) => document.getElementById(id)?.value || '';
@@ -702,24 +735,7 @@ window.showSpinner?.('Saving show…');
         if (dbError) throw dbError;
 
         // Ensure artist exists and fetch their id for the journal FK
-        let artistId = null;
-        const { data: existingArtist } = await supabase
-            .from('artists')
-            .select('id')
-            .eq('name', band)
-            .maybeSingle();
-
-        if (existingArtist) {
-            artistId = existingArtist.id;
-        } else {
-            const { data: newArtist } = await supabase
-                .from('artists')
-                .insert({ name: band })
-                .select('id')
-                .single();
-            if (newArtist) artistId = newArtist.id;
-            invalidateArtistCache();
-        }
+        let artistId = await _ensureArtistId(band);
 
         // Patch artist_id onto the journal row now we have it
         if (artistId) {
@@ -767,6 +783,34 @@ window.showSpinner?.('Saving show…');
             try {
                 if (isFest === 'Y') {
                     // ── Festival path ──────────────────────────────────────────
+                    // Ensure every act on this bill has an `artists` row and has
+                    // been through enrichment (mbid + Spotify) — not just newly
+                    // typed names, but also pool-ticked acts that may have been
+                    // saved before this linking existed and still lack artist_id.
+                    // This is what previously depended entirely on a manual
+                    // backfill_artists.py run; doing it here means new festival
+                    // acts get resolved as soon as they're logged.
+                    const artistIdByName = {};
+                    for (const name of fullLineup) {
+                        const id = await _ensureArtistId(name);
+                        if (id) {
+                            artistIdByName[name] = id;
+                            enrichNewArtist(name); // fire-and-forget, no-op if already enriched
+                        }
+                    }
+
+                    // Backfill artist_id on existing performances rows for this
+                    // journal_key (covers pool-ticked acts saved before artist_id
+                    // linking existed). No-op for names with no existing row yet.
+                    for (const [name, id] of Object.entries(artistIdByName)) {
+                        await supabase
+                            .from('performances')
+                            .update({ artist_id: id })
+                            .eq('journal_key', journalKey)
+                            .eq('artist', name)
+                            .is('artist_id', null);
+                    }
+
                     // Only the names NOT ticked from the pool need a fresh
                     // setlist.fm lookup — ticked ones already have performances
                     // rows for this journal_key, so re-searching them would
@@ -785,10 +829,21 @@ window.showSpinner?.('Saving show…');
                                 // which is keyed to the start date + venue the user entered.
                                 // Without this, performances are orphaned under band-specific
                                 // keys that no journal row points to.
+                                //
+                                // Also override role — groupByShow() always tags fresh rows
+                                // 'Headline' by default, which is wrong here (this is exactly
+                                // what caused past festivals to be mis-tagged), and attach
+                                // artist_id resolved above. setlist.fm's own name spelling for
+                                // an act may differ slightly from what the user typed, so fall
+                                // back to fuzzy matching via artistNamesMatch.
                                 const fixedPerfs = show.performances.map(p => ({
                                     ...p,
                                     journal_key:    journalKey,
                                     official_venue: venue,
+                                    role:           'Festival',
+                                    artist_id:      artistIdByName[p.artist]
+                                        ?? artistIdByName[Object.keys(artistIdByName).find(n => artistNamesMatch(n, p.artist))]
+                                        ?? null,
                                 }));
                                 perfRows.push(...fixedPerfs);
                                 venueRows.push(buildVenueRow(show.venueRaw));
@@ -852,7 +907,7 @@ window.showSpinner?.('Saving show…');
                                         const perfRows = [];
                                         const venueRows = [];
                                         for (const show of grouped.values()) {
-                                            perfRows.push(...show.performances);
+                                            perfRows.push(...show.performances.map(p => ({ ...p, artist_id: artistId })));
                                             venueRows.push(buildVenueRow(show.venueRaw));
                                         }
                                         await Promise.all([upsertVenues(venueRows), upsertPerformances(perfRows)]);
