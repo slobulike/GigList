@@ -150,11 +150,15 @@
         <!-- ── HERO BLOCK ─────────────────────────────────────────────────── -->
         <div id="standard-hero" class="fade-up bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden">
 
-            <!-- Band / artist name -->
-            <div class="px-6 pt-7 pb-5 border-b border-slate-50">
-                <p class="text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-2">Live Show</p>
-                <h2 id="band-name" class="font-display text-6xl italic tracking-tight text-slate-900 leading-none uppercase">—</h2>
-                <p id="support-acts" class="hidden text-sm font-bold text-slate-400 mt-1.5">—</p>
+            <!-- Band / artist name — full-bleed artist image banner -->
+            <div class="relative min-h-[260px] flex flex-col justify-end overflow-hidden">
+                <div id="artist-hero-bg" class="absolute inset-0 bg-cover bg-center" style="background-image: linear-gradient(160deg, #312e81, #1e1b4b 60%, #0f172a);"></div>
+                <div class="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-slate-950/35 to-slate-950/10"></div>
+                <div class="relative px-6 pt-10 pb-5">
+                    <p class="text-[10px] font-black uppercase tracking-widest text-indigo-300 mb-2">Live Show</p>
+                    <h2 id="band-name" class="font-display text-5xl italic tracking-tight text-white leading-none uppercase">—</h2>
+                    <p id="support-acts" class="hidden text-sm font-bold text-slate-300 mt-1.5">—</p>
+                </div>
             </div>
 
             <!-- Venue & Date meta row -->
@@ -402,7 +406,7 @@
             if (isFestival) {
                 await renderFestivalPoster(festivalRows, rawKey);
             } else {
-                renderStandardShow(perf, supportActs);
+                await renderStandardShow(perf, supportActs);
             }
 
             // 4. Social proof
@@ -421,7 +425,7 @@
     }
 
     // ── Standard (Headline/Support) rendering ────────────────────────────────
-    function renderStandardShow(perf, supportActs) {
+    async function renderStandardShow(perf, supportActs) {
         const bandNameEl = document.getElementById('band-name');
         const venueEl    = document.getElementById('venue-name');
         const dateEl     = document.getElementById('show-date');
@@ -434,6 +438,21 @@
             const supportEl = document.getElementById('support-acts');
             supportEl.textContent = `with ${supportActs.join(', ')}`;
             supportEl.classList.remove('hidden');
+        }
+
+        // Artist hero image — same artists.spotify_image_url used for the
+        // festival poster background, filling the top banner here too rather
+        // than a small avatar (which read as too tiny on mobile).
+        if (perf.artist_id) {
+            const { data: artistRow } = await supabase
+                .from('artists')
+                .select('spotify_image_url')
+                .eq('id', perf.artist_id)
+                .maybeSingle();
+            if (artistRow?.spotify_image_url) {
+                document.getElementById('artist-hero-bg').style.backgroundImage =
+                    `url('${artistRow.spotify_image_url}')`;
+            }
         }
 
         // Notes

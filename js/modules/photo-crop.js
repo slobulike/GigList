@@ -6,14 +6,25 @@
 // Drop-in replacement for the old "select file -> upload immediately" flow.
 // Splices in BEFORE compressImage/upload, so everything below stays the same.
 
-// Match this to the gig modal's hero photo container's real aspect ratio.
-// Screenshots show ~16:9. Change this one constant if that's not exact.
+// Default aspect ratio, matching the gig modal's hero photo container.
+// Screenshots show ~16:9. Callers that need a different frame (e.g. the
+// collection grid's 1:1 cards) pass their own ratio into openPhotoCropModal.
 export const PHOTO_CROP_ASPECT_RATIO = 16 / 9;
 
-// Output render size (sets final image resolution; compressImage will
-// still downscale further if needed, so this just needs to be >= maxDimension).
-const PHOTO_CROP_OUTPUT_WIDTH = 1600;
-const PHOTO_CROP_OUTPUT_HEIGHT = Math.round(PHOTO_CROP_OUTPUT_WIDTH / PHOTO_CROP_ASPECT_RATIO);
+// Longest edge of the rendered output (sets final image resolution;
+// compressImage will still downscale further if needed).
+const PHOTO_CROP_OUTPUT_MAX_DIMENSION = 1600;
+
+// Given an aspect ratio (width / height), returns { width, height } for the
+// output canvas so nothing gets stretched, capping the longest edge.
+function _outputDimensionsForRatio(aspectRatio) {
+    if (aspectRatio >= 1) {
+        const width = PHOTO_CROP_OUTPUT_MAX_DIMENSION;
+        return { width, height: Math.round(width / aspectRatio) };
+    }
+    const height = PHOTO_CROP_OUTPUT_MAX_DIMENSION;
+    return { width: Math.round(height * aspectRatio), height };
+}
 
 let _cropState = null; // holds in-progress crop session data
 
@@ -49,7 +60,7 @@ function _buildCropModal() {
     `;
     document.body.appendChild(modal);
 
-    document.getElementById('photo-crop-cancel').addEventListener('click', _closeCropModal);
+    document.getElementById('photo-crop-cancel').addEventListener('click', _cancelCrop);
     document.getElementById('photo-crop-use').addEventListener('click', _confirmCrop);
 
     const stage = document.getElementById('photo-crop-stage');
@@ -61,7 +72,7 @@ function _buildCropModal() {
     stage.addEventListener('wheel', _onWheel, { passive: false });
 }
 
-function _layoutFrame() {
+function _layoutFrame(aspectRatio = PHOTO_CROP_ASPECT_RATIO) {
     const stage = document.getElementById('photo-crop-stage');
     const frame = document.getElementById('photo-crop-frame');
     const stageRect = stage.getBoundingClientRect();
@@ -71,11 +82,11 @@ function _layoutFrame() {
     }
 
     let frameW = stageRect.width * 0.92;
-    let frameH = frameW / PHOTO_CROP_ASPECT_RATIO;
+    let frameH = frameW / aspectRatio;
     const maxH = stageRect.height * 0.8;
     if (frameH > maxH) {
         frameH = maxH;
-        frameW = frameH * PHOTO_CROP_ASPECT_RATIO;
+        frameW = frameH * aspectRatio;
     }
 
     const left = (stageRect.width - frameW) / 2;
@@ -183,7 +194,7 @@ function _onWheel(e) {
     _drawCrop();
 }
 
-export function openPhotoCropModal(file, onCropped) {
+export function openPhotoCropModal(file, onCropped, aspectRatio = PHOTO_CROP_ASPECT_RATIO, onCancelled) {
     _buildCropModal();
     const modal = document.getElementById('photo-crop-modal');
     if (!modal) return;
@@ -195,11 +206,15 @@ export function openPhotoCropModal(file, onCropped) {
     const img = new Image();
 
     img.onload = () => {
-        const frameLayout = _layoutFrame();
+        const frameLayout = _layoutFrame(aspectRatio);
         const minScale = _minScaleToCoverFrame(img, frameLayout.frameW, frameLayout.frameH);
+        const { width: outputWidth, height: outputHeight } = _outputDimensionsForRatio(aspectRatio);
 
         _cropState = {
-            img, canvas, ctx, file, onCropped,
+            img, canvas, ctx, file, onCropped, onCancelled,
+            aspectRatio,
+            outputWidth,
+            outputHeight,
             scale: minScale,
             offsetX: 0,
             offsetY: 0,
@@ -221,6 +236,8 @@ export function openPhotoCropModal(file, onCropped) {
     img.src = url;
 }
 
+// Plain teardown, shared by both the cancel and confirm paths — never fires
+// a callback itself, so each caller controls exactly which callback runs.
 function _closeCropModal() {
     const modal = document.getElementById('photo-crop-modal');
     if (modal) modal.classList.add('hidden');
@@ -228,9 +245,15 @@ function _closeCropModal() {
     _cropState = null;
 }
 
+function _cancelCrop() {
+    const onCancelled = _cropState?.onCancelled;
+    _closeCropModal();
+    onCancelled?.();
+}
+
 function _confirmCrop() {
     if (!_cropState) return;
-    const { img, scale, offsetX, offsetY, frameLayout, file, onCropped } = _cropState;
+    const { img, scale, offsetX, offsetY, frameLayout, file, onCropped, outputWidth, outputHeight } = _cropState;
 
     // Map the on-screen frame rect back into source-image pixel space.
     const stageCenterX = frameLayout.stageRect.width / 2 + offsetX;
@@ -246,10 +269,10 @@ function _confirmCrop() {
     const srcH = frameLayout.frameH / scale;
 
     const outCanvas = document.createElement('canvas');
-    outCanvas.width = PHOTO_CROP_OUTPUT_WIDTH;
-    outCanvas.height = PHOTO_CROP_OUTPUT_HEIGHT;
+    outCanvas.width = outputWidth;
+    outCanvas.height = outputHeight;
     const outCtx = outCanvas.getContext('2d');
-    outCtx.drawImage(img, srcX, srcY, srcW, srcH, 0, 0, PHOTO_CROP_OUTPUT_WIDTH, PHOTO_CROP_OUTPUT_HEIGHT);
+    outCtx.drawImage(img, srcX, srcY, srcW, srcH, 0, 0, outputWidth, outputHeight);
 
     outCanvas.toBlob((blob) => {
         if (!blob) {
@@ -265,7 +288,7 @@ function _confirmCrop() {
 
 window.addEventListener('resize', () => {
     if (!_cropState) return;
-    _cropState.frameLayout = _layoutFrame();
+    _cropState.frameLayout = _layoutFrame(_cropState.aspectRatio);
     const minScale = _minScaleToCoverFrame(_cropState.img, _cropState.frameLayout.frameW, _cropState.frameLayout.frameH);
     if (_cropState.scale < minScale) _cropState.scale = minScale;
     _clampOffsets();

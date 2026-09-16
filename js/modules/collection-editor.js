@@ -23,6 +23,12 @@
 import { supabase } from './supabase.js';
 import { enrichNewArtist } from './artist-enrichment.js';
 import { escapeHtml } from './utils.js';
+import { openPhotoCropModal } from './photo-crop.js';
+
+// Collection cards render hero photos in a square tile (see collection.js
+// _renderGridCard's aspect-square container) — not the gig modal's 16:9 —
+// so items get their own crop ratio.
+const COLLECTION_PHOTO_CROP_ASPECT_RATIO = 1;
 const PUSH_WORKER_URL = 'https://giglist-push.richard-lipscombe.workers.dev';
 
 // ─── STATE ────────────────────────────────────────────────────────────────────
@@ -1146,14 +1152,32 @@ window.colEditorSetSubtype = (subtype) => {
     _wireFormatSuggestions(subtype);
 };
 
+// Opens the shared crop modal for one file and resolves with the cropped
+// File, or null if the user cancels that photo (e.g. skip and move on to
+// the next file rather than aborting the whole batch).
+function _cropPhoto(file) {
+    return new Promise((resolve) => {
+        openPhotoCropModal(
+            file,
+            (croppedFile) => resolve(croppedFile),
+            COLLECTION_PHOTO_CROP_ASPECT_RATIO,
+            () => resolve(null),
+        );
+    });
+}
+
 window.colEditorPhotoChange = async (input) => {
     const files = Array.from(input.files || []);
+    input.value = ''; // reset up front — the crop flow below can take a while
+
     for (const file of files) {
         if (_pendingPhotos.length + _existingPhotos.length >= 8) break;
-        const compressed = await _compressImage(file);
+        const cropped = await _cropPhoto(file);
+        if (!cropped) continue; // user cancelled this photo — skip to the next
+        const compressed = await _compressImage(cropped);
         _pendingPhotos.push({ file: compressed, previewUrl: URL.createObjectURL(compressed) });
+        _renderPhotoPreviews();
     }
-    input.value = '';
     _renderPhotoPreviews();
 };
 

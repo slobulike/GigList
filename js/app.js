@@ -1,9 +1,10 @@
 /**
  * GigList Core Engine
- * v8.5.4 — 2026-09-15
+ * v8.5.5 — 2026-09-16
  * ------------------------------------------------------------------
- * ✅ Added festival poster with artist image to show share feature
- * ✅ Fixed artist_id backfill in editor, and correct festival lineup artists to store as festival not headliner role in performances
+ * ✅ Added artist photo to share gig show html
+ * ✅ Gated "Request band archive" button to only show when user has seen an artist at least 3 times
+ * ✅ Added photo crop tool to Collection Editor
  */
 
 import * as Data from './modules/data.js';
@@ -39,7 +40,7 @@ import { openPhotoCropModal } from './modules/photo-crop.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "8.5.4";
+const APP_VERSION = "8.5.5";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 

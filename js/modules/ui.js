@@ -1523,9 +1523,6 @@ window._toggleGigModalSection = (section) => {
  *   unique(user_id, band_name)
  */
 export async function initArchiveButton(entry) {
-    // Only show for authenticated personal users, not in band/friend mode
-    if (!window.currentUser?.isAuthUser || window.currentUser?.Type !== 'Personal') return;
-
     const bandName = entry.Band || entry.band || '';
     const safeKey  = (entry['Journal Key'] || '').replace(/[^a-z0-9]/gi, '_');
     const wrap     = document.getElementById(`modal-archive-btn-wrap-${safeKey}`);
@@ -1534,30 +1531,51 @@ export async function initArchiveButton(entry) {
     const status = await getArchiveStatus(bandName);
 
     if (status === 'archived') {
-        // Link through to the existing Band Page
+        // Link through to the existing Band Page — visible to everyone,
+        // including band/friend mode, since the page already exists.
         const bandParam = encodeURIComponent(bandName);
         wrap.innerHTML = `
             <a href="vault.html?band=${bandParam}"
                class="bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 text-slate-500 text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
                 <i data-lucide="users" class="w-3.5 h-3.5" aria-hidden="true"></i> VIEW BAND PAGE
             </a>`;
-    } else if (status === 'pending') {
+        if (window.lucide) lucide.createIcons();
+        return;
+    }
+
+    // Everything below is about *requesting* a Band Page — only show that
+    // to authenticated personal users, not in band/friend mode.
+    if (!window.currentUser?.isAuthUser || window.currentUser?.Type !== 'Personal') return;
+
+    if (status === 'pending') {
         wrap.innerHTML = `
             <span class="bg-amber-50 text-amber-600 text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 border border-amber-200">
                 <i data-lucide="clock" class="w-3.5 h-3.5" aria-hidden="true"></i> REQUESTED ✓
             </span>`;
     } else {
-        // Not archived and no pending request — show the request button
-        wrap.innerHTML = `
-            <div class="flex flex-col items-start gap-0.5">
-                <button id="band-page-request-btn-${safeKey}"
-                        onclick="window.requestBandPage('${bandName.replace(/'/g, "\\'")}', '${safeKey}')"
-                        class="bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 text-slate-500 text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95"
-                        data-tip="request_band_page">
-                    <i data-lucide="plus-circle" class="w-3.5 h-3.5" aria-hidden="true"></i> REQUEST BAND PAGE
-                </button>
-                <p class="text-[8px] text-slate-400 font-bold px-1">Get stats, history &amp; fans for this artist</p>
-            </div>`;
+        // Not archived and no pending request — show the request button,
+        // but only once the user has actually seen this band a few times.
+        // Keeps one-off / typo'd Band entries from cluttering the request queue.
+        const MIN_SEEN_FOR_REQUEST = 3;
+        const seenCount = getGlobalSeenCount(bandName, window.journalData || []);
+
+        if (seenCount >= MIN_SEEN_FOR_REQUEST) {
+            wrap.innerHTML = `
+                <div class="flex flex-col items-start gap-0.5">
+                    <button id="band-page-request-btn-${safeKey}"
+                            onclick="window.requestBandPage('${bandName.replace(/'/g, "\\'")}', '${safeKey}')"
+                            class="bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 text-slate-500 text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95"
+                            data-tip="request_band_page">
+                        <i data-lucide="plus-circle" class="w-3.5 h-3.5" aria-hidden="true"></i> REQUEST BAND PAGE
+                    </button>
+                    <p class="text-[8px] text-slate-400 font-bold px-1">Get stats, history &amp; fans for this artist</p>
+                </div>`;
+        } else {
+            // Under the threshold — render nothing rather than a disabled/greyed
+            // button, so the modal layout doesn't reserve space for an action
+            // that isn't available yet.
+            wrap.innerHTML = '';
+        }
     }
     if (window.lucide) lucide.createIcons();
 }
