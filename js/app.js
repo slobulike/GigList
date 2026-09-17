@@ -1,10 +1,8 @@
 /**
  * GigList Core Engine
- * v8.5.5 — 2026-09-16
+ * v8.5.6 — 2026-09-17
  * ------------------------------------------------------------------
- * ✅ Added artist photo to share gig show html
- * ✅ Gated "Request band archive" button to only show when user has seen an artist at least 3 times
- * ✅ Added photo crop tool to Collection Editor
+ * ✅ Version bump of sw.js to try to clear stale worker and get push deep links running
  */
 
 import * as Data from './modules/data.js';
@@ -40,7 +38,7 @@ import { openPhotoCropModal } from './modules/photo-crop.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "8.5.5";
+const APP_VERSION = "8.5.6";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
