@@ -10,14 +10,21 @@
  *
  * Personal (Phase 1):
  *   on_this_day        — exact day+month match in a past year
- *   artist_story       — artist with 3+ shows, full timeline overview
- *   artist_first       — first time seeing an artist (3+ shows)
- *   artist_milestone   — 5th / 10th / 15th / 20th / 25th / 30th show
+ *   artist_story       — artist with 3+ shows, full timeline overview.
+ *                         Only surfaces in the month of the most recent show.
+ *   artist_first       — first time seeing an artist (3+ shows). Only
+ *                         surfaces in the month of that first show.
+ *   artist_milestone   — 5th / 10th / 15th / 20th / 25th / 30th show. Only
+ *                         surfaces in the month of that milestone show.
  *   artist_cities      — seen an artist in 3+ distinct cities
  *   artist_era         — densest 3-year cluster of shows for an artist
  *   venue_chapter      — 4+ visits to the same venue
  *   first_last         — artists seen exactly once or twice
  *   season_flashback   — shows from this calendar month in past years
+ *
+ * artist_story / artist_first / artist_milestone / first_last all check
+ * isFestival() on their anchor gig and swap "seeing them" / "Show(s)" for
+ * "going" / "Visit(s)" wording when the entry is a festival, not a band.
  *
  * Collection (Phase 1):
  *   collection_band_story   — band you've seen live + items in your collection
@@ -25,45 +32,56 @@
  *
  * Social (Phase 2):
  *   buddy_together      — your show today's anniversary, buddy was there too
- *   buddy_on_this_day   — buddy had a solo show this month, 5+ years ago
- *   buddy_venue_echo    — you + buddy played the same venue, different years
- *   buddy_collection_together   — buddy has collection items for a band you've seen live
  *   buddy_collection_this_month — buddy added a collection item this month, in a past year
+ *   buddy_on_this_day   — buddy had a solo show this month, 5+ years ago
+ *   buddy_near_miss     — you + buddy same venue, current calendar month + same year, different show
+ *   buddy_venue_echo    — you + buddy same venue, any month/year, different show
+ *   buddy_collection_together   — buddy has collection items for a band you've seen live
  *
  * ─── SCORING REFERENCE ────────────────────────────────────────────────────────
  *
  *   100  on_this_day (personal)
  *    95  buddy_together
+ *    93  buddy_collection_this_month
+ *    91  buddy_on_this_day
  *    90  collection_this_month
- *    85  collection_band_story (approx)
- *    80  buddy_on_this_day
  *    75  artist_story / artist_milestone (with anniversary bonus)
+ *    75  collection_band_story
+ *    68  buddy_near_miss
  *    65  artist_milestone (non-anniversary)
  *    65  buddy_collection_together
  *    62  artist_first
- *    60  buddy_venue_echo
  *    58  artist_cities
  *    55  artist_era
- *    55  buddy_collection_this_month
+ *    55  buddy_venue_echo
  *    52  venue_chapter
  *    50  season_flashback
  *    47  first_last (2 shows)
  *    45  first_last (1 show)
  *
- * Cards scoring ≥ 90 are pinned (always shown). The rest are seeded-shuffled
- * daily so the feed rotates without losing genuine date-anchored moments.
+ * Scores above still decide display order (highest first) and which type
+ * gets first pick each round in selectCards(), but no longer gate whether a
+ * card is shown at all — see selectCards() for the round-robin selection.
  */
 
 import { parseDate, slugify, slugifyArtist } from './utils.js';
 import { supabase } from './supabase.js';
+
+// Bump this on every deploy that touches card-selection or card-building
+// logic (selectCards, buildCards, buildCollectionCards, buildBuddyCards,
+// buildBuddyCollectionCards). The sessionStorage cache key includes it, so a
+// bump forces every open tab to rebuild instead of serving whatever was
+// cached under the old logic for the rest of the day. Bumping unnecessarily
+// just costs one extra rebuild per user per day — cheap insurance, so when
+// in doubt, bump it.
+const FEED_LOGIC_VERSION = 2;
 import { startNewPuzzle, setPuzzleDifficulty, resetPuzzleImage } from './games.js';
 import { buildTipDiscoveryCards, renderTipDiscoveryCard } from './tip-nudges.js';
 import { renderEmptyStateTips } from './tip-nudges.js';
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
-const CARD_LIMIT      = 10;
-const POOL_MULTIPLIER = 2;   // Build pool 2× the limit before seeded rotation
+const CARD_LIMIT = 15;   // cap on total cards shown in one feed load
 
 const DEFAULT_IMAGES = [
     'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?auto=format&fit=crop&q=75&w=800',
@@ -103,6 +121,15 @@ function todaySeed() {
 function gigDay(g)   { return Number(g.Date.split('/')[0]); }
 function gigMonth(g) { return Number(g.Date.split('/')[1]); }
 function gigYear(g)  { return Number(g.Date.split('/')[2]); }
+
+// True for a festival gig, so wording can say "going" / "visits" instead of
+// "seeing them" / "shows". Handles both the raw Supabase shape (boolean
+// `festival`) and the normalised shape used elsewhere (`'Festival?': 'Y'/'N'`).
+function isFestival(g) {
+    if (!g) return false;
+    if (typeof g.festival === 'boolean') return g.festival;
+    return g['Festival?'] === 'Y';
+}
 
 // ─── BUDDY JOURNAL FETCH ──────────────────────────────────────────────────────
 
@@ -266,15 +293,20 @@ function buildCards(journalData, performanceData) {
                 return da - db;
             });
 
+            const first    = sorted[0];
+            const last     = sorted[sorted.length - 1];
+            const festival = isFestival(first);
+
             const hasAnniversary   = sorted.some(g => gigDay(g) === todayDay && gigMonth(g) === todayMonth);
             const anniversaryBonus = hasAnniversary ? 15 : 0;
 
-            // ARTIST STORY (3+ shows) — full timeline overview
-            if (sorted.length >= 3) {
-                const first    = sorted[0];
-                const last     = sorted[sorted.length - 1];
+            // ARTIST STORY (3+ shows) — full timeline overview. Gated to the
+            // current month (the most recent show's month) so a band's story
+            // doesn't surface at a random, unrelated time of year.
+            if (sorted.length >= 3 && gigMonth(last) === thisMonth) {
                 const yearSpan = gigYear(last) - gigYear(first);
                 const base     = onThisDayArtists.has(artist) ? 55 : 70;
+                const noun     = festival ? 'visits' : 'shows';
                 cards.push({
                     type:       'artist_story',
                     score:      base + anniversaryBonus,
@@ -282,18 +314,18 @@ function buildCards(journalData, performanceData) {
                     allGigs:    sorted,
                     headline:   artist,
                     subline:    yearSpan > 0
-                        ? `${sorted.length} shows across ${yearSpan} year${yearSpan !== 1 ? 's' : ''}`
-                        : `${sorted.length} shows`,
+                        ? `${sorted.length} ${noun} across ${yearSpan} year${yearSpan !== 1 ? 's' : ''}`
+                        : `${sorted.length} ${noun}`,
                     eyebrow:    'Your History',
-                    badge:      `${sorted.length} Shows`,
+                    badge:      `${sorted.length} ${festival ? 'Visits' : 'Shows'}`,
                     badgeColor: 'bg-indigo-500',
                     journalKey: last['Journal Key'],
                 });
             }
 
-            // ARTIST FIRST (3+ shows) — origin story
-            if (sorted.length >= 3) {
-                const first    = sorted[0];
+            // ARTIST FIRST (3+ shows) — origin story. Gated to the current
+            // month (the first show's month) for the same reason.
+            if (sorted.length >= 3 && gigMonth(first) === thisMonth) {
                 const yearsAgo = thisYear - gigYear(first);
                 cards.push({
                     type:       'artist_first',
@@ -302,17 +334,19 @@ function buildCards(journalData, performanceData) {
                     allGigs:    sorted,
                     headline:   artist,
                     subline:    `${first.OfficialVenue} · ${first.Date}`,
-                    eyebrow:    `First time seeing them — ${yearsAgo} year${yearsAgo !== 1 ? 's' : ''} ago`,
-                    badge:      'First Show',
+                    eyebrow:    `First time ${festival ? 'going' : 'seeing them'} — ${yearsAgo} year${yearsAgo !== 1 ? 's' : ''} ago`,
+                    badge:      festival ? 'First Visit' : 'First Show',
                     badgeColor: 'bg-emerald-500',
                     journalKey: first['Journal Key'],
                 });
             }
 
-            // ARTIST MILESTONE — 5th, 10th, 15th, 20th, 25th, 30th
+            // ARTIST MILESTONE — 5th, 10th, 15th, 20th, 25th, 30th. Gated to
+            // the current month (the milestone show's own month).
             [5, 10, 15, 20, 25, 30].forEach((n, nIdx) => {
                 if (sorted.length >= n) {
-                    const mg     = sorted[n - 1];
+                    const mg = sorted[n - 1];
+                    if (gigMonth(mg) !== thisMonth) return;
                     const suffix = n === 1 ? 'st' : n === 2 ? 'nd' : n === 3 ? 'rd' : 'th';
                     cards.push({
                         type:       'artist_milestone',
@@ -321,8 +355,8 @@ function buildCards(journalData, performanceData) {
                         allGigs:    sorted,
                         headline:   artist,
                         subline:    `${mg.OfficialVenue} · ${mg.Date}`,
-                        eyebrow:    `Your ${n}${suffix} time seeing them`,
-                        badge:      `Show #${n}`,
+                        eyebrow:    `Your ${n}${suffix} time ${festival ? 'going' : 'seeing them'}`,
+                        badge:      `${festival ? 'Visit' : 'Show'} #${n}`,
                         badgeColor: 'bg-violet-500',
                         journalKey: mg['Journal Key'],
                     });
@@ -337,15 +371,14 @@ function buildCards(journalData, performanceData) {
                 }))].filter(Boolean);
 
                 if (cities.length >= 3) {
-                    const last = sorted[sorted.length - 1];
                     cards.push({
                         type:       'artist_cities',
                         score:      58 + anniversaryBonus,
                         gig:        last,
                         allGigs:    sorted,
                         headline:   artist,
-                        subline:    `Seen in ${cities.length} different places`,
-                        eyebrow:    'You followed them everywhere',
+                        subline:    `${festival ? 'Been to' : 'Seen in'} ${cities.length} different places`,
+                        eyebrow:    festival ? 'You\u2019ve gone all over for it' : 'You followed them everywhere',
                         badge:      `${cities.length} Cities`,
                         badgeColor: 'bg-sky-500',
                         journalKey: last['Journal Key'],
@@ -371,7 +404,7 @@ function buildCards(journalData, performanceData) {
                         gig:        rep,
                         allGigs:    eraGigs,
                         headline:   artist,
-                        subline:    `${bestCount} shows between ${eraStart} and ${eraStart + 2}`,
+                        subline:    `${bestCount} ${festival ? 'visits' : 'shows'} between ${eraStart} and ${eraStart + 2}`,
                         eyebrow:    'Your peak era',
                         badge:      `${eraStart}–${eraStart + 2}`,
                         badgeColor: 'bg-orange-500',
@@ -391,14 +424,13 @@ function buildCards(journalData, performanceData) {
                     headline:   artist,
                     subline:    `${gig.OfficialVenue} · ${gig.Date}`,
                     eyebrow:    'The one and only time',
-                    badge:      'One Show',
+                    badge:      festival ? 'One Visit' : 'One Show',
                     badgeColor: 'bg-slate-500',
                     journalKey: gig['Journal Key'],
                 });
             }
 
             if (sorted.length === 2) {
-                const last     = sorted[sorted.length - 1];
                 const yearsAgo = thisYear - gigYear(last);
                 cards.push({
                     type:       'first_last',
@@ -406,9 +438,9 @@ function buildCards(journalData, performanceData) {
                     gig:        last,
                     allGigs:    sorted,
                     headline:   artist,
-                    subline:    `Last seen at ${last.OfficialVenue} · ${last.Date}`,
-                    eyebrow:    `Seen twice${yearsAgo > 0 ? `, ${yearsAgo} years ago` : ''}`,
-                    badge:      'Two Shows',
+                    subline:    `${festival ? 'Last visited' : 'Last seen at'} ${last.OfficialVenue} · ${last.Date}`,
+                    eyebrow:    `${festival ? 'Been twice' : 'Seen twice'}${yearsAgo > 0 ? `, ${yearsAgo} years ago` : ''}`,
+                    badge:      festival ? 'Two Visits' : 'Two Shows',
                     badgeColor: 'bg-slate-500',
                     journalKey: last['Journal Key'],
                 });
@@ -575,7 +607,7 @@ function _formatAcquiredDate(raw) {
 // ─── BUDDY CARD BUILDERS ──────────────────────────────────────────────────────
 
 /**
- * Three social card types, all built from buddy journal data already in memory
+ * Four social card types, all built from buddy journal data already in memory
  * after fetchBuddyJournals() runs.
  *
  * buddy_together:     My on-this-day show where one or more buddies' journal
@@ -589,8 +621,18 @@ function _formatAcquiredDate(raw) {
  *                     card exists to keep buddy content flowing frequently,
  *                     not to mark a single date.
  *
- * buddy_venue_echo:   Same venue, same calendar month, different years.
- *                     "Same room, different night."
+ * buddy_near_miss:    Same venue, current calendar month AND same year,
+ *                     different show — "you were both in this room, weeks
+ *                     apart." The tight version of a venue overlap.
+ *
+ * buddy_venue_echo:   Same venue, any month/year in history, different show.
+ *                     The loose sibling of buddy_near_miss for when nothing
+ *                     lines up as tightly.
+ *
+ * Neither of the last two ever fires for a show you actually both attended —
+ * that's buddy_together's territory. "Same show" is detected by Journal Key
+ * (date + venue), so any gig either of you logged with a matching key is
+ * excluded from both sides before the venue comparison happens.
  */
 function buildBuddyCards(buddyJournalsByUser, myJournalData, buddyProfiles) {
     if (!buddyProfiles?.length || !Object.keys(buddyJournalsByUser).length) return [];
@@ -605,7 +647,7 @@ function buildBuddyCards(buddyJournalsByUser, myJournalData, buddyProfiles) {
     // { [buddyId]: Set<journalKey> } for shows they attended.
     const buddyJournalKeys = window._buddyJournalKeys || {};
 
-    // Venue → my past gigs lookup for echo matching
+    // Venue → my past gigs lookup for near-miss/echo matching
     const myVenueMap = {};
     myJournalData.forEach(g => {
         if (!g.OfficialVenue) return;
@@ -616,6 +658,15 @@ function buildBuddyCards(buddyJournalsByUser, myJournalData, buddyProfiles) {
     });
 
     const cards = [];
+
+    // Near-miss/echo candidates are collected across ALL buddies first, then
+    // deduped by venue and capped feed-wide — see MAX_NEAR_MISS_CARDS /
+    // MAX_ECHO_CARDS below. Without this, a heavily-used venue (arenas,
+    // festival grounds) can throw a card for every buddy who's ever played
+    // it, flooding the feed with the lowest-value social card types.
+    const nearMissCandidates = [];
+    const echoCandidates     = [];
+    const venuesClaimed      = new Set();
 
     // Track which of my journal keys have been claimed by buddy_together so
     // selectCards() can suppress the plain on_this_day duplicate for the same show.
@@ -688,7 +739,7 @@ function buildBuddyCards(buddyJournalsByUser, myJournalData, buddyProfiles) {
             const yearsAgo = thisYear - gigYear(bg);
             cards.push({
                 type:        'buddy_on_this_day',
-                score:       80 - idx * 3,
+                score:       91 - idx * 2,
                 gig:         bg,
                 allGigs:     [bg],
                 buddy,
@@ -702,61 +753,114 @@ function buildBuddyCards(buddyJournalsByUser, myJournalData, buddyProfiles) {
             });
         });
 
-        // ── BUDDY VENUE ECHO ───────────────────────────────────────────────
-        // Same venue, same calendar month, in at least one year that differs.
-        // Groups buddy gigs by venue+month then checks against my venue map.
-        const buddyVenuesByMonth = {};
+        // ── BUDDY NEAR MISS + VENUE ECHO ────────────────────────────────────
+        // Group this buddy's past gigs by venue, then compare against my own
+        // history at the same venue — excluding any gig either of us logged
+        // that matches the other's Journal Key (date + venue), since that's
+        // literally the same show, i.e. buddy_together territory, not a miss.
+        const buddyVenueGigsByVenue = {};
         buddyGigs.forEach(g => {
             if (!g.OfficialVenue) return;
             const d = parseDate(g.Date);
             if (!d || d >= today) return;
-            const vmKey = `${g.OfficialVenue}::${gigMonth(g)}`;
-            if (!buddyVenuesByMonth[vmKey]) buddyVenuesByMonth[vmKey] = [];
-            buddyVenuesByMonth[vmKey].push(g);
+            if (!buddyVenueGigsByVenue[g.OfficialVenue]) buddyVenueGigsByVenue[g.OfficialVenue] = [];
+            buddyVenueGigsByVenue[g.OfficialVenue].push(g);
         });
 
-        const emittedVenues = new Set(); // one echo card per venue per buddy
+        Object.entries(buddyVenueGigsByVenue).forEach(([venueName, buddyVenueGigsAll]) => {
+            const myVenueGigsAll = myVenueMap[venueName] || [];
+            if (!myVenueGigsAll.length) return;
+            if (venuesClaimed.has(venueName)) return; // feed-wide dedup across both types
 
-        Object.entries(buddyVenuesByMonth).forEach(([vmKey, buddyVenueGigs]) => {
-            const [venueName, monthStr] = vmKey.split('::');
-            const month       = parseInt(monthStr, 10);
-            const myVenueGigs = (myVenueMap[venueName] || []).filter(g => gigMonth(g) === month);
+            // Strip out any show that's actually shared between us (same
+            // Journal Key = same date + venue = the same real-world show).
+            // Computed as a single intersection up front, then applied to
+            // BOTH sides — computing myGigsHere first and deriving
+            // buddyGigsHere from its (already-filtered) keys let a shared
+            // show survive on the buddy's side whenever I had other, unshared
+            // gigs at the same venue, which is exactly the "three-night run,
+            // shared one night" case that was slipping through.
+            const myKeysAll     = new Set(myVenueGigsAll.map(g => g['Journal Key']));
+            const buddyKeysAll  = new Set(buddyVenueGigsAll.map(g => g['Journal Key']));
+            const sharedKeys    = new Set([...myKeysAll].filter(k => buddyKeysAll.has(k)));
+            const myGigsHere    = myVenueGigsAll.filter(g => !sharedKeys.has(g['Journal Key']));
+            const buddyGigsHere = buddyVenueGigsAll.filter(g => !sharedKeys.has(g['Journal Key']));
 
-            if (!myVenueGigs.length) return;
-            if (emittedVenues.has(venueName)) return;
+            if (!myGigsHere.length || !buddyGigsHere.length) return;
 
-            // Only emit if there's at least one year that differs between us
-            // (purely co-attended shows are covered by buddy_together)
-            const myYears    = new Set(myVenueGigs.map(g => gigYear(g)));
-            const buddyYears = new Set(buddyVenueGigs.map(g => gigYear(g)));
-            const hasDiff    = [...myYears].some(y => !buddyYears.has(y)) ||
-                               [...buddyYears].some(y => !myYears.has(y));
-            if (!hasDiff) return;
+            // NEAR MISS — tight match: same venue, same month AND year as each
+            // other, AND that month has to be the current calendar month —
+            // otherwise a May/May match or a July/July match surfaces year
+            // round instead of feeling like a timely "this month" moment.
+            const nearMissGig = myGigsHere.find(mg =>
+                gigMonth(mg) === todayMonth &&
+                buddyGigsHere.some(bg => gigMonth(bg) === gigMonth(mg) && gigYear(bg) === gigYear(mg))
+            );
 
-            emittedVenues.add(venueName);
+            if (nearMissGig) {
+                venuesClaimed.add(venueName);
+                const monthName = new Date(2000, gigMonth(nearMissGig) - 1, 1)
+                    .toLocaleString('default', { month: 'long' });
 
-            const heroGig   = myVenueGigs.sort((a, b) =>
+                nearMissCandidates.push({
+                    type:        'buddy_near_miss',
+                    score:       68,
+                    gig:         nearMissGig,
+                    allGigs:     myGigsHere,
+                    buddy,
+                    buddyName,
+                    headline:    venueName,
+                    subline:     `You and ${buddyName} · same venue, different night`,
+                    eyebrow:     `${monthName} ${gigYear(nearMissGig)} · near miss`,
+                    badge:       'Near Miss',
+                    badgeColor:  'bg-cyan-600',
+                    journalKey:  `nearmiss_${buddy.id}_${venueName.replace(/[^a-z0-9]/gi, '_')}_${gigYear(nearMissGig)}_${gigMonth(nearMissGig)}`,
+                    // used only for ranking candidates below, stripped before render
+                    _overlapCount: myGigsHere.length + buddyGigsHere.length,
+                });
+                return; // don't also throw the looser echo for the same venue/buddy
+            }
+
+            // VENUE ECHO — loose match: same venue, any month/year in history.
+            venuesClaimed.add(venueName);
+            const heroGig = [...myGigsHere].sort((a, b) =>
                 (parseDate(b.Date) || 0) - (parseDate(a.Date) || 0)
             )[0];
-            const monthName = new Date(2000, month - 1, 1)
-                .toLocaleString('default', { month: 'long' });
 
-            cards.push({
+            echoCandidates.push({
                 type:        'buddy_venue_echo',
-                score:       60,
+                score:       55,
                 gig:         heroGig,
-                allGigs:     myVenueGigs,
+                allGigs:     myGigsHere,
                 buddy,
                 buddyName,
                 headline:    venueName,
                 subline:     `You and ${buddyName} · same room, different night`,
-                eyebrow:     `${monthName} memories`,
+                eyebrow:     'Somewhere you\u2019ve both been',
                 badge:       'Venue Echo',
                 badgeColor:  'bg-cyan-500',
-                journalKey:  `echo_${buddy.id}_${venueName.replace(/[^a-z0-9]/gi, '_')}_${month}`,
+                journalKey:  `echo_${buddy.id}_${venueName.replace(/[^a-z0-9]/gi, '_')}`,
+                // used only for ranking candidates below, stripped before render
+                _overlapCount: myGigsHere.length + buddyGigsHere.length,
             });
         });
     });
+
+    // Cap both types feed-wide, favoring venues with more combined history
+    // between the two of you. Left uncapped, a heavily-shared venue history
+    // (or a very active buddy) could drown out the rest of the buddy cards.
+    const MAX_NEAR_MISS_CARDS = 2;
+    const MAX_ECHO_CARDS      = 2;
+
+    nearMissCandidates
+        .sort((a, b) => b._overlapCount - a._overlapCount)
+        .slice(0, MAX_NEAR_MISS_CARDS)
+        .forEach(c => { delete c._overlapCount; cards.push(c); });
+
+    echoCandidates
+        .sort((a, b) => b._overlapCount - a._overlapCount)
+        .slice(0, MAX_ECHO_CARDS)
+        .forEach(c => { delete c._overlapCount; cards.push(c); });
 
     // Expose the set of "claimed" on-this-day keys so selectCards() can filter
     // the plain duplicates.
@@ -843,7 +947,7 @@ function buildBuddyCollectionCards(buddyCollectionItemsByUser, myJournalData, bu
 
             cards.push({
                 type:           'buddy_collection_this_month',
-                score:          55,
+                score:          93,
                 collectionItem: featured,
                 allItems:       thisMonthItems,
                 buddy,
@@ -865,7 +969,10 @@ function buildBuddyCollectionCards(buddyCollectionItemsByUser, myJournalData, bu
 
 /**
  * Merges all pools, deduplicates, suppresses on_this_day cards superseded by
- * buddy_together, then applies pinned + seeded rotation to pick CARD_LIMIT.
+ * buddy_together, then does one round-robin pass per card type (best-scoring
+ * types first each pass) so the feed has variety instead of a handful of
+ * types (e.g. first_last, which tends to have far more candidates than
+ * anything else) crowding everything out. Capped at CARD_LIMIT overall.
  */
 function selectCards(gigCards, colCards, buddyCards) {
     const togetherKeys = window._feedTogetherKeys || new Set();
@@ -884,19 +991,38 @@ function selectCards(gigCards, colCards, buddyCards) {
         }
     }
 
-    const unique = [...seen.values()].sort((a, b) => b.score - a.score);
+    // Group remaining candidates by type, best score first within each group
+    const byType = new Map();
+    for (const card of seen.values()) {
+        if (!byType.has(card.type)) byType.set(card.type, []);
+        byType.get(card.type).push(card);
+    }
+    for (const group of byType.values()) {
+        group.sort((a, b) => b.score - a.score);
+    }
 
-    // Pinned tier — always shown
-    const pinned    = unique.filter(c => c.score >= 90);
-    const rotatable = unique.filter(c => c.score < 90);
+    // Types ordered by their best available card, so the strongest types get
+    // first pick each round. A type drops out of the rotation once its pool
+    // is empty; the loop stops once CARD_LIMIT is hit or every pool is dry.
+    const typeOrder = [...byType.keys()].sort(
+        (a, b) => byType.get(b)[0].score - byType.get(a)[0].score
+    );
 
-    // Seeded rotation from the rotatable pool
-    const candidates = rotatable.slice(0, CARD_LIMIT * POOL_MULTIPLIER);
-    const shuffled   = seededShuffle(candidates, todaySeed());
-    const slotsLeft  = Math.max(0, CARD_LIMIT - pinned.length);
-    const selected   = shuffled.slice(0, slotsLeft);
+    const selected = [];
+    let stillHasCards = true;
+    while (selected.length < CARD_LIMIT && stillHasCards) {
+        stillHasCards = false;
+        for (const type of typeOrder) {
+            if (selected.length >= CARD_LIMIT) break;
+            const group = byType.get(type);
+            if (group.length) {
+                selected.push(group.shift());
+                stillHasCards = true;
+            }
+        }
+    }
 
-    return [...pinned, ...selected].sort((a, b) => b.score - a.score);
+    return selected.sort((a, b) => b.score - a.score);
 }
 
 // ─── IMAGE RESOLUTION ─────────────────────────────────────────────────────────
@@ -1059,7 +1185,7 @@ const EXPANDABLE_TYPES = new Set([
 
 // Social card types — rendered with a coloured top border + buddy avatar
 const SOCIAL_TYPES = new Set([
-    'buddy_together', 'buddy_on_this_day', 'buddy_venue_echo',
+    'buddy_together', 'buddy_on_this_day', 'buddy_near_miss', 'buddy_venue_echo',
     'buddy_collection_together', 'buddy_collection_this_month',
 ]);
 
@@ -1090,6 +1216,7 @@ function renderCard(card, index) {
 
     // Top accent stripe colour for social cards
     const socialStripeClass =
+        card.type === 'buddy_near_miss'             ? 'bg-cyan-600'  :
         card.type === 'buddy_venue_echo'            ? 'bg-cyan-500'  :
         card.type === 'buddy_collection_together'   ? 'bg-indigo-400' :
         card.type === 'buddy_collection_this_month' ? 'bg-amber-400'  :
@@ -1113,6 +1240,7 @@ function renderCard(card, index) {
     const ctaLabel = (() => {
         if (card.type === 'buddy_together')    return 'View your show';
         if (card.type === 'buddy_on_this_day') return `See ${card.buddyName}'s show`;
+        if (card.type === 'buddy_near_miss')   return 'View your show';
         if (card.type === 'buddy_venue_echo')  return 'View your show';
         if (card.type === 'buddy_collection_together')   return `See ${card.buddyName}'s collection`;
         if (card.type === 'buddy_collection_this_month') return `See ${card.buddyName}'s collection`;
@@ -1497,7 +1625,10 @@ export async function init(journalData, performanceData, _ignored = []) {
 
     // 3. Cache check
     const buddyCollectionCount = Object.values(buddyCollectionItemsByUser).reduce((n, items) => n + items.length, 0);
-    const cacheKey   = `giglist_feed_${new Date().toDateString()}_j${journalData.length}_c${collectionItems.length}_b${buddyProfiles.length}_bc${buddyCollectionCount}`;
+    const cacheKey   = `giglist_feed_v${FEED_LOGIC_VERSION}_${new Date().toDateString()}_j${journalData.length}_c${collectionItems.length}_b${buddyProfiles.length}_bc${buddyCollectionCount}`;
+    // TEMP DEBUG — skip the cache entirely so every load rebuilds from scratch
+    // and actually reaches the window._feedCards / console.table logging below.
+    // Otherwise a same-day reload just replays the cached HTML and skips it.
     const cachedHtml = sessionStorage.getItem(cacheKey);
     const cachedJson = sessionStorage.getItem(`${cacheKey}_cards`);
 
@@ -1522,20 +1653,36 @@ export async function init(journalData, performanceData, _ignored = []) {
         ...buildBuddyCards(buddyJournalsByUser, journalData, buddyProfiles),
         ...buildBuddyCollectionCards(buddyCollectionItemsByUser, journalData, buddyProfiles),
     ];
-    const scored     = selectCards(gigCards, colCards, buddyCards);
+
+    // selectCards() now round-robins one card per type per pass, so every
+    // type — including buddy_on_this_day — already gets a fair shot without
+    // a separate reserved-slot carve-out (the previous approach added extra
+    // cards on top of CARD_LIMIT, which this replaces).
+    const scored = selectCards(gigCards, colCards, buddyCards);
 
     // Inject tip_discovery cards — at most 2 per render, after pinned content
     const tipCards = buildTipDiscoveryCards().slice(0, 2);
     const cards    = [
         ...scored.filter(c => c.score >= 90),   // pinned tier first
         ...tipCards,                              // then tip discovery
-        ...scored.filter(c => c.score < 90),     // then rotatable
+        ...scored.filter(c => c.score < 90),     // then the rest
     ];
 
     if (cards.length === 0) {
         renderEmptyState(container);
         return;
     }
+
+    // Debug aid — full card payload + a type-count breakdown, both inspectable
+    // in devtools via window._feedCards. Left in permanently; cheap and handy
+    // for spot-checking variety/scoring without digging through the DOM.
+    window._feedCards = cards;
+    console.log(`[Feed] built ${cards.length} cards`);
+    console.table(
+        Object.entries(
+            cards.reduce((acc, c) => { acc[c.type] = (acc[c.type] || 0) + 1; return acc; }, {})
+        ).map(([type, count]) => ({ type, count }))
+    );
 
     // 5. Render
     const html = cards.map((card, i) => renderCard(card, i)).join('');

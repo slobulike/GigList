@@ -16,6 +16,12 @@ let _activeBuddyId   = null;   // uuid of the buddy currently open in drill-in
 let _activeBuddyName = null;
 let _buddyJournalData = null;  // full normalised rows for active buddy
 let _buddyJournalKeys = {};    // { [userId]: Set<journalKey> } — keys only, pre-fetched
+// Bumped on every drill-in open/toggle so an in-flight fetch that resolves
+// AFTER a newer one can recognise it's stale and bail instead of overwriting
+// the panel with the wrong buddy's data. This was the cause of "click buddy A,
+// then buddy B, and B's panel briefly/incorrectly shows A's data" — A's fetch
+// can resolve after B's if A's response happens to take longer.
+let _drillInRequestId = 0;
 
 // ─── COLOUR PALETTE ──────────────────────────────────────────────────────────
 // Stable per-buddy colour derived from their user id
@@ -162,6 +168,14 @@ window.openBuddyDrillIn = async (buddyId, buddyName) => {
     _activeBuddyId   = buddyId;
     _activeBuddyName = buddyName;
 
+    // collection.js defines _buddyResetTabs specifically for this moment —
+    // switches back to the Gigs tab and clears any previous buddy's cached
+    // collection body/id — but nothing was actually calling it. Without this,
+    // switching buddies could leave a stale buddy id around for the
+    // Collection tab to pick up. Must run BEFORE the name text below changes,
+    // so collection.js's MutationObserver sees clean state to resolve into.
+    window._buddyResetTabs?.();
+
     // Update header
     const nameEl = document.getElementById('buddy-drill-name');
     const metaEl = document.getElementById('buddy-drill-meta');
@@ -186,7 +200,8 @@ window.openBuddyDrillIn = async (buddyId, buddyName) => {
     window.scrollTo(0, 0);
 
     // Fetch and render
-    await _loadBuddyDrillData(buddyId, false);
+    const requestId = ++_drillInRequestId;
+    await _loadBuddyDrillData(buddyId, false, requestId);
 };
 
 window.closeBuddyDrillIn = () => {
@@ -210,7 +225,8 @@ window.closeBuddyDrillIn = () => {
 window.handleBuddyDrillSharedToggle = () => {
     if (!_activeBuddyId) return;
     const sharedOnly = document.getElementById('buddy-drill-shared-toggle')?.checked;
-    _loadBuddyDrillData(_activeBuddyId, sharedOnly);
+    const requestId  = ++_drillInRequestId;
+    _loadBuddyDrillData(_activeBuddyId, sharedOnly, requestId);
 };
 
 function wireDrillInSearch() {
@@ -234,13 +250,19 @@ function wireDrillInSearch() {
 
 // ─── DATA FETCHING ────────────────────────────────────────────────────────────
 
-async function _loadBuddyDrillData(buddyId, sharedOnly) {
+async function _loadBuddyDrillData(buddyId, sharedOnly, requestId) {
     // Two-step query — safe pattern throughout the app
     const { data: buddyRows, error } = await supabase
         .from('journals')
         .select('*')
         .eq('user_id', buddyId)
         .order('date', { ascending: false });
+
+    // Bail if a newer drill-in request has started since this one was fired —
+    // e.g. the user clicked a second buddy before this fetch finished. Without
+    // this check, whichever fetch happens to resolve LAST wins and overwrites
+    // the panel, even if it's for the wrong (earlier-clicked) buddy.
+    if (requestId !== _drillInRequestId) return;
 
     if (error) {
         console.error('Buddy drill-in fetch failed:', error);

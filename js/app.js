@@ -1,8 +1,9 @@
 /**
  * GigList Core Engine
- * v8.5.6 — 2026-09-17
+ * v8.6.0 — 2026-09-19
  * ------------------------------------------------------------------
- * ✅ Version bump of sw.js to try to clear stale worker and get push deep links running
+ * ✅ Fixed buddy cards in feed and improved algorithm for selection and sorting
+ * ✅ Fixed link from buddy card to buddy collection
  */
 
 import * as Data from './modules/data.js';
@@ -38,7 +39,7 @@ import { openPhotoCropModal } from './modules/photo-crop.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "8.5.6";
+const APP_VERSION = "8.6.0";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 

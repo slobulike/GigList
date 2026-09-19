@@ -497,7 +497,7 @@ async function _renderBuddyProfile(userId) {
     // ── Shared shows callout ──
     const callout = document.getElementById('profile-shared-callout');
     const ownKeys = new Set((window.journalData || []).map(g => g['Journal Key']));
-    const buddyKeySet = window._buddyJournalKeys?.get?.(userId);
+    const buddyKeySet = window._buddyJournalKeys?.[userId];
     const sharedCount = buddyKeySet ? [...buddyKeySet].filter(k => ownKeys.has(k)).length : null;
     if (callout) {
         if (sharedCount !== null && sharedCount > 0) {

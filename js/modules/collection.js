@@ -1209,48 +1209,60 @@ window._buddyResetTabs = () => {
     const colBody = document.getElementById('buddy-collection-body');
     if (colBody) colBody.innerHTML = '';
     window._currentBuddyId = null;
+    // panel.dataset.buddyId was never cleared here before, even though
+    // _tryRender() in _buddySwitchTab falls back to it when _currentBuddyId
+    // is still resolving. Leaving it set meant a fast tab-switch right after
+    // opening a NEW buddy could render the PREVIOUS buddy's collection while
+    // showing the new buddy's name.
+    const panel = document.getElementById('buddy-drill-in');
+    if (panel) delete panel.dataset.buddyId;
     window._buddySwitchTab('gigs');
 };
 
 // ─── BUDDY ID RESOLVER ────────────────────────────────────────────────────────
 // buddies.js sets #buddy-drill-name text content when it opens the panel, but
 // doesn't expose the user_id. We watch for that text change and look up the
-// profile by username so the Collection tab has the ID ready before it opens.
+// profile by username/display_name so the Collection tab has the ID ready
+// before it opens.
 (function _watchBuddyPanel() {
     const nameEl = document.getElementById('buddy-drill-name');
     if (!nameEl) return;
 
-    let _lastResolvedName = null;
+    let _lastResolvedName   = null;
+    let _resolverGeneration = 0;
 
     const observer = new MutationObserver(() => {
-        const username = nameEl.textContent?.trim();
-        if (!username || username === '--' || username === _lastResolvedName) return;
-        _lastResolvedName = username;
+        const name = nameEl.textContent?.trim();
+        if (!name || name === '--' || name === _lastResolvedName) return;
+        _lastResolvedName = name;
         window._currentBuddyId = null; // clear while resolving
+        const panel = document.getElementById('buddy-drill-in');
+        if (panel) delete panel.dataset.buddyId;
 
-        // Try username first, fall back to display_name
+        // Bumped on every new name so a slow, older lookup that resolves
+        // AFTER a newer one can recognise it's stale and skip committing —
+        // otherwise rapid buddy switching could let an outdated resolution
+        // clobber the correct, already-resolved id.
+        const generation = ++_resolverGeneration;
+
+        // Single round trip matching EITHER field. Callers (feed.js,
+        // buddies.js, profile.js) mostly pass display_name here, so the old
+        // sequential "try username, then fall back to display_name" pattern
+        // nearly always paid for two round trips — widening the window
+        // where the Collection tab's polling loop could time out.
+        const escaped = name.replace(/,/g, '\\,');
         supabase
             .from('profiles')
             .select('id')
-            .eq('username', username)
+            .or(`username.eq.${escaped},display_name.eq.${escaped}`)
             .maybeSingle()
             .then(({ data, error }) => {
-                if (!error && data?.id) return data;
-                // Fallback: display_name match
-                return supabase
-                    .from('profiles')
-                    .select('id')
-                    .eq('display_name', username)
-                    .maybeSingle()
-                    .then(r => r.data);
-            })
-            .then(data => {
-                if (data?.id) {
+                if (generation !== _resolverGeneration) return; // stale — a newer lookup has already started
+                if (!error && data?.id) {
                     window._currentBuddyId = data.id;
-                    const panel = document.getElementById('buddy-drill-in');
                     if (panel) panel.dataset.buddyId = data.id;
                 } else {
-                    console.warn('[Collection] Could not resolve buddy user_id for:', username);
+                    console.warn('[Collection] Could not resolve buddy user_id for:', name);
                 }
             })
             .catch(e => console.warn('[Collection] Buddy ID lookup error:', e.message));
