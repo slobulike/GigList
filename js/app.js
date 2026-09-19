@@ -1,9 +1,9 @@
 /**
  * GigList Core Engine
- * v8.6.0 — 2026-09-19
+ * v8.6.1 — 2026-09-19
  * ------------------------------------------------------------------
- * ✅ Fixed buddy cards in feed and improved algorithm for selection and sorting
- * ✅ Fixed link from buddy card to buddy collection
+ * ✅ Added new variants to Collection Sharing assets including shapes and gradient
+ * ✅ Fix to other card type for buddy-collection to ensure correct link to their collection profile
  */
 
 import * as Data from './modules/data.js';
@@ -39,7 +39,7 @@ import { openPhotoCropModal } from './modules/photo-crop.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "8.6.0";
+const APP_VERSION = "8.6.1";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 

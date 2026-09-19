@@ -1145,9 +1145,19 @@ function buddyAvatarPill(buddyOrBuddies) {
  * item, so instead of trying to build one, this reuses the existing buddy
  * drill-in panel and jumps straight to its Collection tab.
  */
-window._feedOpenBuddyCollection = (buddyId, buddyName) => {
+
+window._feedOpenBuddyCollection = async (buddyId, buddyName) => {
     if (!buddyId || typeof window.openBuddyDrillIn !== 'function') return;
+
+    // Open the buddy profile modal
     window.openBuddyDrillIn(buddyId, buddyName);
+
+    // Guarantee buddy collection items are fetched before rendering the tab
+    if (typeof fetchBuddyCollectionItems === 'function') {
+        await fetchBuddyCollectionItems();
+    }
+
+    // Switch to the collection tab
     if (typeof window._buddySwitchTab === 'function') {
         window._buddySwitchTab('collection');
     }
@@ -1697,6 +1707,8 @@ export async function init(journalData, performanceData, _ignored = []) {
             journalKey:     c.journalKey,
             gig:            c.gig            || null,
             collectionItem: c.collectionItem || null,
+            buddy:          c.buddy          || null,
+            buddyName:      c.buddyName      || null,
         }))
     ));
 

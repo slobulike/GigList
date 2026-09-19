@@ -1,6 +1,6 @@
 /**
  * GigList - Collection Module
- * v1.0.0 — April 2026
+ * v1.0.1 — Sept 2026
  *
  * Renders the Collection tab — shelf view, drill-down (spine + grid),
  * curation strips, item detail bottom sheet, and buddy read support.
@@ -120,7 +120,7 @@ async function _fetchItems(userId) {
         .from('collection_items')
         .select([
             'id', 'user_id', 'type', 'subtype', 'title',
-            'band_id', 'band_name', 'artist_context',
+            'band_id', 'band_name', 'artist_context', 'artist_id',
             'item_date', 'acquired_date',
             'photos', 'hero_color',
             'body', 'signed_by', 'provenance',
@@ -185,6 +185,36 @@ const _signedUrlCache = new Map();
 
 // Expose for collection-collage.js
 window._colSignedUrlCache = _signedUrlCache;
+
+/**
+ * Resolves a photo for the collage module's Superfan hero. Prefers a direct
+ * artist_id match against artists.spotify_image_url (same field Devotee/the
+ * festival poster already use); falls back to a case-insensitive name match
+ * for older items that predate artist_id being linked.
+ */
+window._colResolveBandPhoto = async (artistId, bandName) => {
+    try {
+        if (artistId) {
+            const { data, error } = await supabase
+                .from('artists')
+                .select('spotify_image_url')
+                .eq('id', artistId)
+                .maybeSingle();
+            if (!error && data?.spotify_image_url) return data.spotify_image_url;
+        }
+        if (bandName) {
+            const { data, error } = await supabase
+                .from('artists')
+                .select('spotify_image_url')
+                .ilike('name', bandName)
+                .maybeSingle();
+            if (!error && data?.spotify_image_url) return data.spotify_image_url;
+        }
+    } catch (e) {
+        console.warn('[Collage] band photo resolve failed:', e.message);
+    }
+    return null;
+};
 
 /**
  * Pre-resolves signed URLs for all items that have photos.
