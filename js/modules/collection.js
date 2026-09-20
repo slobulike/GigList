@@ -262,14 +262,11 @@ function _applyCuration(items, curationKey) {
     if (!curationKey || curationKey === 'all') return items;
 
     // Band filter — key format: "band_<bandname>"
-    // Matches band_name (set by the editor) or artist_context as a fallback
-    // for items saved before band_name was introduced.
+    // Strict match on band_name to prevent false-positives
+    // from contextual fields like artist_context.
     if (curationKey.startsWith('band_')) {
-        const name = curationKey.slice(5).toLowerCase();
-        return items.filter(i =>
-            (i.band_name || '').toLowerCase() === name ||
-            (i.artist_context || '').toLowerCase().includes(name)
-        );
+        const targetName = curationKey.slice(5).toLowerCase();
+        return items.filter(i => (i.band_name || '').toLowerCase() === targetName);
     }
 
     // System curations
@@ -323,16 +320,40 @@ function _applySavedCuration(items, filterJson) {
     return result;
 }
 
+// Helper to determine if the currently filtered items belong strictly to a single artist
+function getSingleArtistContext(filteredItems) {
+    if (!filteredItems || filteredItems.length === 0) return null;
+
+    const bandNames = new Set(
+        filteredItems
+            .map(i => i.band_name?.trim()?.toLowerCase())
+            .filter(Boolean)
+    );
+
+    const artistIds = new Set(
+        filteredItems
+            .map(i => i.artist_id)
+            .filter(Boolean)
+    );
+
+    // If all items belong to exactly one band name or artist ID, return clean context
+    if (bandNames.size === 1) {
+        return { bandName: filteredItems[0].band_name, artistId: filteredItems[0].artist_id };
+    }
+
+    if (artistIds.size === 1) {
+        return { artistId: [...artistIds][0], bandName: filteredItems[0].band_name };
+    }
+
+    return null; // Mixed artists; do not trigger single-artist footer
+}
+
 // ─── CURATION CHIPS ──────────────────────────────────────────────────────────
 
 function _buildCurationChips(items) {
     const chips = [{ key: 'all', label: 'All' }];
 
     // Band chips — one per unique band name, sourced from _bandNames
-    // (fetched from journals + free-text band_name on items at init time).
-    // These come first so they're the primary quick-filter.
-    // TODO: if band count grows large (10+), consider a collapsible "By band"
-    //       section or grouped curation strip rather than an ever-longer scroll.
     _bandNames.forEach(name => {
         chips.push({ key: `band_${name}`, label: name });
     });

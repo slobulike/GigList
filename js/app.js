@@ -1,9 +1,10 @@
 /**
  * GigList Core Engine
- * v8.6.1 — 2026-09-19
+ * v8.6.2 — 2026-09-20
  * ------------------------------------------------------------------
- * ✅ Added new variants to Collection Sharing assets including shapes and gradient
- * ✅ Fix to other card type for buddy-collection to ensure correct link to their collection profile
+ * ✅ Improved new collection sharing assets to show cleaner shapes and offer additional options with "branding" filter for all options
+ * ✅ Fixed bug with Add Item to collection where artist_id was not being populated correctly for new items
+ * ✅ Fixed quick filter buttons to bring in exact artist matches only
  */
 
 import * as Data from './modules/data.js';
@@ -39,7 +40,7 @@ import { openPhotoCropModal } from './modules/photo-crop.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "8.6.1";
+const APP_VERSION = "8.6.2";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 

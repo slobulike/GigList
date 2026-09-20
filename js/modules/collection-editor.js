@@ -951,13 +951,40 @@ window.saveCollectionItem = async () => {
     try {
         const itemId = _editingId || crypto.randomUUID();
 
+        // Read band name directly from combobox input
+        const bandInput = document.getElementById('col-editor-band-input');
+        const bandName = bandInput?.value.trim() || null;
+
+        // 1. Resolve or Create artist_id BEFORE saving the collection item
+        let artistId = null;
+        if (bandName) {
+            const { data: existingArtist } = await supabase
+                .from('artists')
+                .select('id')
+                .ilike('name', bandName)
+                .maybeSingle();
+
+            if (existingArtist) {
+                artistId = existingArtist.id;
+            } else {
+                // Insert new artist and retrieve returned ID
+                const { data: newArtist, error: insertErr } = await supabase
+                    .from('artists')
+                    .insert({ name: bandName })
+                    .select('id')
+                    .single();
+
+                if (!insertErr && newArtist) {
+                    artistId = newArtist.id;
+                    enrichNewArtist(bandName); // Hydrate MBID / Spotify metadata
+                    _bandOptions = []; // Invalidate band cache
+                }
+            }
+        }
+
         // Upload any pending photos
         const newPhotoUrls = await _uploadPhotos(session.user.id, itemId);
 
-        // All photo paths (existing + new)
-        // _existingPhotos are signed URLs — we store the raw path in DB.
-        // For existing items, we re-fetch the raw paths from the DB rather than
-        // trying to reverse-engineer them from signed URLs.
         let allPhotoPaths = newPhotoUrls;
         if (_editingId && _existingPhotos.length > 0) {
             const { data: existing } = await supabase
@@ -966,39 +993,31 @@ window.saveCollectionItem = async () => {
                 .eq('id', _editingId)
                 .single();
             const existingPaths = existing?.photos || [];
-            // Keep only the paths that still have a signed URL (user didn't remove them)
-            // We use count: signed URLs correspond 1:1 to existingPaths in order
             const keepCount = _existingPhotos.length;
             allPhotoPaths = [...existingPaths.slice(0, keepCount), ...newPhotoUrls];
         }
 
-        // Sample hero colour from first pending photo if no existing photos
         let heroColor = null;
         if (_pendingPhotos.length > 0 && _existingPhotos.length === 0) {
             heroColor = await _sampleHeroColor(_pendingPhotos[0].file);
         }
 
-        // Build acquired_date from month + year selects (format: "YYYY-MM" or "YYYY")
         const acquiredYear  = document.getElementById('col-editor-acquired-year')?.value?.trim() || '';
         const acquiredMonth = document.getElementById('col-editor-acquired-month')?.value || '';
         const acquiredDate  = acquiredYear
             ? (acquiredMonth ? `${acquiredYear}-${acquiredMonth}` : acquiredYear)
             : null;
 
-        // Read band name directly from combobox input (free-text or lookup selection)
-        const bandInput = document.getElementById('col-editor-band-input');
-        const bandName = bandInput?.value.trim() || null;
-
         const taggedUserIds = _taggedBuddies.map(b => b.id);
 
+        // 2. Include artist_id in the row payload
         const row = {
             id:               itemId,
             user_id:          session.user.id,
             type:             _selectedType,
             subtype:          _selectedSubtype,
             title,
-            // band_name requires the column to exist in collection_items.
-            // Run: ALTER TABLE collection_items ADD COLUMN IF NOT EXISTS band_name text;
+            artist_id:        artistId, // Ensures footer queries link correctly
             ...(bandName !== null && { band_name: bandName }),
             item_date:        _get('col-editor-date')       || null,
             acquired_date:    acquiredDate,
@@ -1022,38 +1041,22 @@ window.saveCollectionItem = async () => {
 
         if (error) throw error;
 
-        // Ensure artist exists in canonical artists table
-        if (bandName) {
-            const { data: existingArtist } = await supabase
-                .from('artists')
-                .select('id')
-                .eq('name', bandName)
-                .maybeSingle();
-
-            if (!existingArtist) {
-                await supabase.from('artists').insert({ name: bandName });
-                enrichNewArtist(bandName); // same MBID/Spotify hydration as editor.js and wishlist.js
-                // Invalidate the band options cache so new artist appears next time
-                _bandOptions = [];
-            }
-        }
-
-        // Fire push notifications to each tagged buddy (non-blocking)
+        // Fire push notifications to each tagged buddy
         if (taggedUserIds.length && _selectedType === 'memory') {
             _notifyTaggedBuddies(session.user.id, itemId, title, taggedUserIds);
         }
 
         closeCollectionEditor();
-                if (window.showToast) window.showToast(
-                    _editingId ? 'Item updated ✓' : 'Added to collection ✓',
-                    'success'
-                );
-                // Dispatch nudge trigger for new items only (not edits)
-                if (!_editingId) {
-                    window.dispatchEvent(new CustomEvent('giglist:collectionItemSaved'));
-                }
-                // Refresh collection view
-                if (window._refreshCollection) window._refreshCollection();
+        if (window.showToast) window.showToast(
+            _editingId ? 'Item updated ✓' : 'Added to collection ✓',
+            'success'
+        );
+
+        if (!_editingId) {
+            window.dispatchEvent(new CustomEvent('giglist:collectionItemSaved'));
+        }
+
+        if (window._refreshCollection) window._refreshCollection();
 
     } catch (err) {
         console.error('[ColEditor] save failed:', err);
