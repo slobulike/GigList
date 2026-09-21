@@ -2,7 +2,7 @@
 // Gig List — Service Worker
 // ─────────────────────────────────────────────────────────────────────────────
 
-const CACHE_NAME = 'gig-list-v3';
+const CACHE_NAME = 'gig-list-v4';
 const APP_BASE   = '/GigList/';
 const APP_ROOT   = APP_BASE + 'vault.html';
 
@@ -23,6 +23,50 @@ const ASSETS = [
   './assets/icon-512.png',
   './assets/badge-72.png',
 ];
+
+// ─── Deep-link mailbox (IndexedDB) ─────────────────────────────────────────────
+//
+// Both iOS (WebKit) and Android have documented bugs where a notificationclick
+// handler's openWindow()/navigate()/focus()+postMessage() doesn't reliably
+// deliver the deep-link target to the page that actually loads:
+//   - WebKit bug 263687: clients.openWindow(url) on an installed Home Screen
+//     PWA can open the app to its root URL instead of the URL given.
+//   - Android: a backgrounded tab's renderer can be evicted for memory while
+//     its WindowClient reference is still matched by matchAll(), so focus()
+//     reloads the tab to its *last* URL and any postMessage sent to it is
+//     dropped.
+//
+// IndexedDB is shared between this worker and every page on the same origin
+// regardless of which URL loads, so we stash the intent here first as a
+// fallback the app checks on every boot — see modules/idb-mailbox.js and
+// deep-link.js (PATH C).
+
+const DEEPLINK_DB_NAME = 'giglist-deeplink';
+const DEEPLINK_STORE   = 'pending';
+
+function _openDeepLinkDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DEEPLINK_DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains(DEEPLINK_STORE)) {
+        req.result.createObjectStore(DEEPLINK_STORE);
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function writePendingDeepLink(intent) {
+  const db = await _openDeepLinkDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(DEEPLINK_STORE, 'readwrite');
+    tx.objectStore(DEEPLINK_STORE).put({ ...intent, ts: Date.now() }, 'pending');
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
+}
 
 // ─── Install ──────────────────────────────────────────────────────────────────
 
@@ -123,10 +167,14 @@ self.addEventListener('push', (event) => {
 //   vault.html?open=<journalId>&ww=1     → open gig + Weezer Wednesday canvas
 //
 // Strategy:
-//   Warm (app already open) → focus existing window + BroadcastChannel the intent.
-//     deep-link.js picks this up and calls openGigModal() at the right moment.
-//   Cold (app closed)       → openWindow with the full URL.
-//     deep-link.js reads ?open= and ?ww= params on load instead.
+//   1. Always write the intent to the IndexedDB mailbox FIRST, before doing
+//      anything else — this is the part that actually survives iOS/Android
+//      ignoring the URL or dropping postMessage. See notes above.
+//   2. Warm (app already open) → focus existing window + postMessage the
+//      intent. deep-link.js's PATH B picks this up when it works; PATH C
+//      (mailbox) is the fallback when it doesn't.
+//   3. Cold (app closed) → openWindow with the full URL. deep-link.js reads
+//      ?open= and ?ww= params on load, or falls back to the mailbox.
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
@@ -144,8 +192,10 @@ self.addEventListener('notificationclick', (event) => {
   console.log('[SW] journalId:', journalId, '| isWW:', isWW, '| source:', source);
 
   event.waitUntil(
-    clients
-      .matchAll({ type: 'window', includeUncontrolled: true })
+    writePendingDeepLink({ id: journalId, weezerWednesday: isWW, source })
+      .then(() => console.log('[SW] wrote pending deep link to IndexedDB mailbox'))
+      .catch((err) => console.warn('[SW] writePendingDeepLink failed', err))
+      .then(() => clients.matchAll({ type: 'window', includeUncontrolled: true }))
       .then((windowClients) => {
         console.log('[SW] windowClients found:', windowClients.length);
         windowClients.forEach((c, i) => console.log(`[SW]   client[${i}]:`, c.url));
@@ -163,6 +213,10 @@ self.addEventListener('notificationclick', (event) => {
             // registered at the moment the message is sent. client.postMessage()
             // is delivered to the window's message queue regardless of whether
             // the navigator.serviceWorker listener is attached yet.
+            //
+            // NOTE: on mobile this can still silently fail if the client's
+            // renderer was evicted while backgrounded — that's exactly what
+            // the IndexedDB mailbox write above is a fallback for.
             appClient.postMessage({
               type:            'GIGLIST_DEEP_LINK',
               journalId,

@@ -1,19 +1,28 @@
 /**
  * deep-link.js
  * ─────────────────────────────────────────────────────────────────────────────
- * Handles two entry paths that both end at the same destination — opening a
+ * Handles three entry paths that all end at the same destination — opening a
  * specific gig modal or Weezer Wednesday canvas:
  *
  *   PATH A — URL params (cold start from a notification tap, or a shared link)
- *     index.html?open=<journalId>
- *     index.html?open=<journalId>&ww=1
- *     index.html?open=<collectionId>&ww=1&source=collection
+ *     vault.html?open=<journalId>
+ *     vault.html?open=<journalId>&ww=1
+ *     vault.html?open=<collectionId>&ww=1&source=collection
  *
  *   PATH B — postMessage from the service worker (warm app already open)
  *     { type: 'GIGLIST_DEEP_LINK', journalId: '...', weezerWednesday: true }
  *     { type: 'GIGLIST_DEEP_LINK', journalId: '...', weezerWednesday: true, source: 'collection' }
  *
- * Both paths call _resolveDeepLink() which waits for the app to be ready
+ *   PATH C — IndexedDB mailbox (checked first, on every boot)
+ *     Both iOS and Android have documented bugs where a notificationclick
+ *     handler's openWindow()/navigate()/postMessage() doesn't reliably reach
+ *     the page that actually loads (WebKit bug 263687; Android renderer
+ *     eviction races — see idb-mailbox.js for details). The service worker
+ *     writes the intent to IndexedDB before doing anything else, so we catch
+ *     it here even if the browser ignored the target URL or dropped the
+ *     postMessage.
+ *
+ * All three call _resolveDeepLink() which waits for the app to be ready
  * before dispatching to the correct handler.
  *
  * Source values:
@@ -25,7 +34,7 @@
  *   In app.js, after initApp() resolves:
  *
  *     import { initDeepLink, markAppReady } from './modules/deep-link.js';
- *     initDeepLink();
+ *     await initDeepLink();
  *     // ... after data is loaded and modals are live:
  *     markAppReady();
  *
@@ -37,6 +46,8 @@
  *   window.openWeezerWednesdayCanvasCollection(collectionId)
  * ─────────────────────────────────────────────────────────────────────────────
  */
+
+import { readAndClearPendingDeepLink } from './idb-mailbox.js';
 
 // ── App-ready gate ────────────────────────────────────────────────────────────
 // initApp() is async; we don't want to call openGigModal before journals are
@@ -151,6 +162,10 @@ function _handleServiceWorkerMessage(event) {
 // The intent is still safely queued via _resolveDeepLink → _pendingLink and
 // flushed when markAppReady() is called, so warm-path taps work even if the
 // app was backgrounded and data hasn't fully reloaded yet.
+//
+// NOTE: on mobile this path is the least reliable of the three — see PATH C
+// below and idb-mailbox.js for why. Kept as-is since it still helps on desktop
+// and doesn't hurt to leave attached.
 
 if ('serviceWorker' in navigator) {
     navigator.serviceWorker.addEventListener('message', _handleServiceWorkerMessage);
@@ -158,8 +173,25 @@ if ('serviceWorker' in navigator) {
 
 // ── Public init — call once from app.js ───────────────────────────────────────
 
-export function initDeepLink() {
-    // PATH A: check URL params immediately (cold start / shared link)
+export async function initDeepLink() {
+    // PATH C: IndexedDB mailbox — checked first, before URL params. The
+    // service worker writes the intended deep link here before calling
+    // openWindow()/focus()/postMessage(), so we still catch it even if the
+    // browser or OS ignored the notification's target URL or dropped the
+    // postMessage (both are documented iOS/Android platform bugs, not
+    // something fixable from app code alone).
+    try {
+        const pending = await readAndClearPendingDeepLink();
+        if (pending && Date.now() - pending.ts < 5 * 60 * 1000) {
+            console.log('[deep-link] resolved from IndexedDB mailbox', pending);
+            _resolveDeepLink(pending.id, pending.weezerWednesday, pending.source);
+            return;
+        }
+    } catch (err) {
+        console.warn('[deep-link] IndexedDB mailbox check failed, falling back to URL params', err);
+    }
+
+    // PATH A: check URL params (cold start / shared link)
     _handleUrlParams();
 
     // PATH B listener is already attached above at module parse time — nothing
