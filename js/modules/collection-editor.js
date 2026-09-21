@@ -16,6 +16,8 @@
  *   window.colEditorSetSubtype(subtype)
  *   window.colEditorPhotoChange(input)  — file input onChange
  *   window.colEditorRemovePhoto(index)
+ *   window.colEditorRecropPhoto(index)  — reopen crop tool on an already-added photo
+ *   window.colEditorSetHeroPhoto(index) — move a photo to the front (hero) slot
  *   window.colEditorAddLabel(label)
  *   window.colEditorRemoveLabel(index)
  */
@@ -36,8 +38,11 @@ const PUSH_WORKER_URL = 'https://giglist-push.richard-lipscombe.workers.dev';
 let _editingId    = null;   // uuid of item being edited, null for new
 let _selectedType    = 'artefact';
 let _selectedSubtype = 'cd';
-let _pendingPhotos   = [];  // Array of { file, previewUrl } — not yet uploaded
-let _existingPhotos  = [];  // Array of storage URL strings — already in DB
+// Single ordered list of photo slots — index 0 is always the hero.
+// Each entry is one of:
+//   { kind: 'existing', path, url }             — already in DB (path = storage key, url = signed URL)
+//   { kind: 'pending',  file, previewUrl }       — new or re-cropped, not yet uploaded
+let _photos          = [];
 let _labels          = [];  // Current label array
 let _taggedBuddies   = [];  // Array of { id, name } — buddies tagged in this memory
 
@@ -299,31 +304,41 @@ function _renderPhotoPreviews() {
     const container = document.getElementById('col-editor-photo-previews');
     if (!container) return;
 
-    // 1. Generate HTML for photos already saved in the database
-    const existingHtml = (_existingPhotos || []).map((url, i) => `
-        <div class="relative w-16 h-16 rounded-xl overflow-hidden border border-slate-200 flex-shrink-0">
-            <img src="${url}" alt="Photo ${i + 1}" class="w-full h-full object-cover">
-            ${i === 0 ? `<span class="absolute bottom-0 left-0 right-0 text-center text-[8px] font-black uppercase bg-black/50 text-white py-0.5">Hero</span>` : ''}
+    // Render every photo slot in order — index 0 is always the hero.
+    const photosHtml = (_photos || []).map((p, i) => {
+        const isHero  = i === 0;
+        const isNew   = p.kind === 'pending';
+        const src     = isNew ? p.previewUrl : p.url;
+        const badge   = isHero
+            ? `<span class="absolute bottom-0 left-0 right-0 text-center text-[8px] font-black uppercase bg-black/50 text-white py-0.5">Hero</span>`
+            : (isNew ? `<span class="absolute bottom-0 left-0 right-0 text-center text-[8px] font-black uppercase bg-amber-500/80 text-white py-0.5">New</span>` : '');
+        // "Set as hero" star — only shown on non-hero slots
+        const heroBtn = !isHero ? `
             <button type="button"
-                    onclick="window.colEditorRemovePhoto('existing-${i}')"
+                    onclick="window.colEditorSetHeroPhoto(${i})"
+                    aria-label="Set as hero photo"
+                    title="Set as hero"
+                    class="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-black/60 text-white text-[10px] flex items-center justify-center hover:bg-amber-500 transition-colors">★</button>` : '';
+        return `
+        <div class="relative w-16 h-16 rounded-xl overflow-hidden border ${isNew ? 'border-amber-200' : 'border-slate-200'} flex-shrink-0 group">
+            <img src="${src}" alt="Photo ${i + 1}" class="w-full h-full object-cover">
+            ${badge}
+            ${heroBtn}
+            <button type="button"
+                    onclick="window.colEditorRecropPhoto(${i})"
+                    aria-label="Edit crop"
+                    title="Re-crop"
+                    class="absolute bottom-0.5 right-0.5 w-4 h-4 rounded-full bg-black/60 text-white text-[9px] flex items-center justify-center hover:bg-amber-500 transition-colors">✎</button>
+            <button type="button"
+                    onclick="window.colEditorRemovePhoto(${i})"
                     aria-label="Remove photo"
                     class="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/60 text-white text-[10px] flex items-center justify-center hover:bg-red-500 transition-colors">×</button>
-        </div>`).join('');
+        </div>`;
+    }).join('');
 
-    // 2. Generate HTML for photos currently being uploaded (pending)
-    const pendingHtml = (_pendingPhotos || []).map((p, i) => `
-        <div class="relative w-16 h-16 rounded-xl overflow-hidden border border-amber-200 flex-shrink-0">
-            <img src="${p.previewUrl}" alt="New photo ${i + 1}" class="w-full h-full object-cover">
-            <span class="absolute bottom-0 left-0 right-0 text-center text-[8px] font-black uppercase bg-amber-500/80 text-white py-0.5">New</span>
-            <button type="button"
-                    onclick="window.colEditorRemovePhoto('pending-${i}')"
-                    aria-label="Remove photo"
-                    class="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/60 text-white text-[10px] flex items-center justify-center hover:bg-red-500 transition-colors">×</button>
-        </div>`).join('');
+    const totalPhotos = _photos?.length || 0;
 
-    const totalPhotos = (_existingPhotos?.length || 0) + (_pendingPhotos?.length || 0);
-
-    // 3. Small "+" Button: Specialized for Photo Library/Bulk Upload
+    // Small "+" Button: Specialized for Photo Library/Bulk Upload
     // Added 'ml-1' for that requested white space between existing photos and the add button
     const addMore = totalPhotos < 8 ? `
         <label class="ml-1 w-16 h-16 rounded-xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center cursor-pointer hover:border-amber-400 transition-colors flex-shrink-0 text-slate-400 hover:text-amber-500">
@@ -336,8 +351,8 @@ function _renderPhotoPreviews() {
                    onchange="window.colEditorPhotoChange(this)">
         </label>` : '';
 
-    // 4. Update the container
-    container.innerHTML = `<div class="flex gap-2 flex-wrap items-center">${existingHtml}${pendingHtml}${addMore}</div>`;
+    // Update the container
+    container.innerHTML = `<div class="flex gap-2 flex-wrap items-center">${photosHtml}${addMore}</div>`;
 
     // Re-initialize icons if necessary
     if (window.lucide) {
@@ -345,9 +360,13 @@ function _renderPhotoPreviews() {
     }
 }
 
+// Uploads every pending slot in _photos (in place) and stamps each one with
+// the storage path it was uploaded to (p.uploadedPath). Order is preserved —
+// callers build the final photos[] column by walking _photos afterwards.
 async function _uploadPhotos(userId, itemId) {
-    const uploadedUrls = [];
-    for (const p of _pendingPhotos) {
+    for (const p of _photos) {
+        if (p.kind !== 'pending') continue;
+
         const ext  = p.file.name.split('.').pop() || 'jpg';
         // Using a more collision-resistant path for multiple uploads
         const timestamp = Date.now();
@@ -365,10 +384,9 @@ async function _uploadPhotos(userId, itemId) {
         if (error) {
             console.error('[ColEditor] photo upload failed:', error.message);
         } else {
-            uploadedUrls.push(path);
+            p.uploadedPath = path;
         }
     }
-    return uploadedUrls;
 }
 
 /**
@@ -507,20 +525,20 @@ async function _populateForm(item) {
     _selectedType    = item.type    || 'artefact';
     _selectedSubtype = item.subtype || 'cd';
     _labels          = [...(item.labels || [])];
-    _existingPhotos  = [];
-    _pendingPhotos   = [];
+    _photos          = [];
 
     _renderTypeToggle();
     _renderSubtypeSelector();
     _wireFormatSuggestions(_selectedSubtype);
     _wireConditionSuggestions();
 
-    // Resolve signed URLs for existing photos
+    // Resolve signed URLs for existing photos, preserving stored order
+    // (index 0 stays the hero).
     for (const path of (item.photos || [])) {
         const { data } = await supabase.storage
             .from('collection-photos')
             .createSignedUrl(path, 3600);
-        if (data?.signedUrl) _existingPhotos.push(data.signedUrl);
+        if (data?.signedUrl) _photos.push({ kind: 'existing', path, url: data.signedUrl });
     }
 
     _val('col-editor-title',      item.title            || '');
@@ -849,8 +867,7 @@ function _wireBandCombobox() {
 
 export const openCollectionEditor = async (type = null, itemId = null) => {
     _editingId       = itemId || null;
-    _pendingPhotos   = [];
-    _existingPhotos  = [];
+    _photos          = [];
     _labels          = [];
     _taggedBuddies   = [];
     _labelCache      = null; // refresh label suggestions on each open
@@ -929,9 +946,9 @@ export const closeCollectionEditor = () => {
         modal.setAttribute('aria-hidden', 'true');
     }
     document.body.style.overflow = 'auto';
-    // Revoke any pending photo preview URLs
-    _pendingPhotos.forEach(p => URL.revokeObjectURL(p.previewUrl));
-    _pendingPhotos = [];
+    // Revoke any pending photo preview URLs (new or re-cropped, not yet uploaded)
+    _photos.forEach(p => { if (p.kind === 'pending' && p.previewUrl) URL.revokeObjectURL(p.previewUrl); });
+    _photos = [];
 };
 
 // ─── SAVE ─────────────────────────────────────────────────────────────────────
@@ -982,24 +999,24 @@ window.saveCollectionItem = async () => {
             }
         }
 
-        // Upload any pending photos
-        const newPhotoUrls = await _uploadPhotos(session.user.id, itemId);
+        // Upload any pending photos (new adds or re-crops) in place, then walk
+        // _photos in its current, user-controlled order — this is what makes
+        // "set as hero" and re-cropping an existing photo just work, since the
+        // final photos[] column always mirrors _photos' order directly rather
+        // than assuming existing photos are an untouched prefix.
+        await _uploadPhotos(session.user.id, itemId);
+        const allPhotoPaths = _photos
+            .map(p => p.kind === 'existing' ? p.path : p.uploadedPath)
+            .filter(Boolean);
 
-        let allPhotoPaths = newPhotoUrls;
-        if (_editingId && _existingPhotos.length > 0) {
-            const { data: existing } = await supabase
-                .from('collection_items')
-                .select('photos')
-                .eq('id', _editingId)
-                .single();
-            const existingPaths = existing?.photos || [];
-            const keepCount = _existingPhotos.length;
-            allPhotoPaths = [...existingPaths.slice(0, keepCount), ...newPhotoUrls];
-        }
-
+        // Only resample the spine colour when the hero slot is a new/re-cropped
+        // file we have local pixels for. If the hero is unchanged, or was
+        // reordered to an existing (already-uploaded) photo, leave hero_color
+        // as-is rather than fetching the remote image back down.
         let heroColor = null;
-        if (_pendingPhotos.length > 0 && _existingPhotos.length === 0) {
-            heroColor = await _sampleHeroColor(_pendingPhotos[0].file);
+        const heroPhoto = _photos[0];
+        if (heroPhoto?.kind === 'pending') {
+            heroColor = await _sampleHeroColor(heroPhoto.file);
         }
 
         const acquiredYear  = document.getElementById('col-editor-acquired-year')?.value?.trim() || '';
@@ -1174,25 +1191,63 @@ window.colEditorPhotoChange = async (input) => {
     input.value = ''; // reset up front — the crop flow below can take a while
 
     for (const file of files) {
-        if (_pendingPhotos.length + _existingPhotos.length >= 8) break;
+        if (_photos.length >= 8) break;
         const cropped = await _cropPhoto(file);
         if (!cropped) continue; // user cancelled this photo — skip to the next
         const compressed = await _compressImage(cropped);
-        _pendingPhotos.push({ file: compressed, previewUrl: URL.createObjectURL(compressed) });
+        _photos.push({ kind: 'pending', file: compressed, previewUrl: URL.createObjectURL(compressed) });
         _renderPhotoPreviews();
     }
     _renderPhotoPreviews();
 };
 
-window.colEditorRemovePhoto = (key) => {
-    if (key.startsWith('existing-')) {
-        const i = parseInt(key.replace('existing-', ''));
-        _existingPhotos.splice(i, 1);
+window.colEditorRemovePhoto = (index) => {
+    const p = _photos[index];
+    if (!p) return;
+    if (p.kind === 'pending' && p.previewUrl) URL.revokeObjectURL(p.previewUrl);
+    _photos.splice(index, 1);
+    _renderPhotoPreviews();
+};
+
+// Reopens the crop tool on a photo already in the list — existing (uploaded)
+// or pending (just added this session) — and replaces that slot in place so
+// its position (and hero status, if it's index 0) is preserved.
+window.colEditorRecropPhoto = async (index) => {
+    const entry = _photos[index];
+    if (!entry) return;
+
+    let sourceFile;
+    if (entry.kind === 'pending') {
+        sourceFile = entry.file;
     } else {
-        const i = parseInt(key.replace('pending-', ''));
-        URL.revokeObjectURL(_pendingPhotos[i]?.previewUrl);
-        _pendingPhotos.splice(i, 1);
+        try {
+            const resp = await fetch(entry.url);
+            if (!resp.ok) throw new Error(`fetch failed: ${resp.status}`);
+            const blob = await resp.blob();
+            sourceFile = new File([blob], entry.path.split('/').pop() || 'photo.jpg', {
+                type: blob.type || 'image/jpeg',
+            });
+        } catch (err) {
+            console.error('[ColEditor] failed to load photo for re-crop:', err.message);
+            _showError('Could not load that photo for editing — try again.');
+            return;
+        }
     }
+
+    const cropped = await _cropPhoto(sourceFile);
+    if (!cropped) return; // user cancelled — leave the existing slot untouched
+
+    const compressed = await _compressImage(cropped);
+    if (entry.kind === 'pending' && entry.previewUrl) URL.revokeObjectURL(entry.previewUrl);
+    _photos[index] = { kind: 'pending', file: compressed, previewUrl: URL.createObjectURL(compressed) };
+    _renderPhotoPreviews();
+};
+
+// Moves a photo to the front of the list, making it the hero.
+window.colEditorSetHeroPhoto = (index) => {
+    if (index <= 0 || index >= _photos.length) return;
+    const [chosen] = _photos.splice(index, 1);
+    _photos.unshift(chosen);
     _renderPhotoPreviews();
 };
 

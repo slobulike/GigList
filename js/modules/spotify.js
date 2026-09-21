@@ -219,9 +219,9 @@ window.generateSlotPlaylist = async (slotId, journalKey, artistName, gigDate, ve
     }
 
     if (gigIsPast) {
-        await window.createRelivePlaylist(journalKey, artistName, gigDate, venueName);
+        await window.createRelivePlaylist(journalKey, artistName, gigDate, venueName, slotId);
     } else {
-        await window.createGigReadyPlaylist(journalKey, artistName, gigDate, venueName);
+        await window.createGigReadyPlaylist(journalKey, artistName, gigDate, venueName, slotId);
     }
 
     const entry = (window.journalData || []).find(g => g['Journal Key'] === journalKey);
@@ -230,8 +230,13 @@ window.generateSlotPlaylist = async (slotId, journalKey, artistName, gigDate, ve
 
 // ─── RELIVE THE SHOW ──────────────────────────────────────────────────────────
 
-window.createRelivePlaylist = async (journalKey, artistName, gigDate, venueName) => {
-    const btnId = `relive-btn-${journalKey.replace(/[^a-z0-9]/gi, '_')}`;
+window.createRelivePlaylist = async (journalKey, artistName, gigDate, venueName, targetId) => {
+    // targetId lets callers point this at whatever element actually exists in
+    // the DOM for their context (e.g. the slot-based CTA passes its slotId,
+    // since it never renders a relive-btn-{key} element). Falls back to the
+    // legacy id for callers that do render one (e.g. refreshGigReadyPlaylist's
+    // idle button, initReliveButton's admin-only OPEN PLAYLIST swap).
+    const btnId = targetId || `relive-btn-${journalKey.replace(/[^a-z0-9]/gi, '_')}`;
     const btn = document.getElementById(btnId);
 
     const toReadyState = (url) => {
@@ -253,7 +258,7 @@ window.createRelivePlaylist = async (journalKey, artistName, gigDate, venueName)
     const connected = await checkSpotifyConnection(window.currentUser.id);
     if (!connected) {
         renderConnectPrompt(btnId, window.currentUser.id, () =>
-            window.createRelivePlaylist(journalKey, artistName, gigDate, venueName)
+            window.createRelivePlaylist(journalKey, artistName, gigDate, venueName, targetId)
         );
         return;
     }
@@ -394,8 +399,9 @@ const renderGigReadyReadyState = (btnId, url, journalKey, artistName, gigDate, v
     if (window.lucide) lucide.createIcons();
 };
 
-window.createGigReadyPlaylist = async (journalKey, artistName, gigDate, venueName) => {
-    const btnId = `gig-ready-btn-${journalKey.replace(/[^a-z0-9]/gi, '_')}`;
+window.createGigReadyPlaylist = async (journalKey, artistName, gigDate, venueName, targetId) => {
+    // See createRelivePlaylist's targetId comment — same reasoning applies here.
+    const btnId = targetId || `gig-ready-btn-${journalKey.replace(/[^a-z0-9]/gi, '_')}`;
 
     const toIdleState = () => {
         const el = document.getElementById(btnId);
@@ -420,7 +426,7 @@ window.createGigReadyPlaylist = async (journalKey, artistName, gigDate, venueNam
     const connected = await checkSpotifyConnection(window.currentUser.id);
     if (!connected) {
         renderConnectPrompt(btnId, window.currentUser.id, () =>
-            window.createGigReadyPlaylist(journalKey, artistName, gigDate, venueName)
+            window.createGigReadyPlaylist(journalKey, artistName, gigDate, venueName, targetId)
         );
         return;
     }

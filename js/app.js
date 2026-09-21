@@ -1,10 +1,9 @@
 /**
  * GigList Core Engine
- * v8.6.2 — 2026-09-20
+ * v8.6.3 — 2026-09-21
  * ------------------------------------------------------------------
- * ✅ Improved new collection sharing assets to show cleaner shapes and offer additional options with "branding" filter for all options
- * ✅ Fixed bug with Add Item to collection where artist_id was not being populated correctly for new items
- * ✅ Fixed quick filter buttons to bring in exact artist matches only
+ * ✅ Added photo crop and zoom to existing photos in the Editor
+ * ✅ Added ability to set hero photo in Collection Editor
  */
 
 import * as Data from './modules/data.js';
