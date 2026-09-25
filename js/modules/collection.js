@@ -18,6 +18,7 @@
  *   window._colSetCuration(key)
  *   window._colSetTypeFilter(subtype)
  *   window._colSetDrillFilter(filter)
+ *   window._colToggleDisposed()
  */
 
 import { supabase } from './supabase.js';
@@ -38,6 +39,7 @@ let _drillType     = null;        // Currently open drill-down type
 let _drillView     = 'spine';     // 'spine' | 'grid'
 let _drillFilter   = 'all';       // Sub-filter within drill-down
 let _searchQuery   = '';          // Current search string
+let _showDisposed  = false;       // Show items marked no-longer-owned
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
@@ -53,6 +55,10 @@ const SUBTYPE_LABELS = {
     tab_book:    'Tab Books',
     ticket:      'Tickets',
     laminate:    'Laminates',
+    video:       'Video',
+    game:        'Games',
+    memorabilia: 'Memorabilia',
+    ephemera:    'Ephemera',
     other:       'Other',
 };
 
@@ -68,6 +74,10 @@ const SUBTYPE_ICONS = {
     tab_book:    '🎸',
     ticket:      '🎟',
     laminate:    '🪪',
+    video:       '📀',
+    game:        '🎮',
+    memorabilia: '🎁',
+    ephemera:    '📰',
     other:       '✦',
 };
 
@@ -86,6 +96,14 @@ function _hashColor(str) {
     let h = 0;
     for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) >>> 0;
     return SPINE_PALETTES[h % SPINE_PALETTES.length];
+}
+
+// Items marked no-longer-owned are hidden everywhere by default (main shelf
+// view, drill-down, collage) unless _showDisposed is on. Centralised here
+// because _renderCollectionTab, _renderDrillDown, and the collage view each
+// build their own filter chain from _items directly.
+function _visibleItems() {
+    return _showDisposed ? _items : _items.filter(i => i.still_owned !== false);
 }
 
 function _yearsSpan(items) {
@@ -123,9 +141,10 @@ async function _fetchItems(userId) {
             'band_id', 'band_name', 'artist_context', 'artist_id',
             'item_date', 'acquired_date',
             'photos', 'hero_color',
-            'body', 'signed_by', 'provenance',
+            'body', 'notes', 'signed_by', 'provenance', 'country', 'size',
             'format', 'label', 'catalogue_number', 'condition',
-            'labels', 'tagged_user_ids',
+            'labels', 'links', 'tagged_user_ids',
+            'still_owned', 'disposed_date', 'disposal_reason',
         ].join(', '))
         .eq('user_id', userId)
         .order('item_date', { ascending: true });
@@ -592,14 +611,21 @@ function _renderCollectionTab() {
     const container = document.getElementById('col-main-container');
     if (!container) return;
 
-    const bandFiltered  = _applyBandFilter(_items);
+    // Items marked no-longer-owned are hidden by default — collectors who
+    // sold/gifted/traded something away generally don't want it cluttering
+    // the shelves they still browse day to day.
+    const disposedCount = _items.filter(i => i.still_owned === false).length;
+
+    const bandFiltered  = _applyBandFilter(_visibleItems());
     const curated       = _applyCuration(bandFiltered, _activeCuration);
     const searched      = _searchQuery ? curated.filter(i =>
         (i.title          || '').toLowerCase().includes(_searchQuery) ||
         (i.body           || '').toLowerCase().includes(_searchQuery) ||
+        (i.notes          || '').toLowerCase().includes(_searchQuery) ||
         (i.label          || '').toLowerCase().includes(_searchQuery) ||
         (i.artist_context || '').toLowerCase().includes(_searchQuery) ||
         (i.provenance     || '').toLowerCase().includes(_searchQuery) ||
+        (i.country        || '').toLowerCase().includes(_searchQuery) ||
         (i.signed_by      || '').toLowerCase().includes(_searchQuery) ||
         (i.labels         || []).some(l => l.toLowerCase().includes(_searchQuery)) ||
         (i.band_name      || '').toLowerCase().includes(_searchQuery)
@@ -608,7 +634,7 @@ function _renderCollectionTab() {
     const memories      = searched.filter(i => i.type === 'memory');
 
     // Group artefacts by subtype — preserve a sensible display order
-    const SUBTYPE_ORDER = ['vinyl', 'cd', 'tape', 'minidisc', 'apparel', 'poster', 'magazine', 'book', 'tab_book', 'ticket', 'laminate', 'other'];
+    const SUBTYPE_ORDER = ['vinyl', 'cd', 'tape', 'minidisc', 'apparel', 'poster', 'magazine', 'book', 'tab_book', 'ticket', 'laminate', 'video', 'game', 'memorabilia', 'ephemera', 'other'];
     const presentSubtypes = SUBTYPE_ORDER.filter(s => artefacts.some(i => i.subtype === s));
 
     const emptyState = _items.length === 0 ? `
@@ -643,7 +669,18 @@ function _renderCollectionTab() {
                 <i data-lucide="book-open" class="w-3.5 h-3.5" aria-hidden="true"></i>
                 Add memory
             </button>
+            <button onclick="window.openCollectionImport()" aria-label="Import from CSV"
+                    class="w-12 flex-shrink-0 flex items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 text-slate-500 hover:border-[#c8a050] hover:text-[#c8a050] transition-all active:scale-95">
+                <i data-lucide="upload" class="w-3.5 h-3.5" aria-hidden="true"></i>
+            </button>
         </div>
+
+        ${disposedCount > 0 ? `
+        <button onclick="window._colToggleDisposed()"
+                class="w-full flex items-center justify-center gap-2 py-2 mb-4 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-[#c8a050] transition-colors">
+            <i data-lucide="${_showDisposed ? 'eye-off' : 'eye'}" class="w-3 h-3" aria-hidden="true"></i>
+            ${_showDisposed ? 'Hide' : 'Show'} ${disposedCount} no-longer-owned item${disposedCount !== 1 ? 's' : ''}
+        </button>` : ''}
 
         ${emptyState}
 
@@ -777,8 +814,9 @@ function _renderDrillDown(subtype) {
     if (!panel) return;
 
     // Apply the same band/curation/search filters that the main tab uses,
-    // so drilling into a category respects the active filter state.
-    const bandFiltered = _applyBandFilter(_items);
+    // so drilling into a category respects the active filter state
+    // (including the still-owned/disposed toggle).
+    const bandFiltered = _applyBandFilter(_visibleItems());
     const curated      = _applyCuration(bandFiltered, _activeCuration);
     const searched     = _searchQuery ? curated.filter(i =>
         (i.title          || '').toLowerCase().includes(_searchQuery) ||
@@ -913,14 +951,32 @@ function _renderItemDetail(item) {
         item.label         && { label: 'Label',            value: item.label },
         item.catalogue_number && { label: 'Cat. no.',      value: item.catalogue_number },
         item.condition     && { label: 'Condition',        value: item.condition },
+        item.size          && { label: 'Size',             value: item.size },
         item.signed_by     && { label: 'Signed by',        value: item.signed_by },
         item.provenance    && { label: 'Acquired',         value: item.provenance },
+        item.country       && { label: 'Country',          value: item.country },
         item.artist_context && { label: 'Context',         value: item.artist_context },
     ].filter(Boolean);
 
     const labelsHtml = (item.labels || []).map(l =>
         `<span class="inline-block text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 mr-1">${escapeHtml(l)}</span>`
     ).join('');
+
+    const linksHtml = (item.links || []).map(url =>
+        `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer"
+            class="inline-flex items-center gap-1 text-[10px] font-black px-2.5 py-1 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors mr-1.5 mb-1.5 max-w-full">
+            <i data-lucide="link" class="w-3 h-3 flex-shrink-0" aria-hidden="true"></i>
+            <span class="truncate" style="max-width:220px">${escapeHtml(url.replace(/^https?:\/\/(www\.)?/, ''))}</span>
+        </a>`
+    ).join('');
+
+    const disposedBanner = item.still_owned === false ? `
+        <div class="mx-5 mb-4 p-3 rounded-2xl bg-slate-50 border border-slate-200 flex items-start gap-2">
+            <i data-lucide="archive" class="w-3.5 h-3.5 mt-0.5 text-slate-400 flex-shrink-0" aria-hidden="true"></i>
+            <p class="text-[11px] text-slate-500 font-bold leading-snug">
+                No longer in the collection${item.disposed_date ? ' · ' + escapeHtml(_formatAcquiredDate(item.disposed_date)) : ''}${item.disposal_reason ? ' — ' + escapeHtml(item.disposal_reason) : ''}
+            </p>
+        </div>` : '';
 
     // Tagged buddies — resolve names from _buddyOptions cache or show IDs
     const taggedIds = item.tagged_user_ids || [];
@@ -986,6 +1042,9 @@ const allPhotoUrls = (item.photos || []).map(p => _signedUrlCache.get(p)).filter
                 </button>` : ''}
             </div>
 
+            <!-- No longer owned -->
+            ${disposedBanner}
+
             <!-- Detail rows -->
             ${detailRows.length ? `
             <div class="px-5 divide-y divide-slate-100 mb-4">
@@ -996,7 +1055,14 @@ const allPhotoUrls = (item.photos || []).map(p => _signedUrlCache.get(p)).filter
                 </div>`).join('')}
             </div>` : ''}
 
-            <!-- Story -->
+            <!-- Notes (factual — deluxe edition, obi strip, etc.) -->
+            ${item.notes ? `
+            <div class="mx-5 mb-4 p-4 rounded-2xl bg-slate-50 border border-slate-100">
+                <p class="text-[9px] font-black uppercase tracking-widest mb-2 text-slate-400">Notes</p>
+                <p class="text-[13px] text-slate-600 leading-relaxed">${escapeHtml(item.notes)}</p>
+            </div>` : ''}
+
+            <!-- Story (personal) -->
             ${item.body ? `
             <div class="mx-5 mb-4 p-4 rounded-2xl bg-amber-50 border border-amber-100"
                  style="border-left:3px solid rgba(200,160,80,0.5)">
@@ -1006,6 +1072,9 @@ const allPhotoUrls = (item.photos || []).map(p => _signedUrlCache.get(p)).filter
 
             <!-- Labels -->
             ${labelsHtml ? `<div class="px-5 mb-5">${labelsHtml}</div>` : ''}
+
+            <!-- Links -->
+            ${linksHtml ? `<div class="px-5 mb-5 flex flex-wrap">${linksHtml}</div>` : ''}
 
             <!-- Tagged buddies (memories) -->
             ${taggedHtml ? `
@@ -1172,7 +1241,7 @@ window._colCloseDrillDown = () => {
 window._colSetView = (view) => {
     if (view === 'collage') {
         // Gather the currently-displayed items for the collage
-        const bandFiltered = _applyBandFilter(_items);
+        const bandFiltered = _applyBandFilter(_visibleItems());
         const curated      = _applyCuration(bandFiltered, _activeCuration);
         const searched     = _searchQuery ? curated.filter(i =>
             (i.title          || '').toLowerCase().includes(_searchQuery) ||
@@ -1246,6 +1315,11 @@ window._colSetBand = (bandId) => {
 
 window._colSearch = (query) => {
     _searchQuery = query.toLowerCase().trim();
+    _renderCollectionTab();
+};
+
+window._colToggleDisposed = () => {
+    _showDisposed = !_showDisposed;
     _renderCollectionTab();
 };
 
@@ -1381,11 +1455,15 @@ async function _renderBuddyCollection(userId, container) {
 
     const { data, error } = await supabase
         .from('collection_items')
-        .select('id, type, subtype, title, band_name, item_date, acquired_date, photos, hero_color, body, signed_by')
+        .select('id, type, subtype, title, band_name, item_date, acquired_date, photos, hero_color, body, signed_by, still_owned')
         .eq('user_id', userId)
         .order('item_date', { ascending: true });
 
-    if (error || !data?.length) {
+    // A buddy's "no longer owned" items stay private to them, same as the
+    // owner's own default view.
+    const visibleData = data ? data.filter(i => i.still_owned !== false) : data;
+
+    if (error || !visibleData?.length) {
         container.innerHTML = `
             <div class="text-center py-16 space-y-2">
                 <div class="text-4xl">📦</div>
@@ -1396,15 +1474,15 @@ async function _renderBuddyCollection(userId, container) {
     }
 
     // Pre-load signed URLs for photos
-    await _preloadSignedUrls(data);
+    await _preloadSignedUrls(visibleData);
 
-    const artefacts = data.filter(i => i.type === 'artefact');
-    const memories  = data.filter(i => i.type === 'memory');
+    const artefacts = visibleData.filter(i => i.type === 'artefact');
+    const memories  = visibleData.filter(i => i.type === 'memory');
 
     // Headline stats
-    const bands = new Set(data.map(i => i.band_id || i.band_name).filter(Boolean)).size;
-    const hasPhotos = data.filter(i => i.photos?.length > 0).length;
-    const years = data.map(i => parseInt(i.item_date)).filter(y => !isNaN(y));
+    const bands = new Set(visibleData.map(i => i.band_id || i.band_name).filter(Boolean)).size;
+    const hasPhotos = visibleData.filter(i => i.photos?.length > 0).length;
+    const years = visibleData.map(i => parseInt(i.item_date)).filter(y => !isNaN(y));
     const span  = years.length ? Math.max(...years) - Math.min(...years) : 0;
 
     const statsHtml = `
@@ -1428,7 +1506,7 @@ async function _renderBuddyCollection(userId, container) {
         </div>`;
 
     // Photo grids by subtype — only subtypes that have items
-    const SUBTYPE_ORDER = ['vinyl','cd','tape','minidisc','apparel','poster','magazine','book','tab_book','ticket','laminate','other'];
+    const SUBTYPE_ORDER = ['vinyl','cd','tape','minidisc','apparel','poster','magazine','book','tab_book','ticket','laminate','video','game','memorabilia','ephemera','other'];
     const presentSubtypes = SUBTYPE_ORDER.filter(s => artefacts.some(i => i.subtype === s));
 
     const shelvesHtml = presentSubtypes.map(subtype => {

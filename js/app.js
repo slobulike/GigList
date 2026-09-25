@@ -1,8 +1,9 @@
 /**
  * GigList Core Engine
- * v8.6.4 — 2026-09-21
+ * v8.7.0 — 2026-09-25
  * ------------------------------------------------------------------
- * ✅ Refactored deep link to use new idb-mailbox.js
+ * ✅ Added Collection import feature to allow users to import their own csv files
+ * ✅ Discogs and Weezerpedia image capture worker when links to items are added to Collection
  */
 
 import * as Data from './modules/data.js';
@@ -38,7 +39,7 @@ import { openPhotoCropModal } from './modules/photo-crop.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "8.6.4";
+const APP_VERSION = "8.7.0";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 

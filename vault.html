@@ -510,6 +510,36 @@
         <!-- Injected by collection.js -->
     </div>
 
+    <!-- ── COLLECTION IMPORT MODAL ──────────────────────────────────────────── -->
+    <div id="col-import-modal"
+         class="hidden fixed inset-0 z-[400] bg-black/60 backdrop-blur-sm flex items-end justify-center"
+         aria-hidden="true"
+         aria-label="Import collection"
+         role="dialog">
+        <div class="bg-white rounded-t-[2rem] w-full max-w-md max-h-[92vh] flex flex-col overflow-hidden">
+
+            <!-- Handle + header — never scrolls -->
+            <div class="flex-shrink-0 bg-white rounded-t-[2rem] border-b border-slate-100 px-5 pt-4 pb-3">
+                <div class="w-9 h-1 bg-slate-200 rounded-full mx-auto mb-4"></div>
+                <div class="flex items-center justify-between gap-3">
+                    <h2 id="col-import-title" class="text-lg font-black text-slate-900 truncate">Import your collection</h2>
+                    <button onclick="window.closeCollectionImport()" aria-label="Close"
+                            class="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center transition-all text-sm flex-shrink-0">✕</button>
+                </div>
+            </div>
+
+            <!-- Scrollable body — fully rebuilt per step by collection-import.js -->
+            <div id="col-import-body" class="overflow-y-auto flex-1 px-5 pt-4 pb-4">
+                <!-- Injected by collection-import.js -->
+            </div>
+
+            <!-- Footer actions — fully rebuilt per step by collection-import.js -->
+            <div id="col-import-footer" class="flex-shrink-0 flex gap-3 px-5 py-4 border-t border-slate-100">
+                <!-- Injected by collection-import.js -->
+            </div>
+        </div>
+    </div>
+
     <!-- ── COLLECTION EDITOR MODAL ──────────────────────────────────────────── -->
     <div id="col-editor-modal"
          class="hidden fixed inset-0 z-[400] bg-black/60 backdrop-blur-sm flex items-end justify-center"
@@ -591,41 +621,11 @@
                         </div>
                     </div>
 
-                    <!-- Date added to collection -->
+                    <!-- Story (personal) -->
                     <div>
-                        <label for="col-editor-acquired-month" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Date added to collection</label>
-                        <div class="flex gap-2">
-                            <div class="flex-1">
-                                <select id="col-editor-acquired-month"
-                                        aria-label="Month added to collection"
-                                        class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors appearance-none">
-                                    <option value="">Month</option>
-                                    <option value="01">January</option>
-                                    <option value="02">February</option>
-                                    <option value="03">March</option>
-                                    <option value="04">April</option>
-                                    <option value="05">May</option>
-                                    <option value="06">June</option>
-                                    <option value="07">July</option>
-                                    <option value="08">August</option>
-                                    <option value="09">September</option>
-                                    <option value="10">October</option>
-                                    <option value="11">November</option>
-                                    <option value="12">December</option>
-                                </select>
-                            </div>
-                            <div style="width:90px">
-                                <input type="text" id="col-editor-acquired-year" aria-label="Year added to collection" placeholder="2005" maxlength="4"
-                                       class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Story -->
-                    <div>
-                        <label for="col-editor-body" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Story / notes</label>
+                        <label for="col-editor-body" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Story</label>
                         <textarea id="col-editor-body" rows="3"
-                                  placeholder="Any notes or the story behind this item…"
+                                  placeholder="How you got it, what it means to you…"
                                   class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors resize-none leading-relaxed"></textarea>
                     </div>
 
@@ -645,72 +645,202 @@
                         </div>
                     </div>
 
-                    <!-- Catalogue fields (hidden for memories) -->
-                    <div id="col-editor-catalogue-fields" class="space-y-4">
+                    <!-- Extended Details toggle — collapsed by default; JS expands it automatically
+                         when editing an item that already has extended data filled in -->
+                    <button type="button" id="col-editor-extended-toggle" onclick="window.colEditorToggleExtended()"
+                            class="w-full text-center text-[11px] font-black uppercase tracking-widest py-2 transition-colors"
+                            style="color:#c8a050">
+                        + Add more details
+                    </button>
 
-                        <div class="relative">
-                            <label for="col-editor-format" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Format</label>
-                            <input type="text" id="col-editor-format" placeholder="LP, 7&quot;, CD single…" autocomplete="off"
-                                   class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
-                            <ul id="col-editor-format-list"
-                                class="hidden absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-2xl shadow-lg z-10 overflow-hidden max-h-48 overflow-y-auto"></ul>
-                        </div>
+                    <div id="col-editor-extended-section" class="hidden space-y-5">
 
-                        <div class="flex gap-3">
-                            <div class="flex-1">
-                                <label for="col-editor-label" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Record label</label>
-                                <input type="text" id="col-editor-label" placeholder="DGC Records"
-                                       class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
+                        <!-- Catalogue fields (hidden for memories) -->
+                        <div id="col-editor-catalogue-fields" class="space-y-4">
+
+                            <!-- Specs & Catalogue — format/label/cat.no/country/size shown per subtype -->
+                            <div id="col-editor-specs-card" class="bg-slate-50/50 border border-slate-100 p-4 rounded-2xl space-y-4">
+                                <p class="text-[10px] font-black uppercase tracking-widest text-slate-400">Specs &amp; catalogue</p>
+
+                                <div id="col-editor-format-container" class="relative">
+                                    <label for="col-editor-format" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Format</label>
+                                    <input type="text" id="col-editor-format" placeholder="LP, 7&quot;, CD single…" autocomplete="off"
+                                           class="w-full px-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
+                                    <ul id="col-editor-format-list"
+                                        class="hidden absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-2xl shadow-lg z-10 overflow-hidden max-h-48 overflow-y-auto"></ul>
+                                </div>
+
+                                <div class="flex gap-3">
+                                    <div id="col-editor-label-container" class="flex-1">
+                                        <label for="col-editor-label" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Record label</label>
+                                        <input type="text" id="col-editor-label" placeholder="DGC Records"
+                                               class="w-full px-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
+                                    </div>
+                                    <div id="col-editor-catno-container" style="width:110px">
+                                        <label for="col-editor-cat-no" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Cat. no.</label>
+                                        <input type="text" id="col-editor-cat-no" placeholder="GED24766"
+                                               class="w-full px-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
+                                    </div>
+                                </div>
+
+                                <div class="flex gap-3">
+                                    <div id="col-editor-country-container" class="flex-1">
+                                        <label for="col-editor-country" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Country</label>
+                                        <input type="text" id="col-editor-country" placeholder="UK"
+                                               class="w-full px-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
+                                    </div>
+                                    <div id="col-editor-size-container" style="width:90px">
+                                        <label for="col-editor-size" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Size</label>
+                                        <input type="text" id="col-editor-size" placeholder="XL"
+                                               class="w-full px-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
+                                    </div>
+                                </div>
                             </div>
-                            <div style="width:110px">
-                                <label for="col-editor-cat-no" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Cat. no.</label>
-                                <input type="text" id="col-editor-cat-no" placeholder="GED24766"
-                                       class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
-                            </div>
-                        </div>
 
-                        <div class="flex gap-3">
-                            <div class="flex-1">
-                                <label for="col-editor-condition" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Condition</label>
-                                <div class="relative">
+                            <!-- Notes (factual — deluxe edition, obi strip, etc. Distinct from the personal Story field above).
+                                 Not subtype-gated: useful regardless of item type, so it lives outside the Specs card. -->
+                            <div>
+                                <label for="col-editor-notes" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Notes</label>
+                                <textarea id="col-editor-notes" rows="2"
+                                          placeholder="Deluxe edition, obi strip, bonus disc…"
+                                          class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors resize-none leading-relaxed"></textarea>
+                            </div>
+
+                            <!-- Condition & History — condition/signed by/provenance shown per subtype -->
+                            <div id="col-editor-condition-card" class="bg-slate-50/50 border border-slate-100 p-4 rounded-2xl space-y-4">
+                                <p class="text-[10px] font-black uppercase tracking-widest text-slate-400">Condition &amp; history</p>
+
+                                <div id="col-editor-condition-container" class="relative">
+                                    <label for="col-editor-condition" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Condition</label>
                                     <input type="text" id="col-editor-condition" placeholder="Mint, Good…" autocomplete="off"
-                                           class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
+                                           class="w-full px-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
                                     <ul id="col-editor-condition-list"
                                         class="hidden absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-2xl shadow-lg z-10 overflow-hidden max-h-48 overflow-y-auto"></ul>
                                 </div>
+
+                                <div id="col-editor-signed-by-container">
+                                    <label for="col-editor-signed-by" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Signed by</label>
+                                    <input type="text" id="col-editor-signed-by" placeholder="Rivers Cuomo"
+                                           class="w-full px-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
+                                </div>
+
+                                <div id="col-editor-provenance-container">
+                                    <label for="col-editor-provenance" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Where I got it</label>
+                                    <input type="text" id="col-editor-provenance" placeholder="HMV Oxford Street · 1996"
+                                           class="w-full px-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
+                                </div>
                             </div>
-                            <div class="flex-1">
-                                <label for="col-editor-signed-by" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Signed by</label>
-                                <input type="text" id="col-editor-signed-by" placeholder="Rivers Cuomo"
+
+                            <div>
+                                <label for="col-editor-artist-ctx" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Artist context</label>
+                                <input type="text" id="col-editor-artist-ctx" placeholder="Rivers Cuomo solo, side project…"
                                        class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
                             </div>
-                        </div>
 
+                            <!-- Ownership & Dates -->
+                            <div class="bg-slate-50/50 border border-slate-100 p-4 rounded-2xl space-y-4">
+                                <p class="text-[10px] font-black uppercase tracking-widest text-slate-400">Ownership &amp; dates</p>
+
+                                <div>
+                                    <label for="col-editor-acquired-month" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Date added to collection</label>
+                                    <div class="flex gap-2">
+                                        <div class="flex-1">
+                                            <select id="col-editor-acquired-month"
+                                                    aria-label="Month added to collection"
+                                                    class="w-full px-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors appearance-none">
+                                                <option value="">Month</option>
+                                                <option value="01">January</option>
+                                                <option value="02">February</option>
+                                                <option value="03">March</option>
+                                                <option value="04">April</option>
+                                                <option value="05">May</option>
+                                                <option value="06">June</option>
+                                                <option value="07">July</option>
+                                                <option value="08">August</option>
+                                                <option value="09">September</option>
+                                                <option value="10">October</option>
+                                                <option value="11">November</option>
+                                                <option value="12">December</option>
+                                            </select>
+                                        </div>
+                                        <div style="width:90px">
+                                            <input type="text" id="col-editor-acquired-year" aria-label="Year added to collection" placeholder="2005" maxlength="4"
+                                                   class="w-full px-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- No longer owned — sold/gifted/traded away, kept for the record rather than deleted -->
+                                <label class="flex items-center justify-between cursor-pointer pt-1">
+                                    <span class="text-[11px] font-black uppercase tracking-widest text-slate-500">No longer in my collection</span>
+                                    <input type="checkbox" id="col-editor-not-owned"
+                                           onchange="window.colEditorToggleDisposed(this.checked)"
+                                           class="w-5 h-5 rounded accent-[#c8a050]">
+                                </label>
+                                <div id="col-editor-disposed-fields" class="hidden space-y-4">
+                                    <div>
+                                        <label for="col-editor-disposed-month" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Date parted with it</label>
+                                        <div class="flex gap-2">
+                                            <div class="flex-1">
+                                                <select id="col-editor-disposed-month"
+                                                        aria-label="Month parted with it"
+                                                        class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors appearance-none">
+                                                    <option value="">Month</option>
+                                                    <option value="01">January</option>
+                                                    <option value="02">February</option>
+                                                    <option value="03">March</option>
+                                                    <option value="04">April</option>
+                                                    <option value="05">May</option>
+                                                    <option value="06">June</option>
+                                                    <option value="07">July</option>
+                                                    <option value="08">August</option>
+                                                    <option value="09">September</option>
+                                                    <option value="10">October</option>
+                                                    <option value="11">November</option>
+                                                    <option value="12">December</option>
+                                                </select>
+                                            </div>
+                                            <div style="width:90px">
+                                                <input type="text" id="col-editor-disposed-year" aria-label="Year parted with it" placeholder="2021" maxlength="4"
+                                                       class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label for="col-editor-disposal-reason" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">What happened to it</label>
+                                        <input type="text" id="col-editor-disposal-reason" placeholder="Sold, gifted, traded…"
+                                               class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div><!-- /catalogue fields -->
+
+                        <!-- Labels -->
                         <div>
-                            <label for="col-editor-provenance" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Where I got it</label>
-                            <input type="text" id="col-editor-provenance" placeholder="HMV Oxford Street · 1996"
-                                   class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
+                            <label for="col-editor-label-input" class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block">Labels</label>
+                            <div id="col-editor-labels" class="flex flex-wrap gap-2 mb-2"></div>
+                            <div class="relative">
+                                <input type="text" id="col-editor-label-input" placeholder="Beanos find, Karl sent this…" autocomplete="off"
+                                       class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
+                                <ul id="col-editor-label-dropdown"
+                                    class="hidden absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-2xl shadow-lg z-10 overflow-hidden max-h-48 overflow-y-auto"></ul>
+                            </div>
                         </div>
 
+                        <!-- Links — Discogs, Weezerpedia, anything reference-worthy -->
                         <div>
-                            <label for="col-editor-artist-ctx" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Artist context</label>
-                            <input type="text" id="col-editor-artist-ctx" placeholder="Rivers Cuomo solo, side project…"
-                                   class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
+                            <label for="col-editor-link-input" class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block">Links</label>
+                            <div id="col-editor-links" class="flex flex-wrap gap-2 mb-2"></div>
+                            <div class="flex gap-2">
+                                <input type="text" id="col-editor-link-input" placeholder="https://discogs.com/…" autocomplete="off"
+                                       class="flex-1 min-w-0 px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
+                                <button type="button" onclick="window.colEditorAddLinkFromInput()"
+                                        class="px-4 rounded-2xl text-[11px] font-black uppercase tracking-widest bg-slate-100 hover:bg-slate-200 text-slate-600 transition-all flex-shrink-0">Add</button>
+                            </div>
                         </div>
 
-                    </div><!-- /catalogue fields -->
-
-                    <!-- Labels -->
-                    <div>
-                        <label for="col-editor-label-input" class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block">Labels</label>
-                        <div id="col-editor-labels" class="flex flex-wrap gap-2 mb-2"></div>
-                        <div class="relative">
-                            <input type="text" id="col-editor-label-input" placeholder="Beanos find, Karl sent this…" autocomplete="off"
-                                   class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-amber-400 transition-colors">
-                            <ul id="col-editor-label-dropdown"
-                                class="hidden absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-2xl shadow-lg z-10 overflow-hidden max-h-48 overflow-y-auto"></ul>
-                        </div>
-                    </div>
+                    </div><!-- /col-editor-extended-section -->
 
                     <!-- Error -->
                     <p id="col-editor-error" class="hidden text-sm font-bold text-red-500 rounded-xl bg-red-50 px-4 py-3"></p>
@@ -1735,12 +1865,14 @@
     import { initFilters } from './js/modules/filters.js';
     import { init as initCollection, refresh as refreshCollection } from './js/modules/collection.js';
     import { initCollectionEditor, openCollectionEditor } from './js/modules/collection-editor.js';
+    import { initCollectionImport } from './js/modules/collection-import.js';
     import { openCapture, closeCaptureModal, openAddShowFork } from './js/modules/capture.js';
     import { initWishlist } from './js/modules/wishlist.js';
     import './js/modules/stats-share.js';
     initWishlist();
 window._initCollectionEditor = initCollectionEditor;
 window.openCollectionEditor  = openCollectionEditor;
+    initCollectionImport();
     window._initCollection  = initCollection;
     window._refreshCollection = refreshCollection;
     window.openCapture       = openCapture;

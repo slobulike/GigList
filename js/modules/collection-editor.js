@@ -20,6 +20,9 @@
  *   window.colEditorSetHeroPhoto(index) — move a photo to the front (hero) slot
  *   window.colEditorAddLabel(label)
  *   window.colEditorRemoveLabel(index)
+ *   window.colEditorAddLinkFromInput()
+ *   window.colEditorRemoveLink(index)
+ *   window.colEditorToggleDisposed(checked)
  */
 
 import { supabase } from './supabase.js';
@@ -32,6 +35,7 @@ import { openPhotoCropModal } from './photo-crop.js';
 // so items get their own crop ratio.
 const COLLECTION_PHOTO_CROP_ASPECT_RATIO = 1;
 const PUSH_WORKER_URL = 'https://giglist-push.richard-lipscombe.workers.dev';
+const IMPORT_WORKER_URL = 'https://collection-image-import.richard-lipscombe.workers.dev';
 
 // ─── STATE ────────────────────────────────────────────────────────────────────
 
@@ -44,7 +48,9 @@ let _selectedSubtype = 'cd';
 //   { kind: 'pending',  file, previewUrl }       — new or re-cropped, not yet uploaded
 let _photos          = [];
 let _labels          = [];  // Current label array
+let _links           = [];  // Current reference-URL array (Discogs, Weezerpedia, etc.)
 let _taggedBuddies   = [];  // Array of { id, name } — buddies tagged in this memory
+let _extendedOpen    = false; // Whether the "Extended Details" section is expanded
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
@@ -61,6 +67,10 @@ const SUBTYPES = {
         { value: 'tab_book',  label: 'Tab Book',    icon: '🎸' },
         { value: 'ticket',    label: 'Ticket',      icon: '🎟' },
         { value: 'laminate',  label: 'Laminate',    icon: '🪪' },
+        { value: 'video',       label: 'Video',        icon: '📀' },
+        { value: 'game',         label: 'Game',          icon: '🎮' },
+        { value: 'memorabilia',  label: 'Memorabilia',   icon: '🎁' },
+        { value: 'ephemera',     label: 'Ephemera',      icon: '📰' },
         { value: 'other',     label: 'Other',       icon: '✦'  },
     ],
     memory: [
@@ -84,9 +94,44 @@ const FORMAT_SUGGESTIONS = {
     tab_book: ['Guitar tab', 'Bass tab', 'Piano/vocal'],
     ticket:   ['Ticket stub', 'E-ticket printout', 'Wristband'],
     laminate: ['AAA laminate', 'Guest pass', 'Crew laminate'],
+    video:       ['DVD', 'VHS', 'Blu-ray', 'DVD-R'],
+    game:        ['Cartridge', 'Disc', 'Digital code'],
+    memorabilia: ['Keychain', 'Pin', 'Toy', 'Bag', 'Instrument', 'Gift card'],
+    ephemera:    ['Flyer', 'Postcard', 'Press kit', 'Setlist', 'Zine', 'Sticker'],
 };
 
 // CONDITION_OPTIONS defined below alongside _wireConditionSuggestions
+
+// Which extended-detail fields are relevant for each subtype. Drives both
+// per-field visibility (below) and whole-card visibility — a card whose
+// fields are all irrelevant for the current subtype collapses away instead
+// of showing an empty shell. Memories never use this (whole catalogue
+// section is hidden for type === 'memory').
+const SUBTYPE_FIELD_RULES = {
+    cd:          ['format', 'label', 'catalogue_number', 'country', 'condition'],
+    vinyl:       ['format', 'label', 'catalogue_number', 'country', 'condition'],
+    tape:        ['format', 'label', 'catalogue_number', 'condition'],
+    minidisc:    ['format', 'label', 'catalogue_number', 'condition'],
+    apparel:     ['size', 'condition', 'signed_by', 'provenance'],
+    poster:      ['size', 'condition', 'signed_by', 'provenance'],
+    magazine:    ['format', 'condition', 'provenance'],
+    book:        ['format', 'condition', 'signed_by'],
+    tab_book:    ['format', 'condition', 'signed_by'],
+    ticket:      ['provenance', 'condition'],
+    laminate:    ['provenance', 'condition'],
+    video:       ['format', 'condition', 'signed_by'],
+    game:        ['format', 'condition'],
+    memorabilia: ['size', 'condition', 'signed_by', 'provenance'],
+    ephemera:    ['condition', 'provenance'],
+    other:       ['format', 'label', 'catalogue_number', 'country', 'size', 'condition', 'signed_by', 'provenance'],
+};
+
+// Which card each subtype-gated field lives in — used to collapse a whole
+// card when none of its fields apply to the current subtype.
+const FIELD_CARD = {
+    format: 'specs', label: 'specs', catalogue_number: 'specs', country: 'specs', size: 'specs',
+    condition: 'condition', signed_by: 'condition', provenance: 'condition',
+};
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 
@@ -137,6 +182,16 @@ function _renderLabels() {
         <span class="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-700">
             ${escapeHtml(l)}
             <button type="button" onclick="window.colEditorRemoveLabel(${i})" aria-label="Remove label ${escapeHtml(l)}" class="hover:text-red-500 transition-colors leading-none">×</button>
+        </span>`).join('');
+}
+
+function _renderLinks() {
+    const container = document.getElementById('col-editor-links');
+    if (!container) return;
+    container.innerHTML = _links.map((url, i) => `
+        <span class="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full bg-slate-100 border border-slate-200 text-slate-600 max-w-full">
+            <span class="truncate" style="max-width:180px">${escapeHtml(url)}</span>
+            <button type="button" onclick="window.colEditorRemoveLink(${i})" aria-label="Remove link" class="hover:text-red-500 transition-colors leading-none flex-shrink-0">×</button>
         </span>`).join('');
 }
 
@@ -200,6 +255,18 @@ function _wireLabelInput() {
     document.addEventListener('click', (e) => {
         if (!input.contains(e.target) && !dropdown.contains(e.target)) {
             dropdown.classList.add('hidden');
+        }
+    });
+}
+
+function _wireLinkInput() {
+    const input = document.getElementById('col-editor-link-input');
+    if (!input || input._linkWired) return;
+    input._linkWired = true;
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            window.colEditorAddLinkFromInput();
         }
     });
 }
@@ -300,6 +367,17 @@ window.togglePhotoMenu = (e) => {
     }
 };
 
+// Auto-fetched source images are tagged in their storage path as
+// "-src-<name>-" by the collection-image-import Worker (e.g.
+// ".../abc-src-discogs-172938-x9f2k.jpg"). Pure filename convention —
+// no schema/state-shape change — so existing photos with no tag are
+// just untagged user uploads.
+const SOURCE_LABELS = { discogs: 'Discogs', weezerpedia: 'Weezerpedia', coverart: 'Cover Art' };
+function _photoSource(path) {
+    const m = /-src-([a-z]+)-/.exec(path || '');
+    return m ? m[1] : null;
+}
+
 function _renderPhotoPreviews() {
     const container = document.getElementById('col-editor-photo-previews');
     if (!container) return;
@@ -309,9 +387,14 @@ function _renderPhotoPreviews() {
         const isHero  = i === 0;
         const isNew   = p.kind === 'pending';
         const src     = isNew ? p.previewUrl : p.url;
+        const source  = p.kind === 'existing' ? _photoSource(p.path) : null;
         const badge   = isHero
             ? `<span class="absolute bottom-0 left-0 right-0 text-center text-[8px] font-black uppercase bg-black/50 text-white py-0.5">Hero</span>`
-            : (isNew ? `<span class="absolute bottom-0 left-0 right-0 text-center text-[8px] font-black uppercase bg-amber-500/80 text-white py-0.5">New</span>` : '');
+            : (isNew
+                ? `<span class="absolute bottom-0 left-0 right-0 text-center text-[8px] font-black uppercase bg-amber-500/80 text-white py-0.5">New</span>`
+                : (source
+                    ? `<span class="absolute bottom-0 left-0 right-0 text-center text-[8px] font-black uppercase bg-slate-700/80 text-white py-0.5">${escapeHtml(SOURCE_LABELS[source] || source)}</span>`
+                    : ''));
         // "Set as hero" star — only shown on non-hero slots
         const heroBtn = !isHero ? `
             <button type="button"
@@ -525,6 +608,7 @@ async function _populateForm(item) {
     _selectedType    = item.type    || 'artefact';
     _selectedSubtype = item.subtype || 'cd';
     _labels          = [...(item.labels || [])];
+    _links           = [...(item.links || [])];
     _photos          = [];
 
     _renderTypeToggle();
@@ -557,14 +641,37 @@ async function _populateForm(item) {
         if (acqMonth) acqMonth.value = '';
     }
     _val('col-editor-body',       item.body              || '');
+    _val('col-editor-notes',      item.notes             || '');
     _val('col-editor-label',      item.label             || '');
     _val('col-editor-cat-no',     item.catalogue_number  || '');
     _val('col-editor-format',     item.format            || '');
     _val('col-editor-signed-by',  item.signed_by         || '');
     _val('col-editor-provenance', item.provenance        || '');
+    _val('col-editor-country',    item.country            || '');
+    _val('col-editor-size',       item.size               || '');
 
     const condEl = document.getElementById('col-editor-condition');
     if (condEl) condEl.value = item.condition || '';
+
+    // "No longer owned" — still_owned defaults true for rows that predate
+    // this field. disposed_date follows the same "YYYY-MM"/"YYYY" convention
+    // as acquired_date.
+    const notOwnedEl   = document.getElementById('col-editor-not-owned');
+    const disposedFields = document.getElementById('col-editor-disposed-fields');
+    const stillOwned = item.still_owned !== false;
+    if (notOwnedEl) notOwnedEl.checked = !stillOwned;
+    if (disposedFields) disposedFields.classList.toggle('hidden', stillOwned);
+    const dispMonthEl = document.getElementById('col-editor-disposed-month');
+    const dispYearEl  = document.getElementById('col-editor-disposed-year');
+    if (item.disposed_date) {
+        const dParts = item.disposed_date.split('-');
+        if (dispYearEl)  dispYearEl.value  = dParts[0] || '';
+        if (dispMonthEl) dispMonthEl.value = dParts[1] || '';
+    } else {
+        if (dispYearEl)  dispYearEl.value  = '';
+        if (dispMonthEl) dispMonthEl.value = '';
+    }
+    _val('col-editor-disposal-reason', item.disposal_reason || '');
 
     // Band combobox — pre-fill with stored band_name
     const bandInput = document.getElementById('col-editor-band-input');
@@ -595,9 +702,21 @@ async function _populateForm(item) {
     }
 
     _renderLabels();
+    _renderLinks();
     _renderBuddyTags();
     _renderPhotoPreviews();
     _updateFieldVisibility();
+
+    // Auto-expand Extended Details when editing an item that already has
+    // data in any extended field — otherwise editors would silently hide
+    // existing values behind a collapsed "+ Add more details" toggle.
+    const hasExtendedData = Boolean(
+        item.format || item.catalogue_number || item.label || item.country || item.size ||
+        item.condition || item.signed_by || item.provenance || item.notes ||
+        item.acquired_date || item.still_owned === false ||
+        (item.labels && item.labels.length) || (item.links && item.links.length)
+    );
+    window.colEditorToggleExtended(hasExtendedData);
 }
 
 // ─── BUDDY TAGGING ───────────────────────────────────────────────────────────
@@ -729,28 +848,85 @@ window._colEditorRemoveBuddy = (i) => {
  * Memories only need title, date, body and photos.
  * Artefacts show the full catalogue fields.
  */
+// Container element IDs for each subtype-gated field. Matches the markup
+// in the modal template — each wraps a label + input as one toggle unit.
+const FIELD_CONTAINER_ID = {
+    format:           'col-editor-format-container',
+    label:            'col-editor-label-container',
+    catalogue_number: 'col-editor-catno-container',
+    country:          'col-editor-country-container',
+    size:             'col-editor-size-container',
+    condition:        'col-editor-condition-container',
+    signed_by:        'col-editor-signed-by-container',
+    provenance:       'col-editor-provenance-container',
+};
+
+function _setHidden(id, hidden) {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('hidden', hidden);
+}
+
 function _updateFieldVisibility() {
+    const isMemory = _selectedType === 'memory';
+
+    // Whole catalogue/extended-details section only applies to artefacts.
     const catalogueFields = document.getElementById('col-editor-catalogue-fields');
-    if (catalogueFields) {
-        catalogueFields.classList.toggle('hidden', _selectedType === 'memory');
-    }
-    // Buddy tag field is only meaningful on memories
-    const buddyField = document.getElementById('col-editor-buddy-tag-field');
-    if (buddyField) {
-        buddyField.classList.toggle('hidden', _selectedType !== 'memory');
-    }
+    if (catalogueFields) catalogueFields.classList.toggle('hidden', isMemory);
+
+    // Buddy tag field is only meaningful on memories.
+    _setHidden('col-editor-buddy-tag-field', !isMemory);
+
     const subtypeLabel = document.getElementById('col-editor-subtype-label');
-    if (subtypeLabel) {
-        subtypeLabel.textContent = _selectedType === 'memory' ? 'Memory type' : 'Item type';
-    }
-    // Update placeholder on body field
+    if (subtypeLabel) subtypeLabel.textContent = isMemory ? 'Memory type' : 'Item type';
+
+    // Update placeholder on the main story/body field.
     const bodyEl = document.getElementById('col-editor-body');
     if (bodyEl) {
-        bodyEl.placeholder = _selectedType === 'memory'
+        bodyEl.placeholder = isMemory
             ? 'Tell the story…'
-            : 'Any notes or the story behind this item…';
+            : 'How you got it, what it means to you…';
     }
+
+    if (isMemory) return; // nothing below applies to memories
+
+    // Per-field visibility, driven by SUBTYPE_FIELD_RULES for the active subtype.
+    const activeFields = SUBTYPE_FIELD_RULES[_selectedSubtype] || [];
+    Object.entries(FIELD_CONTAINER_ID).forEach(([field, containerId]) => {
+        _setHidden(containerId, !activeFields.includes(field));
+    });
+
+    // Whole-card visibility — collapse a card if none of its fields apply
+    // to this subtype, so switching to e.g. "Ticket" doesn't leave an
+    // empty Specs & Catalogue card sitting in the Extended view.
+    const cardsWithVisibleFields = new Set(activeFields.map(f => FIELD_CARD[f]).filter(Boolean));
+    _setHidden('col-editor-specs-card',     !cardsWithVisibleFields.has('specs'));
+    _setHidden('col-editor-condition-card', !cardsWithVisibleFields.has('condition'));
+
+    _updateExtendedToggleVisibility();
 }
+
+// If every field in the Extended section is irrelevant for this subtype AND
+// there's nothing already filled in, hide the "Add more details" toggle
+// itself rather than opening onto a mostly-empty extended view. Ownership
+// and Tags & Links cards are always potentially useful, so the toggle only
+// ever fully hides in the rare case those are also suppressed — in
+// practice this just keeps the button from being visually misleading; it
+// still always shows for now since Ownership/Tags & Links are universal.
+function _updateExtendedToggleVisibility() {
+    const toggleBtn = document.getElementById('col-editor-extended-toggle');
+    if (toggleBtn) toggleBtn.classList.remove('hidden');
+}
+
+// Expand/collapse the Extended Details section. Called by the toggle
+// button; also called with an explicit `open` value when populating an
+// existing item so editors land on the right state (see _populateForm).
+window.colEditorToggleExtended = (open) => {
+    _extendedOpen = typeof open === 'boolean' ? open : !_extendedOpen;
+    const section = document.getElementById('col-editor-extended-section');
+    const btn     = document.getElementById('col-editor-extended-toggle');
+    if (section) section.classList.toggle('hidden', !_extendedOpen);
+    if (btn) btn.textContent = _extendedOpen ? '– Show less details' : '+ Add more details';
+};
 
 // ─── BAND COMBOBOX ────────────────────────────────────────────────────────────
 
@@ -869,10 +1045,13 @@ export const openCollectionEditor = async (type = null, itemId = null) => {
     _editingId       = itemId || null;
     _photos          = [];
     _labels          = [];
+    _links           = [];
     _taggedBuddies   = [];
     _labelCache      = null; // refresh label suggestions on each open
     _selectedType    = type || 'artefact';
     _selectedSubtype = 'cd';
+    _extendedOpen    = false; // always start collapsed to Quick Add; _populateForm reopens it for edits with existing extended data
+    window.colEditorToggleExtended(false);
     _hideError();
 
     const modal = document.getElementById('col-editor-modal');
@@ -912,17 +1091,27 @@ export const openCollectionEditor = async (type = null, itemId = null) => {
         // here too, not just in _populateForm/initCollectionEditor, in case the modal's
         // markup wasn't in the DOM yet when initCollectionEditor() ran on page load.
         _renderLabels();
+        _links = [];
+        _renderLinks();
+        _wireLinkInput();
         _renderPhotoPreviews();
         _updateFieldVisibility();
 
         ['col-editor-title','col-editor-date','col-editor-artist-ctx',
-         'col-editor-body','col-editor-label','col-editor-cat-no',
+         'col-editor-body','col-editor-notes','col-editor-label','col-editor-cat-no',
          'col-editor-format','col-editor-signed-by','col-editor-provenance',
-         'col-editor-acquired-year'].forEach(id => _val(id, ''));
+         'col-editor-country','col-editor-size','col-editor-disposal-reason',
+         'col-editor-acquired-year','col-editor-disposed-year'].forEach(id => _val(id, ''));
         const condEl = document.getElementById('col-editor-condition');
         if (condEl) condEl.value = '';
         const acqMonthEl = document.getElementById('col-editor-acquired-month');
         if (acqMonthEl) acqMonthEl.value = '';
+        const dispMonthEl = document.getElementById('col-editor-disposed-month');
+        if (dispMonthEl) dispMonthEl.value = '';
+        const notOwnedEl = document.getElementById('col-editor-not-owned');
+        if (notOwnedEl) notOwnedEl.checked = false;
+        const disposedFields = document.getElementById('col-editor-disposed-fields');
+        if (disposedFields) disposedFields.classList.add('hidden');
         _taggedBuddies = [];
         _renderBuddyTags();
         const buddyInput = document.getElementById('col-editor-buddy-input');
@@ -1025,6 +1214,13 @@ window.saveCollectionItem = async () => {
             ? (acquiredMonth ? `${acquiredYear}-${acquiredMonth}` : acquiredYear)
             : null;
 
+        const notOwned      = document.getElementById('col-editor-not-owned')?.checked || false;
+        const disposedYear  = document.getElementById('col-editor-disposed-year')?.value?.trim() || '';
+        const disposedMonth = document.getElementById('col-editor-disposed-month')?.value || '';
+        const disposedDate  = notOwned && disposedYear
+            ? (disposedMonth ? `${disposedYear}-${disposedMonth}` : disposedYear)
+            : null;
+
         const taggedUserIds = _taggedBuddies.map(b => b.id);
 
         // 2. Include artist_id in the row payload
@@ -1040,14 +1236,21 @@ window.saveCollectionItem = async () => {
             acquired_date:    acquiredDate,
             artist_context:   _get('col-editor-artist-ctx') || null,
             body:             _get('col-editor-body')       || null,
+            notes:            _get('col-editor-notes')      || null,
             label:            _get('col-editor-label')      || null,
             catalogue_number: _get('col-editor-cat-no')     || null,
             format:           _get('col-editor-format')     || null,
             condition:        document.getElementById('col-editor-condition')?.value || null,
             signed_by:        _get('col-editor-signed-by')  || null,
             provenance:       _get('col-editor-provenance') || null,
+            country:          _get('col-editor-country')    || null,
+            size:             _get('col-editor-size')       || null,
+            still_owned:      !notOwned,
+            disposed_date:    disposedDate,
+            disposal_reason:  notOwned ? (_get('col-editor-disposal-reason') || null) : null,
             photos:           allPhotoPaths,
             labels:           _labels,
+            links:            _links,
             tagged_user_ids:  taggedUserIds.length ? taggedUserIds : null,
             ...(heroColor && { hero_color: heroColor }),
         };
@@ -1075,6 +1278,13 @@ window.saveCollectionItem = async () => {
 
         if (window._refreshCollection) window._refreshCollection();
 
+        // Fire-and-forget: resolve any Discogs/Weezerpedia cover art for this
+        // item in the background. The Worker is idempotent (skips sources it's
+        // already fetched), so it's safe to call on every save rather than
+        // only when links change. Never blocks the save or surfaces errors —
+        // a failed image fetch shouldn't make the user think their save failed.
+        _maybeImportSourceImages(itemId, session.user.id, _links);
+
     } catch (err) {
         console.error('[ColEditor] save failed:', err);
         _showError(err.message || 'Could not save item.');
@@ -1082,6 +1292,30 @@ window.saveCollectionItem = async () => {
         _setBusy(false);
     }
 };
+
+// ─── COVER ART IMPORT ────────────────────────────────────────────────────────
+
+/**
+ * Kicks off the collection-image-import Worker for this item, non-blocking.
+ * Only fires when there's a Discogs or Weezerpedia link to work with — the
+ * Worker itself also no-ops if it has nothing new to fetch, but skipping the
+ * network call entirely here avoids a pointless request on every save of an
+ * item with no such links.
+ */
+function _maybeImportSourceImages(itemId, userId, links) {
+    const relevant = (links || []).filter(
+        l => l.includes('discogs.com') || l.includes('weezerpedia.com')
+    );
+    if (!relevant.length) return;
+
+    fetch(`${IMPORT_WORKER_URL}/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ itemId, userId, links: relevant }),
+    }).catch(err => {
+        console.warn('[ColEditor] cover art import failed (non-fatal):', err);
+    });
+}
 
 // ─── PUSH NOTIFICATIONS ──────────────────────────────────────────────────────
 
@@ -1170,6 +1404,7 @@ window.colEditorSetSubtype = (subtype) => {
     _selectedSubtype = subtype;
     _renderSubtypeSelector();
     _wireFormatSuggestions(subtype);
+    _updateFieldVisibility(); // subtype now drives which extended fields/cards show
 };
 
 // Opens the shared crop modal for one file and resolves with the cropped
@@ -1269,10 +1504,36 @@ window.colEditorRemoveLabel = (i) => {
     _renderLabels();
 };
 
+// Links get no autocomplete (unlike labels, URLs aren't reused across items) —
+// just trimmed, de-duped, and a light sanity check before being added.
+window.colEditorAddLinkFromInput = () => {
+    const input = document.getElementById('col-editor-link-input');
+    if (!input) return;
+    const trimmed = input.value.trim();
+    if (!trimmed || _links.includes(trimmed)) { input.value = ''; return; }
+    _links.push(trimmed);
+    input.value = '';
+    _renderLinks();
+};
+
+window.colEditorRemoveLink = (i) => {
+    _links.splice(i, 1);
+    _renderLinks();
+};
+
+// Shows/hides the disposed-date + reason fields when "No longer in my
+// collection" is toggled. Does NOT clear their values on uncheck — if the
+// user re-checks it, whatever they'd already typed is still there.
+window.colEditorToggleDisposed = (checked) => {
+    const fields = document.getElementById('col-editor-disposed-fields');
+    if (fields) fields.classList.toggle('hidden', !checked);
+};
+
 // ─── INIT ─────────────────────────────────────────────────────────────────────
 
 export const initCollectionEditor = () => {
     _wireLabelInput();
+    _wireLinkInput();
     _wireConditionSuggestions();
     // Close modal on backdrop click
     const modal = document.getElementById('col-editor-modal');
