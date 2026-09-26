@@ -597,6 +597,20 @@
                         </label>
                     </div>
 
+                    <!-- Discogs import — paste a release link to prefill the fields below.
+                         Optional: leave blank and fill the form in manually as before. -->
+                    <div>
+                        <label for="col-editor-discogs-input" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Have a Discogs link?</label>
+                        <div class="flex gap-2">
+                            <input type="url" id="col-editor-discogs-input" placeholder="https://discogs.com/release/…" autocomplete="off"
+                                   class="flex-1 px-4 py-3 bg-slate-50 rounded-2xl border border-slate-200 text-sm font-bold text-slate-700 focus:outline-none focus:border-amber-400 transition-colors">
+                            <button type="button" id="col-editor-discogs-fetch-btn" onclick="window.colEditorLookupDiscogs()"
+                                    class="px-4 rounded-2xl text-[11px] font-black uppercase tracking-widest text-white transition-colors"
+                                    style="background:#c8a050">Fill in</button>
+                        </div>
+                        <p id="col-editor-discogs-status" class="hidden text-[11px] font-bold mt-1.5"></p>
+                    </div>
+
                     <!-- Band — first field, above title -->
                     <div>
                         <label for="col-editor-band-input" class="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Band</label>
@@ -839,6 +853,13 @@
                                         class="px-4 rounded-2xl text-[11px] font-black uppercase tracking-widest bg-slate-100 hover:bg-slate-200 text-slate-600 transition-all flex-shrink-0">Add</button>
                             </div>
                         </div>
+
+                        <!-- Discogs details — read-only, populated by the lookup above.
+                             Hidden entirely (JS-controlled) unless this item has Discogs
+                             data attached; not editable since it's Discogs' data, not the
+                             user's — the fields worth editing were already copied into
+                             Title/Band/Format/etc. above. -->
+                        <div id="col-editor-discogs-card" class="hidden p-4 rounded-2xl bg-slate-50 border border-slate-200"></div>
 
                     </div><!-- /col-editor-extended-section -->
 

@@ -1,9 +1,9 @@
 /**
  * GigList Core Engine
- * v8.7.0 — 2026-09-25
+ * v8.7.1 — 2026-09-26
  * ------------------------------------------------------------------
- * ✅ Added Collection import feature to allow users to import their own csv files
- * ✅ Discogs and Weezerpedia image capture worker when links to items are added to Collection
+ * ✅ Improved Collection item flow to allow discogs link to be used to pre-fill all available details
+ * ✅ Worker changed to populate new discogs_catalogue table to avoid redundant API calls
  */
 
 import * as Data from './modules/data.js';

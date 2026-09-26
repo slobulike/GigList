@@ -23,6 +23,7 @@
  *   window.colEditorAddLinkFromInput()
  *   window.colEditorRemoveLink(index)
  *   window.colEditorToggleDisposed(checked)
+ *   window.colEditorLookupDiscogs()     — fetch + autofill from a pasted Discogs link
  */
 
 import { supabase } from './supabase.js';
@@ -51,6 +52,8 @@ let _labels          = [];  // Current label array
 let _links           = [];  // Current reference-URL array (Discogs, Weezerpedia, etc.)
 let _taggedBuddies   = [];  // Array of { id, name } — buddies tagged in this memory
 let _extendedOpen    = false; // Whether the "Extended Details" section is expanded
+let _discogsId       = null; // Set once a Discogs lookup has populated this item
+let _discogsData     = null; // { genres, styles, tracklist, discogs_uri } — read-only snapshot
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
@@ -259,6 +262,136 @@ function _wireLabelInput() {
     });
 }
 
+// ─── DISCOGS LOOKUP / PREFILL ─────────────────────────────────────────────────
+// Autofill is all-or-nothing by design (per product decision): every
+// mapped field gets overwritten with whatever Discogs returned, and the
+// user edits from there afterwards. This is simpler than a per-field
+// keep/discard step and matches how the rest of this form already works
+// (e.g. selecting a band from the combobox just overwrites the input).
+
+function _setDiscogsStatus(msg, isError = false) {
+    const el = document.getElementById('col-editor-discogs-status');
+    if (!el) return;
+    el.textContent = msg || '';
+    el.classList.toggle('hidden', !msg);
+    el.classList.toggle('text-red-500', isError);
+    el.classList.toggle('text-slate-400', !isError);
+}
+
+window.colEditorLookupDiscogs = async () => {
+    const input = document.getElementById('col-editor-discogs-input');
+    const discogsUrl = input?.value?.trim();
+    if (!discogsUrl) return;
+
+    const btn = document.getElementById('col-editor-discogs-fetch-btn');
+    if (btn) btn.disabled = true;
+    _setDiscogsStatus('Looking up release…');
+    // Reuses the app-wide spinner from app.js rather than a bespoke one here —
+    // if that isn't the actual global name/signature, swap this pair for
+    // whatever app.js exports. Both are optional-chained so a mismatch just
+    // means no spinner shows, not a broken lookup.
+    window.showSpinner?.();
+
+    try {
+        const res = await fetch(`${IMPORT_WORKER_URL}/lookup`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ discogsUrl }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.error || `lookup failed (${res.status})`);
+
+        await _applyDiscogsLookup(data);
+        _setDiscogsStatus('Filled in from Discogs — edit anything below as needed.');
+    } catch (err) {
+        console.error('[ColEditor] Discogs lookup failed:', err.message);
+        _setDiscogsStatus("Couldn't find that release — you can still fill the form in yourself.", true);
+    } finally {
+        if (btn) btn.disabled = false;
+        window.hideSpinner?.();
+    }
+};
+
+async function _applyDiscogsLookup(data) {
+    // Core fields — same inputs a manual entry would fill in.
+    _val('col-editor-title', data.title || '');
+    _val('col-editor-date',  data.year ? String(data.year) : '');
+    _val('col-editor-label',      data.label            || '');
+    _val('col-editor-cat-no',     data.catalogue_number || '');
+    _val('col-editor-format',     data.format           || '');
+    _val('col-editor-country',    data.country          || '');
+
+    const bandInput = document.getElementById('col-editor-band-input');
+    if (bandInput && data.artist) bandInput.value = data.artist;
+
+    // Adding the Discogs page itself to the links chips means it's still
+    // there even if the discogs_data snapshot below ever falls out of sync.
+    if (data.discogs_uri && !_links.includes(data.discogs_uri)) {
+        _links.push(data.discogs_uri);
+        _renderLinks();
+    }
+
+    // Reveal the specs fields that were just populated (they live in the
+    // Extended section) and open the read-only Discogs card underneath them.
+    _discogsId   = data.discogs_id || null;
+    _discogsData = {
+        genres:      data.genres || [],
+        styles:      data.styles || [],
+        tracklist:   data.tracklist || [],
+        discogs_uri: data.discogs_uri || null,
+    };
+    _renderDiscogsCard();
+    window.colEditorToggleExtended(true);
+
+    // Cover image comes back as base64 from the worker (it downloads
+    // i.discogs.com server-side) rather than a URL the browser fetches
+    // itself — that host sends no CORS allowance, so a direct fetch()
+    // from here would fail silently every time. From here on it's
+    // treated exactly like a user-picked photo, same upload/crop/reorder
+    // path as everything else in _photos.
+    if (data.image_base64 && _photos.length === 0) {
+        try {
+            const file = _base64ToFile(
+                data.image_base64,
+                data.image_content_type || 'image/jpeg',
+                `discogs-${data.discogs_id}.jpg`
+            );
+            const compressed = await _compressImage(file);
+            _photos.push({ kind: 'pending', file: compressed, previewUrl: URL.createObjectURL(compressed) });
+            _renderPhotoPreviews();
+        } catch (err) {
+            console.log('[ColEditor] could not decode Discogs cover image:', err.message);
+        }
+    }
+}
+
+function _renderDiscogsCard() {
+    const card = document.getElementById('col-editor-discogs-card');
+    if (!card) return;
+
+    if (!_discogsData) { card.classList.add('hidden'); return; }
+
+    const genresStyles = [..._discogsData.genres, ..._discogsData.styles];
+    const tagsHtml = genresStyles.length
+        ? `<div class="flex flex-wrap gap-1.5 mb-3">${genresStyles.map(g => `
+            <span class="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">${escapeHtml(g)}</span>`).join('')}</div>`
+        : '';
+
+    const tracklistHtml = _discogsData.tracklist.length
+        ? `<ol class="space-y-1">${_discogsData.tracklist.map(t => `
+            <li class="flex justify-between gap-3 text-[12px] text-slate-600">
+                <span class="flex-1 truncate"><span class="font-black text-slate-400 mr-1.5">${escapeHtml(t.position)}</span>${escapeHtml(t.title)}</span>
+                ${t.duration ? `<span class="flex-shrink-0 text-slate-400 tabular-nums">${escapeHtml(t.duration)}</span>` : ''}
+            </li>`).join('')}</ol>`
+        : '<p class="text-[12px] text-slate-400 italic">No tracklist available.</p>';
+
+    card.innerHTML = `
+        <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">From Discogs</p>
+        ${tagsHtml}
+        ${tracklistHtml}`;
+    card.classList.remove('hidden');
+}
+
 function _wireLinkInput() {
     const input = document.getElementById('col-editor-link-input');
     if (!input || input._linkWired) return;
@@ -267,6 +400,28 @@ function _wireLinkInput() {
         if (e.key === 'Enter') {
             e.preventDefault();
             window.colEditorAddLinkFromInput();
+        }
+    });
+}
+
+// Decodes a base64 string (from the worker's /lookup response) into a File,
+// the same shape colEditorPhotoChange produces for a user-picked file — so
+// everything downstream (compress, crop, upload) treats it identically.
+function _base64ToFile(base64, contentType, filename) {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return new File([bytes], filename, { type: contentType });
+}
+
+function _wireDiscogsInput() {
+    const input = document.getElementById('col-editor-discogs-input');
+    if (!input || input._discogsWired) return;
+    input._discogsWired = true;
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            window.colEditorLookupDiscogs();
         }
     });
 }
@@ -610,6 +765,12 @@ async function _populateForm(item) {
     _labels          = [...(item.labels || [])];
     _links           = [...(item.links || [])];
     _photos          = [];
+    _discogsId       = item.discogs_id || null;
+    _discogsData     = item.discogs_data || null;
+    _renderDiscogsCard();
+    _setDiscogsStatus('');
+    const discogsInput = document.getElementById('col-editor-discogs-input');
+    if (discogsInput) discogsInput.value = '';
 
     _renderTypeToggle();
     _renderSubtypeSelector();
@@ -1048,6 +1209,8 @@ export const openCollectionEditor = async (type = null, itemId = null) => {
     _links           = [];
     _taggedBuddies   = [];
     _labelCache      = null; // refresh label suggestions on each open
+    _discogsId       = null;
+    _discogsData     = null;
     _selectedType    = type || 'artefact';
     _selectedSubtype = 'cd';
     _extendedOpen    = false; // always start collapsed to Quick Add; _populateForm reopens it for edits with existing extended data
@@ -1094,8 +1257,13 @@ export const openCollectionEditor = async (type = null, itemId = null) => {
         _links = [];
         _renderLinks();
         _wireLinkInput();
+        _wireDiscogsInput();
         _renderPhotoPreviews();
         _updateFieldVisibility();
+        _renderDiscogsCard();
+        _setDiscogsStatus('');
+        const discogsInput = document.getElementById('col-editor-discogs-input');
+        if (discogsInput) discogsInput.value = '';
 
         ['col-editor-title','col-editor-date','col-editor-artist-ctx',
          'col-editor-body','col-editor-notes','col-editor-label','col-editor-cat-no',
@@ -1253,6 +1421,8 @@ window.saveCollectionItem = async () => {
             links:            _links,
             tagged_user_ids:  taggedUserIds.length ? taggedUserIds : null,
             ...(heroColor && { hero_color: heroColor }),
+            discogs_id:       _discogsId,
+            discogs_data:     _discogsData,
         };
 
         const { error } = await supabase
@@ -1534,6 +1704,7 @@ window.colEditorToggleDisposed = (checked) => {
 export const initCollectionEditor = () => {
     _wireLabelInput();
     _wireLinkInput();
+    _wireDiscogsInput();
     _wireConditionSuggestions();
     // Close modal on backdrop click
     const modal = document.getElementById('col-editor-modal');
