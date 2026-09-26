@@ -1,9 +1,8 @@
 /**
  * GigList Core Engine
- * v8.7.1 — 2026-09-26
+ * v8.7.2 — 2026-09-26
  * ------------------------------------------------------------------
- * ✅ Improved Collection item flow to allow discogs link to be used to pre-fill all available details
- * ✅ Worker changed to populate new discogs_catalogue table to avoid redundant API calls
+ * ✅ Version bump for new worker
  */
 
 import * as Data from './modules/data.js';
@@ -39,7 +38,7 @@ import { openPhotoCropModal } from './modules/photo-crop.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "8.7.0";
+const APP_VERSION = "8.7.2";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
