@@ -286,10 +286,6 @@ window.colEditorLookupDiscogs = async () => {
     const btn = document.getElementById('col-editor-discogs-fetch-btn');
     if (btn) btn.disabled = true;
     _setDiscogsStatus('Looking up release…');
-    // Reuses the app-wide spinner from app.js rather than a bespoke one here —
-    // if that isn't the actual global name/signature, swap this pair for
-    // whatever app.js exports. Both are optional-chained so a mismatch just
-    // means no spinner shows, not a broken lookup.
     window.showSpinner?.();
 
     try {
@@ -299,6 +295,18 @@ window.colEditorLookupDiscogs = async () => {
             body: JSON.stringify({ discogsUrl }),
         });
         const data = await res.json();
+
+        // Check this BEFORE res.ok — the worker returns 202 (a "successful"
+        // status) for a rate-limited lookup, so res.ok alone can't tell a
+        // real success apart from "we couldn't get it, still trying."
+        // Falling through to _applyDiscogsLookup with no rateLimited check
+        // was silently populating the form with nothing and claiming
+        // success, since every field there just falls back to '' or [].
+        if (data?.rateLimited) {
+            _setDiscogsStatus(data.error || "Discogs is busy right now — try again in a few minutes.", true);
+            return;
+        }
+
         if (!res.ok) throw new Error(data?.error || `lookup failed (${res.status})`);
 
         await _applyDiscogsLookup(data);
