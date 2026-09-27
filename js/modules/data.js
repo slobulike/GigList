@@ -107,11 +107,6 @@ export const sortGigs = (data, column, ascending = true) => {
  * relevant slice rather than the entire global dataset.
  */
 export const loadAppData = async (user, { skipPerformances = false } = {}) => {
-    const escapeHTMLAttr = (str) => {
-        if (!str) return '';
-        return str.replace(/'/g, "\\'").replace(/"/g, "&quot;");
-    };
-
     const now = new Date();
     now.setHours(0, 0, 0, 0);
 
@@ -317,7 +312,6 @@ if (journalIds.length && companionOwnerId) {
         row.Band = row.Band || row.Artist || '';
         const gigDate = parseDate(row.Date);
         row.type    = (gigDate && gigDate >= now) ? 'future' : 'past';
-        row.safeKey = escapeHTMLAttr(row['Journal Key'] || '');
 
         const venueInfo = venueLookup[row.OfficialVenue];
         if (venueInfo) {

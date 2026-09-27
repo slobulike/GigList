@@ -3,6 +3,8 @@
  * Handles the interactive year/month timeline for the Data view
  */
 
+import { escapeHtml } from './utils.js';
+
 const getTopStat = (entries, key) => {
     const counts = {};
     entries.forEach(e => {
@@ -83,31 +85,32 @@ export const renderCalendar = (data) => {
             `<span style="font-size:9px;color:white;font-weight:700;width:14px;text-align:right;">${c}</span></div>`
         ).join('');
 
+        const yearHtml = escapeHtml(year);
         return `
         <section class="relative bg-white rounded-[2.5rem] p-8 mb-12 shadow-sm border border-slate-100 min-h-[350px] overflow-hidden"
-                 aria-labelledby="year-heading-${year}">
+                 aria-labelledby="year-heading-${yearHtml}">
 
-            <div id="calendar-grid-${year}" class="transition-all duration-300 ease-out">
+            <div id="calendar-grid-${yearHtml}" class="transition-all duration-300 ease-out">
                 <div class="flex justify-between items-center mb-8">
-                    <h3 id="year-heading-${year}" class="text-5xl font-black text-slate-900 tracking-tighter italic">${year}</h3>
-                    <button onclick="window.toggleYearWrapped('${year}')"
-                            id="summary-btn-${year}"
-                            aria-label="View ${year} summary"
+                    <h3 id="year-heading-${yearHtml}" class="text-5xl font-black text-slate-900 tracking-tighter italic">${yearHtml}</h3>
+                    <button data-cal-toggle-year="${yearHtml}"
+                            id="summary-btn-${yearHtml}"
+                            aria-label="View ${yearHtml} summary"
                             class="bg-amber-400 text-[10px] font-black px-5 py-2.5 rounded-full shadow-sm hover:scale-105 transition-all uppercase tracking-widest active:scale-95">
                         ✨ View Summary
                     </button>
                 </div>
 
-                <div class="grid grid-cols-3 sm:grid-cols-4 gap-3" role="grid" aria-label="${year} gig calendar">
+                <div class="grid grid-cols-3 sm:grid-cols-4 gap-3" role="grid" aria-label="${yearHtml} gig calendar">
                     ${monthNames.map((name, index) => {
                         const monthNum  = index + 1;
                         const monthGigs = grouped[year][monthNum] || [];
                         const hasGigs   = monthGigs.length > 0;
 
                         return `
-                        <button onclick="${hasGigs ? `window.showMonthDetail('${year}', '${monthNum}', '${name}')` : ''}"
-                                id="month-btn-${year}-${monthNum}"
-                                aria-label="${name} ${year}: ${monthGigs.length} gig${monthGigs.length !== 1 ? 's' : ''}"
+                        <button ${hasGigs ? `data-cal-month-year="${yearHtml}" data-cal-month-num="${monthNum}" data-cal-month-name="${name}"` : ''}
+                                id="month-btn-${yearHtml}-${monthNum}"
+                                aria-label="${name} ${yearHtml}: ${monthGigs.length} gig${monthGigs.length !== 1 ? 's' : ''}"
                                 ${!hasGigs ? 'disabled aria-disabled="true"' : ''}
                                 class="flex flex-col items-center justify-center h-16 rounded-2xl border transition-all
                                 ${hasGigs ? 'bg-indigo-50/50 border-indigo-100 cursor-pointer hover:border-indigo-400 hover:shadow-md active:scale-95' : 'bg-transparent border-slate-50 opacity-10 select-none'}">
@@ -122,18 +125,18 @@ export const renderCalendar = (data) => {
             </div>
 
             <!-- Year Wrapped overlay — richer layout -->
-            <div id="year-wrapped-${year}"
+            <div id="year-wrapped-${yearHtml}"
                  class="hidden absolute inset-0 bg-indigo-600 text-white p-5 flex flex-col transition-all duration-300 opacity-0 translate-y-4 overflow-y-auto"
-                 role="dialog" aria-modal="true" aria-label="${year} Wrapped summary"
-                 aria-labelledby="wrapped-title-${year}">
+                 role="dialog" aria-modal="true" aria-label="${yearHtml} Wrapped summary"
+                 aria-labelledby="wrapped-title-${yearHtml}">
 
                 <div class="flex justify-between items-center mb-3 flex-shrink-0">
                     <div>
-                        <p class="text-[9px] font-black text-indigo-300 uppercase tracking-widest">${year}</p>
-                        <h3 id="wrapped-title-${year}" class="text-xl font-black italic uppercase tracking-tighter leading-none">Year in Music</h3>
+                        <p class="text-[9px] font-black text-indigo-300 uppercase tracking-widest">${yearHtml}</p>
+                        <h3 id="wrapped-title-${yearHtml}" class="text-xl font-black italic uppercase tracking-tighter leading-none">Year in Music</h3>
                     </div>
-                    <button onclick="window.toggleYearWrapped('${year}')"
-                            aria-label="Close ${year} summary"
+                    <button data-cal-toggle-year="${yearHtml}"
+                            aria-label="Close ${yearHtml} summary"
                             class="bg-white/10 p-2 rounded-xl hover:bg-white/20 transition-colors flex-shrink-0">
                         <i data-lucide="x" class="w-4 h-4" aria-hidden="true"></i>
                     </button>
@@ -142,7 +145,7 @@ export const renderCalendar = (data) => {
                 ${topArtist ? `<div style="background:rgba(255,255,255,0.1);border-radius:16px;padding:14px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;">
                     <div>
                         <p style="font-size:8px;color:rgba(165,180,252,1);font-weight:800;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px;">Top artist</p>
-                        <p style="font-size:20px;font-weight:900;color:white;line-height:1;letter-spacing:-0.02em;">${topArtist}</p>
+                        <p style="font-size:20px;font-weight:900;color:white;line-height:1;letter-spacing:-0.02em;">${escapeHtml(topArtist)}</p>
                         <p style="font-size:10px;color:rgba(199,210,254,1);font-weight:600;margin-top:3px;">Seen ${topArtistCount} time${topArtistCount !== 1 ? 's' : ''} this year</p>
                     </div>
                     <i data-lucide="user" style="width:20px;height:20px;stroke:rgba(255,255,255,0.4);fill:none;flex-shrink:0;" aria-hidden="true"></i>
@@ -176,25 +179,57 @@ export const renderCalendar = (data) => {
             </div>
 
             <!-- Month detail side panel -->
-            <div id="month-side-${year}"
+            <div id="month-side-${yearHtml}"
                  class="hidden absolute inset-0 bg-slate-900 text-white p-10 flex flex-col transition-all duration-300 opacity-0 translate-y-4"
-                 role="dialog" aria-modal="true" aria-labelledby="month-title-${year}">
+                 role="dialog" aria-modal="true" aria-labelledby="month-title-${yearHtml}">
                 <div class="flex justify-between items-center mb-8">
-                    <h3 id="month-title-${year}" class="text-3xl font-black italic uppercase tracking-tighter text-amber-400">Month Details</h3>
-                    <button onclick="window.closeMonthDetail('${year}')"
-                            id="close-month-${year}"
+                    <h3 id="month-title-${yearHtml}" class="text-3xl font-black italic uppercase tracking-tighter text-amber-400">Month Details</h3>
+                    <button data-cal-close-year="${yearHtml}"
+                            id="close-month-${yearHtml}"
                             aria-label="Close month detail"
                             class="bg-white/10 p-3 rounded-2xl hover:bg-white/20 transition-colors">
                         <i data-lucide="x" class="w-6 h-6" aria-hidden="true"></i>
                     </button>
                 </div>
-                <div id="month-list-${year}" class="space-y-4 overflow-y-auto pr-4 custom-scrollbar flex-grow" role="list"></div>
+                <div id="month-list-${yearHtml}" class="space-y-4 overflow-y-auto pr-4 custom-scrollbar flex-grow" role="list"></div>
             </div>
         </section>`;
     }).join('');
 
+    _wireCalendarClicks(container);
     if (window.lucide) lucide.createIcons();
 };
+
+// One delegated listener per container instead of onclick="fn('${...}')"
+// strings — year comes from the gig's Date string and the month list shows
+// Journal Keys, both of which could contain a quote.
+function _wireCalendarClicks(container) {
+    if (container._calClicksWired) return;
+    container._calClicksWired = true;
+
+    container.addEventListener('click', (e) => {
+        const gigEl = e.target.closest('[data-cal-gig-key]');
+        if (gigEl) { window.openGigModal(gigEl.dataset.calGigKey); return; }
+
+        const toggleEl = e.target.closest('[data-cal-toggle-year]');
+        if (toggleEl) { window.toggleYearWrapped(toggleEl.dataset.calToggleYear); return; }
+
+        const monthEl = e.target.closest('[data-cal-month-year]');
+        if (monthEl) {
+            window.showMonthDetail(monthEl.dataset.calMonthYear, monthEl.dataset.calMonthNum, monthEl.dataset.calMonthName);
+            return;
+        }
+
+        const closeEl = e.target.closest('[data-cal-close-year]');
+        if (closeEl) { window.closeMonthDetail(closeEl.dataset.calCloseYear); return; }
+    });
+
+    container.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        const gigEl = e.target.closest('[data-cal-gig-key]');
+        if (gigEl) window.openGigModal(gigEl.dataset.calGigKey);
+    });
+}
 
 /* --- INTERACTIVE FUNCTIONS --- */
 
@@ -249,16 +284,15 @@ window.showMonthDetail = (year, monthNum, monthName) => {
 
     listEl.innerHTML = monthGigs.map(g => {
         // Guard against missing Journal Key to prevent crash
-        const safeKey = (g['Journal Key'] || '').replace(/'/g, "\\'");
+        const safeKey = g['Journal Key'] || '';
         return `
-            <div onclick="window.openGigModal('${safeKey}')"
+            <div data-cal-gig-key="${escapeHtml(safeKey)}"
                  role="listitem"
                  tabindex="0"
-                 onkeydown="if(event.key==='Enter'||event.key===' ')window.openGigModal('${safeKey}')"
                  class="group cursor-pointer border-b border-white/10 pb-4 hover:border-amber-400 transition-all active:scale-95">
-                <div class="text-[10px] font-black text-amber-400 uppercase tracking-widest mb-1">${g.Date}</div>
-                <div class="text-xl font-bold group-hover:text-amber-200 transition-colors">${g.Band || 'Unknown Artist'}</div>
-                <div class="text-xs opacity-50 uppercase tracking-[0.2em] mt-1">${g.OfficialVenue || ''}</div>
+                <div class="text-[10px] font-black text-amber-400 uppercase tracking-widest mb-1">${escapeHtml(g.Date)}</div>
+                <div class="text-xl font-bold group-hover:text-amber-200 transition-colors">${escapeHtml(g.Band || 'Unknown Artist')}</div>
+                <div class="text-xs opacity-50 uppercase tracking-[0.2em] mt-1">${escapeHtml(g.OfficialVenue || '')}</div>
             </div>
         `;
     }).join('');

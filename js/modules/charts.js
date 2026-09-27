@@ -1,7 +1,7 @@
 /**
  * GigList - Charts Module
  */
-import { isFestivalRow, getOwnFestivalLineup, scopeFestivalArtistMap, normalizeArtist } from './utils.js';
+import { isFestivalRow, getOwnFestivalLineup, scopeFestivalArtistMap, normalizeArtist, escapeHtml } from './utils.js';
 import { getCompanionsForGig } from './data.js';
 
 let modalChartInstance      = null;
@@ -778,9 +778,6 @@ export const renderHotList = (journalData, performanceData, containerId, isModal
     }
 
     const maxCount = ranked[0].count;
-    const escapeHtml = (str) => String(str).replace(/[&<>"']/g, (c) => ({
-        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-    }[c]));
 
     container.innerHTML = ranked.map((band, i) => `
         <div class="hotlist-row flex items-center gap-3 py-2 px-1 cursor-pointer hover:bg-slate-50 rounded-xl transition-colors"

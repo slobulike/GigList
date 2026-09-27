@@ -2,7 +2,7 @@
 // Gig List — Service Worker
 // ─────────────────────────────────────────────────────────────────────────────
 
-const CACHE_NAME = 'gig-list-v5';
+const CACHE_NAME = 'gig-list-v6';
 const APP_BASE   = '/GigList/';
 const APP_ROOT   = APP_BASE + 'vault.html';
 
@@ -15,6 +15,7 @@ const ASSETS = [
   './js/app.js',
   './js/modules/clashfinder-sync.js',
   './js/modules/supabase.js',
+  './js/modules/utils.js',   // imported directly by index.html (escapeHtml)
   './manifest.json',
   './data/users.csv',
   './data/venues.csv',

@@ -1,5 +1,5 @@
 // quiz.js
-import { parseDate } from './utils.js';
+import { parseDate, escapeHtml } from './utils.js';
 
 const QUESTION_POOL_SIZE = 25; // Pre-generate more than you'll ever see in 30s
 
@@ -194,15 +194,31 @@ const renderQuestion = (question, options) => {
     const body = document.getElementById('quiz-body');
     if (!body) return;
 
+    // Answers and journal keys are band/venue text, so they're carried in
+    // data-* attributes rather than inline onclick strings. #quiz-body is
+    // reused for every question and the results screen — wire it once.
+    if (!body._quizClickWired) {
+        body._quizClickWired = true;
+        body.addEventListener('click', (e) => {
+            const answerBtn = e.target.closest('[data-quiz-answer]');
+            if (answerBtn) { window.checkAnswer(answerBtn.dataset.quizAnswer); return; }
+            const gigBtn = e.target.closest('[data-quiz-gig-key]');
+            if (gigBtn) {
+                document.getElementById('feed-game-modal')?.remove();
+                window.viewGigDetails(gigBtn.dataset.quizGigKey);
+            }
+        });
+    }
+
     body.innerHTML = `
         <div id="question-container" class="mb-8" role="status" aria-live="polite">
-            <p class="text-2xl md:text-4xl font-black text-white italic uppercase tracking-tighter leading-tight">${question}</p>
+            <p class="text-2xl md:text-4xl font-black text-white italic uppercase tracking-tighter leading-tight">${escapeHtml(question)}</p>
         </div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4 w-full" role="group" aria-label="Answer options">
             ${options.map(opt => `
-                <button onclick="window.checkAnswer('${opt.replace(/'/g, "\\'")}')"
+                <button data-quiz-answer="${escapeHtml(opt)}"
                         class="bg-white/10 border-2 border-white/20 text-white p-6 rounded-2xl font-bold hover:bg-white/30 hover:border-white transition-all active:scale-95 text-xl">
-                    ${opt}
+                    ${escapeHtml(opt)}
                 </button>
             `).join('')}
         </div>
@@ -258,11 +274,11 @@ const endGame = async () => {
             <div class="space-y-2">
                 ${missedQuestions.map(m => `
                     <div class="bg-white/10 rounded-2xl px-4 py-3 space-y-1">
-                        <p class="text-[10px] font-bold text-white/50 leading-snug">${m.questionText}</p>
+                        <p class="text-[10px] font-bold text-white/50 leading-snug">${escapeHtml(m.questionText)}</p>
                         <div class="flex items-center justify-between gap-3">
-                            <p class="text-sm font-black text-white">${m.correctAnswer}</p>
+                            <p class="text-sm font-black text-white">${escapeHtml(m.correctAnswer)}</p>
                             ${m.journalKey ? `
-                            <button onclick="document.getElementById('feed-game-modal')?.remove(); window.viewGigDetails('${m.journalKey.replace(/'/g, "\\'")}')"
+                            <button data-quiz-gig-key="${escapeHtml(m.journalKey)}"
                                     class="flex-shrink-0 text-[9px] font-black uppercase tracking-widest text-indigo-400 hover:text-indigo-300 transition-colors">
                                 View gig →
                             </button>` : ''}

@@ -12,6 +12,7 @@ import {
     isSpotifyConnected,
     renderConnectPrompt,
 } from './spotify-auth.js';
+import { escapeHtml, safeUrl } from './utils.js';
 
 const SPOTIFY_WORKER  = 'https://giglist-spotify.richard-lipscombe.workers.dev';
 const SETLISTFM_PROXY = 'https://setlistfm-proxy.richard-lipscombe.workers.dev';
@@ -22,9 +23,6 @@ const SETLISTFM_PROXY = 'https://setlistfm-proxy.richard-lipscombe.workers.dev';
 window._gigReadyPlaylists ??= {};
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
-
-// Escape a value for safe use inside an inline onclick attribute string.
-const escAttr = s => (s || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 
 // setlist.fm/our own backfill jobs write these sentinel strings when a show
 // genuinely has no known setlist — they're truthy strings, not empty, so a
@@ -50,7 +48,7 @@ window.loadSpotifyEmbed = (wrapId, embedPath) => {
     const el = document.getElementById(wrapId);
     if (!el) return;
     el.innerHTML = `
-        <iframe src="https://open.spotify.com/embed/${embedPath}?utm_source=generator&theme=0"
+        <iframe src="https://open.spotify.com/embed/${escapeHtml(embedPath)}?utm_source=generator&theme=0"
                 width="100%" height="152" frameborder="0"
                 allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
                 loading="lazy"
@@ -144,8 +142,8 @@ const paintAudioSlot = (slotId, content) => {
     if (kind === 'embed') {
         const wrapId = `${slotId}-embed`;
         slot.innerHTML = `
-            <div id="${wrapId}" class="mt-3">
-                <button onclick="window.loadSpotifyEmbed('wrapId','playlist/{content.playlistId}')"
+            <div id="${escapeHtml(wrapId)}" class="mt-3">
+                <button
                         class="w-full flex items-center gap-2.5 ${theme.action} rounded-xl px-3 py-2.5 transition-colors text-left">
                     <i data-lucide="play-circle" class="w-4 h-4 ${theme.icon} flex-shrink-0" aria-hidden="true"></i>
                     <span class="text-[10px] font-black uppercase tracking-widest">Play ${gigIsPast ? 'relive the show' : 'get gig ready'} playlist</span>
@@ -154,25 +152,42 @@ const paintAudioSlot = (slotId, content) => {
     } else if (kind === 'generic') {
         const wrapId = `${slotId}-embed`;
         slot.innerHTML = `
-            <div id="${wrapId}" class="mt-3">
-                <button onclick="window.loadSpotifyEmbed('wrapId','artist/{entry.SpotifyArtistId}')"
+            <div id="${escapeHtml(wrapId)}" class="mt-3">
+                <button
                         class="w-full flex items-center gap-2.5 ${theme.action} rounded-xl px-3 py-2.5 transition-colors text-left">
                     <span class="w-8 h-8 rounded-md bg-emerald-100 flex items-center justify-center flex-shrink-0" aria-hidden="true">
                         <i data-lucide="play-circle" class="w-4 h-4 ${theme.icon}"></i>
                     </span>
                     <span class="flex-1 min-w-0">
-                        <span class="block text-[11px] font-bold truncate">${(entry.Band || 'Listen on Spotify').replace(/</g, '&lt;')}</span>
+                        <span class="block text-[11px] font-bold truncate">${escapeHtml(entry.Band || 'Listen on Spotify')}</span>
                         <span class="block text-[9px] uppercase tracking-widest opacity-70">No setlist yet &middot; tap to play artist</span>
                     </span>
                 </button>
             </div>`;
     } else {
         slot.innerHTML = `
-            <button onclick="window.generateSlotPlaylist('slotId','{escAttr(entry['Journal Key'])}', 'escAttr(entry.Band)','{escAttr(entry.Date)}', '${escAttr(entry.OfficialVenue)}', ${gigIsPast}, ${!!allowGenericFallback})"
+            <button
                     class="mt-3 w-full flex items-center justify-center gap-1.5 ${theme.action} text-[10px] font-black uppercase tracking-widest rounded-xl px-3 py-2.5 transition-colors">
                 <i data-lucide="${gigIsPast ? 'list-music' : 'zap'}" class="w-3.5 h-3.5 ${theme.icon}" aria-hidden="true"></i>
                 ${gigIsPast ? 'Generate relive playlist' : 'Get gig ready'}
             </button>`;
+    }
+
+    // Wired here with the values in closure scope rather than as inline
+    // onclick="fn('${...}')" strings — band/venue names are user data and a
+    // quote in one could otherwise break out of the JS string.
+    const btn = slot.querySelector('button');
+    if (btn) {
+        if (kind === 'embed') {
+            btn.addEventListener('click', () => window.loadSpotifyEmbed(`${slotId}-embed`, `playlist/${content.playlistId}`));
+        } else if (kind === 'generic') {
+            btn.addEventListener('click', () => window.loadSpotifyEmbed(`${slotId}-embed`, `artist/${encodeURIComponent(entry.SpotifyArtistId)}`));
+        } else {
+            btn.addEventListener('click', () => window.generateSlotPlaylist(
+                slotId, entry['Journal Key'] || '', entry.Band || '', entry.Date || '', entry.OfficialVenue || '',
+                gigIsPast, !!allowGenericFallback
+            ));
+        }
     }
     if (window.lucide) lucide.createIcons();
 };
@@ -243,7 +258,7 @@ window.createRelivePlaylist = async (journalKey, artistName, gigDate, venueName,
         const el = document.getElementById(btnId);
         if (el) {
             el.outerHTML = `
-                <a id="btnId"href="{url}" target="_blank" rel="noopener"
+                <a id="${escapeHtml(btnId)}" href="${escapeHtml(safeUrl(url))}" target="_blank" rel="noopener"
                    class="bg-indigo-500 hover:bg-indigo-600 text-white text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
                     <i data-lucide="check-circle" class="w-3.5 h-3.5" aria-hidden="true"></i> OPEN PLAYLIST
                 </a>`;
@@ -369,7 +384,7 @@ window.initReliveButton = async (journalKey) => {
     if (!btn) return;
 
     btn.outerHTML = `
-        <a id="btnId"href="{existing.playlist_url}" target="_blank" rel="noopener"
+        <a id="${escapeHtml(btnId)}" href="${escapeHtml(safeUrl(existing.playlist_url))}" target="_blank" rel="noopener"
            class="bg-indigo-500 hover:bg-indigo-600 text-white text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
             <i data-lucide="check-circle" class="w-3.5 h-3.5" aria-hidden="true"></i> OPEN PLAYLIST
         </a>`;
@@ -383,17 +398,20 @@ const renderGigReadyReadyState = (btnId, url, journalKey, artistName, gigDate, v
     const el = document.getElementById(btnId);
     if (!el) return;
     el.outerHTML = `
-        <div id="${btnId}" class="flex items-center gap-1">
-            <a href="${url}" target="_blank" rel="noopener"
+        <div id="${escapeHtml(btnId)}" class="flex items-center gap-1">
+            <a href="${escapeHtml(safeUrl(url))}" target="_blank" rel="noopener"
                class="bg-green-500 hover:bg-green-600 text-white text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
                 <i data-lucide="check-circle" class="w-3.5 h-3.5" aria-hidden="true"></i> OPEN PLAYLIST
             </a>
-            <button onclick="window.refreshGigReadyPlaylist('escAttr(journalKey)','{escAttr(artistName)}','escAttr(gigDate)','{escAttr(venueName)}')"
+            <button
                     title="Refresh with latest setlist"
                     class="text-green-400 hover:text-white transition-colors p-1 rounded-full active:scale-95">
                 <i data-lucide="refresh-cw" class="w-3 h-3" aria-hidden="true"></i>
             </button>
         </div>`;
+    document.getElementById(btnId)?.querySelector('button')?.addEventListener('click', () =>
+        window.refreshGigReadyPlaylist(journalKey || '', artistName || '', gigDate || '', venueName || '')
+    );
     if (window.lucide) lucide.createIcons();
 };
 
@@ -467,7 +485,7 @@ window.createGigReadyPlaylist = async (journalKey, artistName, gigDate, venueNam
 
     try {
         const slRes = await authedFetch(
-            `SETLISTFMPROXY/?endpoint=artist-setlists&mbid={encodeURIComponent(mbid)}&page=1`
+            `${SETLISTFM_PROXY}/?endpoint=artist-setlists&mbid=${encodeURIComponent(mbid)}&page=1`
         );
         if (!slRes.ok) throw new Error(`setlist.fm proxy returned ${slRes.status}`);
 
@@ -613,11 +631,13 @@ window.refreshGigReadyPlaylist = async (journalKey, artistName, gigDate, venueNa
     const el = document.getElementById(btnId);
     if (el) {
         el.outerHTML = `
-            <button id="${btnId}"
-                    onclick="window.createGigReadyPlaylist('escAttr(journalKey)','{escAttr(artistName)}','escAttr(gigDate)','{escAttr(venueName)}')"
+            <button id="${escapeHtml(btnId)}"
                     class="bg-green-500 hover:bg-green-600 text-white text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
                 <i data-lucide="zap" class="w-3.5 h-3.5" aria-hidden="true"></i> GET READY
             </button>`;
+        document.getElementById(btnId)?.addEventListener('click', () =>
+            window.createGigReadyPlaylist(journalKey || '', artistName || '', gigDate || '', venueName || '')
+        );
         if (window.lucide) lucide.createIcons();
     }
 };
@@ -631,5 +651,3 @@ export const initPlaylistButton = async (journalKey, gigIsPast) => {
         await window.initGigReadyButton(journalKey);
     }
 };
-
-

@@ -5,7 +5,7 @@
 /**
  * GigList - UI Module
  */
-import { getGlobalSeenCount, slugify, slugifyArtist, parseDate, isFestivalRow, scopeFestivalPerformances } from './utils.js';
+import { getGlobalSeenCount, slugify, slugifyArtist, parseDate, isFestivalRow, scopeFestivalPerformances, escapeHtml, safeUrl } from './utils.js';
 import { searchArtists, getArchiveStatus, submitArchiveRequest } from './artist-sync.js';
 import { renderCalendar } from './calendar.js';
 import { sortGigs, deriveType } from './data.js';
@@ -470,20 +470,20 @@ export const renderCarouselItem = (index, carouselData, fullData) => {
 
             <div class="absolute inset-0 z-30 p-8 flex flex-col justify-end pointer-events-none">
                 <div class="pointer-events-auto">
-                    <div onclick="${item.isCTA ? "window.switchView('data')" : (item.isFuture ? "" : "window.viewGigDetails('" + item['Journal Key']?.replace(/'/g, "\\'") + "')")}"
+                    <div ${item.isCTA ? `onclick="window.switchView('data')"` : (item.isFuture ? 'onclick=""' : `data-view-gig-key="${escapeHtml(item['Journal Key'])}"`)}
                          class="cursor-pointer group">
 
                         <span class="${accentClass} text-white text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full mb-3 inline-block">
-                            ${item.badge || (item.isFuture ? 'Upcoming Show' : 'Gig Memory')}
+                            ${escapeHtml(item.badge || (item.isFuture ? 'Upcoming Show' : 'Gig Memory'))}
                         </span>
 
                         <h3 class="text-4xl font-black text-white italic tracking-tighter leading-none mb-1 transition-colors ${hoverClass}">
-                            ${item.band}
+                            ${escapeHtml(item.band)}
                         </h3>
-                        <p class="text-slate-300 font-bold text-sm">${item.details}</p>
+                        <p class="text-slate-300 font-bold text-sm">${escapeHtml(item.details)}</p>
                         ${item.isFuture ? `
                         <div class="flex items-center gap-2 mt-2 flex-wrap">
-                            <span class="bg-white/15 border border-white/25 text-white font-black text-[9px] uppercase tracking-widest px-3 py-1 rounded-full">${subtext}</span>
+                            <span class="bg-white/15 border border-white/25 text-white font-black text-[9px] uppercase tracking-widest px-3 py-1 rounded-full">${escapeHtml(subtext)}</span>
                             ${showNumberPill}
                         </div>` : ''}
                     </div>
@@ -496,6 +496,7 @@ export const renderCarouselItem = (index, carouselData, fullData) => {
                 </div>
             </div>
         </div>`;
+    _wireViewGigClicks();
 
     // ── IMAGE RESOLUTION WATERFALL ────────────────────────────────────────────
         // Priority: 1. Supabase Storage (gig-photo / band-photo)
@@ -561,6 +562,20 @@ export const renderCarouselItem = (index, carouselData, fullData) => {
 
 /* --- TABLE & CALENDAR VIEWS --- */
 
+// Delegated click handler for any element carrying data-view-gig-key (list
+// rows, map popups, carousel card). Journal Keys are date+venue strings, so
+// they're kept out of inline onclick handlers. Attached once to document —
+// Leaflet popups live outside any single stable container.
+let _viewGigClicksWired = false;
+function _wireViewGigClicks() {
+    if (_viewGigClicksWired) return;
+    _viewGigClicksWired = true;
+    document.addEventListener('click', (e) => {
+        const el = e.target.closest?.('[data-view-gig-key]');
+        if (el) window.viewGigDetails(el.dataset.viewGigKey);
+    });
+}
+
 export const renderTable = (data) => {
     const tableContainer = document.getElementById('tableContainer');
     if (!tableContainer) return;
@@ -617,9 +632,9 @@ export const renderTable = (data) => {
                 <tbody class="divide-y divide-slate-50">
                     ${data.map(gig => {
                         const photoLink = gig.Photos || "";
-                        const hasPhotoURL = photoLink.trim() !== "" && photoLink !== "nan";
+                        const hasPhotoURL = photoLink.trim() !== "" && photoLink !== "nan" && safeUrl(photoLink) !== '';
                         const cameraIcon = hasPhotoURL ? `
-                            <a href="${photoLink}" target="_blank" onclick="event.stopPropagation()"
+                            <a href="${escapeHtml(safeUrl(photoLink))}" target="_blank" onclick="event.stopPropagation()"
                                class="flex-shrink-0 text-indigo-300 hover:text-indigo-500 transition-colors ml-auto" title="View photo album">
                                 <i data-lucide="camera" class="w-3.5 h-3.5"></i>
                             </a>` : '<span class="ml-auto w-3.5"></span>';
@@ -668,7 +683,7 @@ export const renderTable = (data) => {
                                         const hash    = (b.id || '').split('').reduce((a, c) => a + c.charCodeAt(0), 0);
                                         const colour  = _tileColours[hash % _tileColours.length];
                                         const initials = (b.display_name || b.username || '?').slice(0, 2).toUpperCase();
-                                        return `<span class="inline-flex items-center justify-center w-5 h-5 rounded-full text-[8px] font-black ${colour.bg} ${colour.text}" title="${b.display_name || b.username}">${initials}</span>`;
+                                        return `<span class="inline-flex items-center justify-center w-5 h-5 rounded-full text-[8px] font-black ${colour.bg} ${colour.text}" title="${escapeHtml(b.display_name || b.username)}">${escapeHtml(initials)}</span>`;
                                     }).join('') +
                                 '</div>';
                             }
@@ -678,12 +693,12 @@ export const renderTable = (data) => {
                         const badgeClass = typeColors[displayValue] || 'text-slate-600 bg-slate-50 border-slate-100';
 
                         const mainContent = window.isBandMode
-                            ? `<span class="px-2 py-0.5 rounded-full border text-[10px] font-bold uppercase tracking-tighter ${badgeClass}">${displayValue}</span>`
-                            : `<span class="text-sm font-bold text-slate-900">${displayValue}</span>`;
+                            ? `<span class="px-2 py-0.5 rounded-full border text-[10px] font-bold uppercase tracking-tighter ${badgeClass}">${escapeHtml(displayValue)}</span>`
+                            : `<span class="text-sm font-bold text-slate-900">${escapeHtml(displayValue)}</span>`;
 
                         return `
-                        <tr onclick="window.viewGigDetails('${gig.safeKey}')" class="group hover:bg-indigo-50/30 transition-all cursor-pointer">
-                            <td class="p-4 text-xs font-medium text-slate-500 font-mono tracking-tighter">${gig.Date}</td>
+                        <tr data-view-gig-key="${escapeHtml(gig['Journal Key'])}" class="group hover:bg-indigo-50/30 transition-all cursor-pointer">
+                            <td class="p-4 text-xs font-medium text-slate-500 font-mono tracking-tighter">${escapeHtml(gig.Date)}</td>
                             <td class="p-4 leading-tight">
                                 <div class="flex flex-col gap-1">
                                     <div class="flex items-center gap-2 w-full">
@@ -696,8 +711,8 @@ export const renderTable = (data) => {
                             </td>
                             <td class="p-4 text-xs text-slate-600 font-medium">
                                 <div class="flex flex-col">
-                                    <span>${gig.OfficialVenue}</span>
-                                    <span class="text-[10px] text-slate-400 font-normal uppercase">${gig.City || ''}</span>
+                                    <span>${escapeHtml(gig.OfficialVenue)}</span>
+                                    <span class="text-[10px] text-slate-400 font-normal uppercase">${escapeHtml(gig.City || '')}</span>
                                 </div>
                             </td>
                         </tr>
@@ -708,6 +723,7 @@ export const renderTable = (data) => {
         </div>
     `;
 
+    _wireViewGigClicks();
     if (window.lucide) lucide.createIcons();
 };
 
@@ -719,7 +735,7 @@ export const openChartModal = (title, renderCallback) => {
     // Set title and prepare canvas
     content.innerHTML = `
         <div class="p-8">
-            <h2 id="modal-title" class="text-3xl font-black text-slate-800 uppercase italic mb-6">${title}</h2>
+            <h2 id="modal-title" class="text-3xl font-black text-slate-800 uppercase italic mb-6">${escapeHtml(title)}</h2>
             <div class="h-[60vh] w-full relative">
                 <canvas id="modalChartCanvas"></canvas>
             </div>
@@ -855,6 +871,7 @@ export const renderMap = async (data) => {
         markerLayer = L.layerGroup().addTo(gigMap);
     }
 
+    _wireViewGigClicks();
     markerLayer.clearLayers();
     const bounds = [];
     const venuesLookup = window.venueLookup || {};
@@ -886,20 +903,20 @@ export const renderMap = async (data) => {
 
             // 3. GENERATE THE POPUP HTML (Restoring the click functionality)
             const gigListHTML = gigsAtVenue.map(g => {
-                // Escape single quotes in Journal Key for the JS function call
-                const safeKey = g['Journal Key']?.replace(/'/g, "\\'");
+                // Journal Key goes in a data attribute — clicks are handled by the
+                // delegated [data-view-gig-key] listener (see _wireViewGigClicks)
                 return `
-                    <div onclick="window.viewGigDetails('${safeKey}')"
+                    <div data-view-gig-key="${escapeHtml(g['Journal Key'])}"
                          class="cursor-pointer hover:bg-slate-50 p-2 rounded transition-colors border-b border-slate-100 last:border-0 mb-1">
-                        <p class="text-[10px] font-black text-indigo-500 uppercase leading-none">${g.Date}</p>
-                        <p class="text-[12px] font-bold text-slate-800 leading-tight">${g.Band}</p>
+                        <p class="text-[10px] font-black text-indigo-500 uppercase leading-none">${escapeHtml(g.Date)}</p>
+                        <p class="text-[12px] font-bold text-slate-800 leading-tight">${escapeHtml(g.Band)}</p>
                     </div>
                 `;
             }).join('');
 
             marker.bindPopup(`
                 <div class="p-1 max-h-48 overflow-y-auto custom-scrollbar min-w-[180px]">
-                    <h4 class="text-[10px] font-black uppercase text-slate-400 mb-2 tracking-widest border-b pb-1">${vName}</h4>
+                    <h4 class="text-[10px] font-black uppercase text-slate-400 mb-2 tracking-widest border-b pb-1">${escapeHtml(vName)}</h4>
                     ${gigListHTML}
                     <div class="pt-2 text-center">
                         <span class="bg-indigo-50 text-indigo-600 text-[10px] font-black px-2 py-0.5 rounded-full uppercase">
@@ -960,6 +977,7 @@ window.openMapModal = () => {
     // every show there, rather than one overlapping same-size pin per gig.
     setTimeout(() => {
         fullMapInstance.invalidateSize();
+        _wireViewGigClicks();
         fullMarkerLayer.clearLayers();
 
         const bounds = [];
@@ -980,12 +998,11 @@ window.openMapModal = () => {
                 const radius = Math.min(6 + (visitCount * 2), 20);
 
                 const gigListHTML = gigsAtVenue.map(g => {
-                    const safeKey = g['Journal Key']?.replace(/'/g, "\\'");
                     return `
-                        <div onclick="window.viewGigDetails('${safeKey}')"
+                        <div data-view-gig-key="${escapeHtml(g['Journal Key'])}"
                              class="cursor-pointer hover:bg-slate-50 p-2 rounded transition-colors border-b border-slate-100 last:border-0 mb-1">
-                            <p class="text-[10px] font-black text-indigo-500 uppercase leading-none">${g.Date}</p>
-                            <p class="text-[12px] font-bold text-slate-800 leading-tight">${g.Band}</p>
+                            <p class="text-[10px] font-black text-indigo-500 uppercase leading-none">${escapeHtml(g.Date)}</p>
+                            <p class="text-[12px] font-bold text-slate-800 leading-tight">${escapeHtml(g.Band)}</p>
                         </div>
                     `;
                 }).join('');
@@ -998,7 +1015,7 @@ window.openMapModal = () => {
                     fillOpacity: 0.9
                 }).bindPopup(`
                     <div class="p-1 max-h-48 overflow-y-auto custom-scrollbar min-w-[180px]">
-                        <h4 class="text-[10px] font-black uppercase text-slate-400 mb-2 tracking-widest border-b pb-1">${vName}</h4>
+                        <h4 class="text-[10px] font-black uppercase text-slate-400 mb-2 tracking-widest border-b pb-1">${escapeHtml(vName)}</h4>
                         ${gigListHTML}
                         <div class="pt-2 text-center">
                             <span class="bg-indigo-50 text-indigo-600 text-[10px] font-black px-2 py-0.5 rounded-full uppercase">
@@ -1114,8 +1131,9 @@ const gigIsPast = (() => {
 
     // --- EXTERNAL LINKS ---
     // Photos album URL (user-supplied)
-    const photosUrl = (entry.Photos || '').trim();
-    const hasPhotos = photosUrl && photosUrl !== 'nan';
+    const photosRaw = (entry.Photos || '').trim();
+    const photosUrl = (photosRaw && photosRaw !== 'nan') ? safeUrl(photosRaw) : '';
+    const hasPhotos = !!photosUrl;
 
     // Review URL — user-supplied, or auto-generated for Weezer via Weezerpedia
     let reviewUrl = (entry.review_url || entry['Review URL'] || '').trim();
@@ -1124,11 +1142,12 @@ const gigIsPast = (() => {
         const [dd, mm, yyyy] = entry.Date.split('/');
         reviewUrl = `https://www.weezerpedia.com/w/index.php?title=Weezer_concert:_${mm}/${dd}/${yyyy}`;
     }
+    reviewUrl = safeUrl(reviewUrl);
     const hasReview = !!reviewUrl;
 
     // Setlist.fm URL — from performances data
-    const setlistUrl = sets.find(s => s.SetlistURL || s.setlist_url)?.SetlistURL ||
-                       sets.find(s => s.setlist_url)?.setlist_url || '';
+    const setlistUrl = safeUrl(sets.find(s => s.SetlistURL || s.setlist_url)?.SetlistURL ||
+                       sets.find(s => s.setlist_url)?.setlist_url || '');
     const hasSetlist = !!setlistUrl;
 
     // --- ENHANCED TICKET LOGIC ---
@@ -1150,7 +1169,7 @@ const gigIsPast = (() => {
     const ticketHTML = `
             <div class="mock-ticket transform -rotate-1 shadow-2xl ${isLandscape ? 'max-w-md w-full' : 'w-64'} ${style.color} ${style.border} border-2 p-6 transition-all hover:rotate-0"
                  role="img"
-                 aria-label="Digital Souvenir Ticket for ${entry.Band}">
+                 aria-label="Digital Souvenir Ticket for ${escapeHtml(entry.Band)}">
 
                 <div class="flex justify-between items-start mb-4">
                     <span class="text-[9px] font-black border border-current px-1 uppercase ${style.accent}" aria-label="Ticket Type">General Admission</span>
@@ -1158,21 +1177,21 @@ const gigIsPast = (() => {
                 </div>
 
                 <div class="text-2xl font-black mb-0.5 leading-none ${style.accent} uppercase italic" aria-label="Headlining Artist">
-                    ${entry.Band}
+                    ${escapeHtml(entry.Band)}
                 </div>
 
                 ${supportActs ? `
                     <div class="text-[10px] font-bold mb-2 uppercase tracking-tight opacity-70 ${style.accent}" aria-label="Support Acts">
-                        + ${supportActs}
+                        + ${escapeHtml(supportActs)}
                     </div>` : '<div class="mb-2"></div>'}
 
                 <div class="text-sm mb-4 opacity-80 font-bold ${style.accent}" aria-label="Venue Name">
-                    ${entry.OfficialVenue}
+                    ${escapeHtml(entry.OfficialVenue)}
                 </div>
 
                 <div class="flex justify-between text-[11px] font-bold border-t border-b border-black/10 py-2 ${style.accent}">
-                    <span aria-label="Show Date">DATE: ${entry.Date}</span>
-                    <span aria-label="Ticket Price">PRICE: ${displayPrice}</span>
+                    <span aria-label="Show Date">DATE: ${escapeHtml(entry.Date)}</span>
+                    <span aria-label="Ticket Price">PRICE: ${escapeHtml(displayPrice)}</span>
                 </div>
 
                 <div class="mt-4 ${isLandscape ? 'h-10' : 'h-8'} bg-black w-full"
@@ -1226,8 +1245,8 @@ const gigIsPast = (() => {
                        class="absolute bottom-3 right-14 z-50 bg-black/40 backdrop-blur-md text-white p-2 rounded-full hover:bg-black/60 transition-all cursor-pointer">
                     <i data-lucide="camera" class="w-5 h-5" aria-hidden="true"></i>
                     <input type="file" accept="image/*"
-                           class="hidden"
-                           onchange="window.uploadScrapbookPhoto(this, '${entry['Journal Key']?.replace(/'/g, "\\'")}', '${formattedDate}', '${cleanVenue}', ${window.isBandMode})">
+                           id="h-camera-input"
+                           class="hidden">
                 </label>` : ''}
 
                 <button onclick="window.closeModal()"
@@ -1239,10 +1258,10 @@ const gigIsPast = (() => {
 
             <div class="px-6 pt-4 pb-3 border-b border-slate-100 flex items-start justify-between gap-3">
                 <div class="min-w-0">
-                    <h2 id="modal-title" tabindex="-1" class="text-xl md:text-3xl font-black italic uppercase leading-tight text-slate-900 outline-none truncate">${entry.Band}</h2>
+                    <h2 id="modal-title" tabindex="-1" class="text-xl md:text-3xl font-black italic uppercase leading-tight text-slate-900 outline-none truncate">${escapeHtml(entry.Band)}</h2>
                     <div class="flex gap-3 text-slate-400 text-[9px] font-bold uppercase tracking-widest mt-1 flex-wrap">
-                        <span class="flex items-center gap-1"><i data-lucide="calendar" class="w-3 h-3 text-indigo-500"></i> <time datetime="${formattedDate}">${entry.Date}</time></span>
-                        <span class="flex items-center gap-1 min-w-0"><i data-lucide="map-pin" class="w-3 h-3 text-indigo-500 flex-shrink-0"></i> <span class="truncate">${entry.OfficialVenue}</span></span>
+                        <span class="flex items-center gap-1"><i data-lucide="calendar" class="w-3 h-3 text-indigo-500"></i> <time datetime="${escapeHtml(formattedDate)}">${escapeHtml(entry.Date)}</time></span>
+                        <span class="flex items-center gap-1 min-w-0"><i data-lucide="map-pin" class="w-3 h-3 text-indigo-500 flex-shrink-0"></i> <span class="truncate">${escapeHtml(entry.OfficialVenue)}</span></span>
                     </div>
                 </div>
                 ${isFestival ? '<span class="flex-shrink-0 bg-amber-400 text-black text-[8px] font-black px-2 py-1 rounded uppercase">Festival</span>' : ''}
@@ -1267,7 +1286,7 @@ const gigIsPast = (() => {
                                  <i data-lucide="play-circle" class="w-4 h-4" aria-hidden="true"></i> WATCH CLIPS
                             </a>
                             ${(window.isReadOnly || (window.isBandMode && !isAdmin)) ? '' : `
-                            <button onclick="window.openEditGigModal('${entry['Journal Key']?.replace(/'/g, "\\'")}')"
+                            <button id="gig-modal-edit-btn"
                                     data-tip="edit"
                                     class="bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 text-slate-500 text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
                                 <i data-lucide="pencil" class="w-3.5 h-3.5" aria-hidden="true"></i> EDIT
@@ -1284,20 +1303,20 @@ const gigIsPast = (() => {
                         <div id="modal-spotify-slot-${entry['Journal Key']?.replace(/[^a-z0-9]/gi,'_')}"></div>
                         ${(hasPhotos || hasReview || hasSetlist) ? `
                         <div class="flex items-center gap-4 mt-4">
-                            ${hasPhotos ? `<a href="${photosUrl}" target="_blank" rel="noopener"
+                            ${hasPhotos ? `<a href="${escapeHtml(photosUrl)}" target="_blank" rel="noopener"
                                 class="flex items-center gap-1.5 text-[10px] font-black text-slate-400 hover:text-indigo-600 transition-colors"
                                 title="View photo album">
                                 <i data-lucide="camera" class="w-3.5 h-3.5" aria-hidden="true"></i>
                                 <span class="uppercase tracking-widest">Photos</span>
                             </a>` : ''}
-                            ${hasReview ? `<a href="${reviewUrl}" target="_blank" rel="noopener"
+                            ${hasReview ? `<a href="${escapeHtml(reviewUrl)}" target="_blank" rel="noopener"
                                 data-tip="setlist"
                                 class="flex items-center gap-1.5 text-[10px] font-black text-slate-400 hover:text-indigo-600 transition-colors"
                                 title="Read review or show page">
                                 <i data-lucide="newspaper" class="w-3.5 h-3.5" aria-hidden="true"></i>
                                 <span class="uppercase tracking-widest">${window.isBandMode && (window.currentArtist||'').toLowerCase() === 'weezer' ? 'Weezerpedia' : 'Review'}</span>
                             </a>` : ''}
-                            ${hasSetlist ? `<a href="${setlistUrl}" target="_blank" rel="noopener"
+                            ${hasSetlist ? `<a href="${escapeHtml(setlistUrl)}" target="_blank" rel="noopener"
                                 class="flex items-center gap-1.5 text-[10px] font-black text-slate-400 hover:text-indigo-600 transition-colors"
                                 title="View on setlist.fm">
                                 <i data-lucide="list-music" class="w-3.5 h-3.5" aria-hidden="true"></i>
@@ -1323,12 +1342,12 @@ const gigIsPast = (() => {
                             ${sets.map(s => `
                                 <div class="bg-white p-5 rounded-[1.5rem] border border-slate-100 shadow-sm">
                                     <div class="flex justify-between items-center mb-3 border-b border-slate-50 pb-2">
-                                        <span class="font-black text-indigo-600 text-xs uppercase italic">${s.Artist}</span>
-                                        <span class="text-[7px] font-black px-2 py-0.5 bg-slate-50 rounded text-slate-400 uppercase">${s.Role}</span>
+                                        <span class="font-black text-indigo-600 text-xs uppercase italic">${escapeHtml(s.Artist)}</span>
+                                        <span class="text-[7px] font-black px-2 py-0.5 bg-slate-50 rounded text-slate-400 uppercase">${escapeHtml(s.Role)}</span>
                                     </div>
                                     <div class="text-[11px] text-slate-500 leading-relaxed font-medium">
                                         ${(s.Setlist || '').replace(/^NOT_FOUND$/i, '')
-                                            ? (s.Setlist).replace(/\|/g, '<br>')
+                                            ? (s.Setlist).split('|').map(escapeHtml).join('<br>')
                                             : '<span class="text-slate-300 italic text-xs">No setlist recorded</span>'
                                         }
                                     </div>
@@ -1369,13 +1388,25 @@ const gigIsPast = (() => {
                 <div style="overflow:hidden;min-height:0">
                     <div class="px-6 py-4">
                         ${entry.Comments && entry.Comments !== "nan"
-                            ? `<div class="p-5 bg-amber-50/50 border-l-4 border-amber-400 italic text-slate-700 text-sm rounded-r-2xl">"${entry.Comments}"</div>`
+                            ? `<div class="p-5 bg-amber-50/50 border-l-4 border-amber-400 italic text-slate-700 text-sm rounded-r-2xl">"${escapeHtml(entry.Comments)}"</div>`
                             : `<p class="text-xs text-slate-300 italic">No notes for this show.</p>`}
                     </div>
                 </div>
             </div>
         </div>
     `;
+
+    // Journal Key / date are user-influenced, so they're passed via closures
+    // here rather than interpolated into inline handler strings.
+    const journalKey = entry['Journal Key'];
+    document.getElementById('gig-modal-edit-btn')
+        ?.addEventListener('click', () => window.openEditGigModal(journalKey));
+    const cameraInput = document.getElementById('h-camera-input');
+    if (cameraInput) {
+        const isBandModeAtRender = window.isBandMode;
+        cameraInput.addEventListener('change', () =>
+            window.uploadScrapbookPhoto(cameraInput, journalKey, formattedDate, cleanVenue, isBandModeAtRender));
+    }
 
 // --- ASSET RESOLUTION WATERFALL ---
 // Priority: 1. Supabase Storage (user's private scrapbook)
@@ -1563,13 +1594,14 @@ export async function initArchiveButton(entry) {
             wrap.innerHTML = `
                 <div class="flex flex-col items-start gap-0.5">
                     <button id="band-page-request-btn-${safeKey}"
-                            onclick="window.requestBandPage('${bandName.replace(/'/g, "\\'")}', '${safeKey}')"
                             class="bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 text-slate-500 text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95"
                             data-tip="request_band_page">
                         <i data-lucide="plus-circle" class="w-3.5 h-3.5" aria-hidden="true"></i> REQUEST BAND PAGE
                     </button>
                     <p class="text-[8px] text-slate-400 font-bold px-1">Get stats, history &amp; fans for this artist</p>
                 </div>`;
+            document.getElementById(`band-page-request-btn-${safeKey}`)
+                ?.addEventListener('click', () => window.requestBandPage(bandName, safeKey));
         } else {
             // Under the threshold — render nothing rather than a disabled/greyed
             // button, so the modal layout doesn't reserve space for an action
@@ -1618,7 +1650,7 @@ window.requestBandPage = async function(bandName, safeKey) {
                     <span class="bg-emerald-50 text-emerald-600 text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 border border-emerald-100">
                         <i data-lucide="check-circle" class="w-3.5 h-3.5" aria-hidden="true"></i> REQUESTED ✓
                     </span>
-                    <p class="text-[8px] text-slate-400 font-bold px-1">We'll notify you when the ${bandName} page goes live</p>
+                    <p class="text-[8px] text-slate-400 font-bold px-1">We'll notify you when the ${escapeHtml(bandName)} page goes live</p>
                 </div>`;
             if (window.lucide) lucide.createIcons();
         }

@@ -279,6 +279,7 @@
 
 <script type="module">
     import { supabase } from './js/modules/supabase.js';
+    import { escapeHtml, safeUrl } from './js/modules/utils.js';
 
     // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -301,6 +302,15 @@
         try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return url; }
     }
 
+    // CSS background-image value from untrusted data: only http(s)/blob URLs.
+    // safeUrl() returns URL.href (already percent-encoded, so no encodeURI —
+    // that would double-encode existing %xx); the chars URL.href leaves raw
+    // that could break out of url('...') are encoded here. '' → caller skips.
+    function cssBgUrl(raw) {
+        const u = safeUrl(raw);
+        return u ? `url('${u.replace(/'/g, '%27').replace(/\(/g, '%28').replace(/\)/g, '%29').replace(/\\/g, '%5C')}')` : '';
+    }
+
     function setlist_html(raw, maxVisible = 12) {
         const tracks = raw.split('|').map(s => s.trim()).filter(Boolean);
         if (!tracks.length) return null;
@@ -319,7 +329,7 @@
         const rows = (arr, startIdx) => arr.map((t, i) => `
             <div class="track-row">
                 <span class="track-num">${startIdx + i + 1}</span>
-                <span class="track-name">${t}</span>
+                <span class="track-name">${escapeHtml(t)}</span>
             </div>`).join('');
 
         container.innerHTML = `<div id="setlist-visible">${rows(visible, 0)}</div>`;
@@ -449,9 +459,9 @@
                 .select('spotify_image_url')
                 .eq('id', perf.artist_id)
                 .maybeSingle();
-            if (artistRow?.spotify_image_url) {
-                document.getElementById('artist-hero-bg').style.backgroundImage =
-                    `url('${artistRow.spotify_image_url}')`;
+            const heroBg = cssBgUrl(artistRow?.spotify_image_url);
+            if (heroBg) {
+                document.getElementById('artist-hero-bg').style.backgroundImage = heroBg;
             }
         }
 
@@ -465,15 +475,17 @@
         if (perf.setlist) setlist_html(perf.setlist);
 
         // Setlist URL
-        if (perf.setlist_url) {
-            document.getElementById('setlist-url-link').href = perf.setlist_url;
+        const setlistUrl = safeUrl(perf.setlist_url);
+        if (setlistUrl) {
+            document.getElementById('setlist-url-link').href = setlistUrl;
             document.getElementById('setlist-url-card').classList.remove('hidden');
         }
 
         // Review URL
-        if (perf.review_url) {
-            document.getElementById('review-url-link').href    = perf.review_url;
-            document.getElementById('review-url-host').textContent = hostnameOf(perf.review_url);
+        const reviewUrl = safeUrl(perf.review_url);
+        if (reviewUrl) {
+            document.getElementById('review-url-link').href    = reviewUrl;
+            document.getElementById('review-url-host').textContent = hostnameOf(reviewUrl);
             document.getElementById('review-url-card').classList.remove('hidden');
         }
 
@@ -559,9 +571,9 @@
                 .filter(a => a.spotify_image_url)
                 .sort((a, b) => a.name.localeCompare(b.name));
 
-            if (withImages.length) {
-                document.getElementById('festival-bg').style.backgroundImage =
-                    `url('${withImages[0].spotify_image_url}')`;
+            const festBg = withImages.length ? cssBgUrl(withImages[0].spotify_image_url) : '';
+            if (festBg) {
+                document.getElementById('festival-bg').style.backgroundImage = festBg;
             }
         }
 
@@ -583,7 +595,7 @@
                         <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
                     </svg>
                 </div>
-                <p class="text-sm font-bold text-slate-700">${msg}</p>
+                <p class="text-sm font-bold text-slate-700">${escapeHtml(msg)}</p>
                 <a href="index.html"
                    class="inline-block px-6 py-2.5 bg-indigo-600 rounded-2xl text-[11px] font-black uppercase tracking-widest text-white hover:bg-indigo-700 transition-colors">
                     Return to Gig List

@@ -17,6 +17,7 @@
 import { supabase } from './supabase.js';
 import { wireCombobox, loadArtistOptions, getArtistOptions, invalidateArtistCache } from './editor.js';
 import { enrichNewArtist } from './artist-enrichment.js';
+import { escapeHtml, safeUrl } from './utils.js';
 
 // ─── STATE ────────────────────────────────────────────────────────────────────
 
@@ -131,19 +132,20 @@ function _renderList() {
 
     container.innerHTML = _items.map(item => {
         const artist = item.artist || {};
-        const img = artist.spotify_image_url
-            ? `<img src="${artist.spotify_image_url}" alt="" class="h-10 w-10 rounded-full object-cover flex-shrink-0">`
-            : `<div class="h-10 w-10 rounded-full bg-indigo-100 flex-shrink-0 flex items-center justify-center text-indigo-600 font-black text-sm">${(artist.name || '?').charAt(0).toUpperCase()}</div>`;
+        const imgUrl = safeUrl(artist.spotify_image_url);
+        const img = imgUrl
+            ? `<img src="${escapeHtml(imgUrl)}" alt="" class="h-10 w-10 rounded-full object-cover flex-shrink-0">`
+            : `<div class="h-10 w-10 rounded-full bg-indigo-100 flex-shrink-0 flex items-center justify-center text-indigo-600 font-black text-sm">${escapeHtml((artist.name || '?').charAt(0).toUpperCase())}</div>`;
 
         return `
-            <div class="flex items-center gap-3 py-2.5 border-b border-slate-100 last:border-0" data-wishlist-id="${item.id}">
+            <div class="flex items-center gap-3 py-2.5 border-b border-slate-100 last:border-0" data-wishlist-id="${escapeHtml(item.id)}">
                 ${img}
                 <div class="min-w-0 flex-1">
-                    <div class="text-sm font-bold text-slate-800 truncate">${artist.name || 'Unknown artist'}</div>
+                    <div class="text-sm font-bold text-slate-800 truncate">${escapeHtml(artist.name || 'Unknown artist')}</div>
                 </div>
                 <button
                     class="flex-shrink-0 text-slate-300 hover:text-rose-500 transition-colors p-1"
-                    data-remove-id="${item.id}" aria-label="Remove from list">
+                    data-remove-id="${escapeHtml(item.id)}" aria-label="Remove from list">
                     <i data-lucide="x" class="w-4 h-4"></i>
                 </button>
             </div>`;

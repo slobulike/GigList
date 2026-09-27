@@ -2,6 +2,8 @@
 // OR logic within dimensions, AND logic across dimensions.
 // Companion matching covers both gig_companions rows and legacy went_with text.
 
+import { escapeHtml } from './utils.js';
+
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
@@ -463,8 +465,8 @@ function _populateLookupSelects() {
 function _fillSelect(id, options, placeholder, currentValue) {
   const el = document.getElementById(id);
   if (!el) return;
-  el.innerHTML = `<option value="">${placeholder}</option>` +
-    options.map(o => `<option value="${o.replace(/"/g, '&quot;')}"${o === currentValue ? ' selected' : ''}>${o}</option>`).join('');
+  el.innerHTML = `<option value="">${escapeHtml(placeholder)}</option>` +
+    options.map(o => `<option value="${escapeHtml(o)}"${o === currentValue ? ' selected' : ''}>${escapeHtml(o)}</option>`).join('');
 }
 
 

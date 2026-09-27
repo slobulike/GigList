@@ -9,6 +9,7 @@ import * as Charts from './charts.js';
 import * as UI from './ui.js';
 import { sortGigs } from './data.js';
 import { renderCalendar } from './calendar.js';
+import { escapeHtml, safeUrl } from './utils.js';
 
 // ─── MODULE STATE ─────────────────────────────────────────────────────────────
 
@@ -130,25 +131,26 @@ function renderBuddyTiles(buddies) {
         const initials   = (buddy.display_name || buddy.username || '?').slice(0, 2).toUpperCase();
         const totalGigs  = buddy.totalGigs  ?? _buddyJournalKeys[buddy.id]?.size ?? 0;
         const sharedGigs = buddy.sharedGigs ?? [...(_buddyJournalKeys[buddy.id] || [])].filter(k => myKeys.has(k)).length;
-        const safeName   = (buddy.display_name || buddy.username || '').replace(/'/g, "\\'");
-        const avatarHtml = buddy.avatar_url
-            ? `<img src="${buddy.avatar_url}" alt="${buddy.display_name || buddy.username}" class="w-full h-full object-cover rounded-2xl">`
-            : `<span class="font-black text-lg">${initials}</span>`;
+        const name       = buddy.display_name || buddy.username;
+        const avatarUrl  = safeUrl(buddy.avatar_url);
+        const avatarHtml = avatarUrl
+            ? `<img src="${escapeHtml(avatarUrl)}" alt="${escapeHtml(name)}" class="w-full h-full object-cover rounded-2xl">`
+            : `<span class="font-black text-lg">${escapeHtml(initials)}</span>`;
 
         return `
             <div class="w-full bg-white rounded-[1.5rem] border border-slate-100 shadow-sm p-4 flex items-center gap-4 hover:border-indigo-200 hover:shadow-md transition-all">
                 <!-- Avatar tap → profile screen -->
                 <button onclick="window.openProfile('${buddy.id}')"
                         class="w-12 h-12 rounded-2xl ${colour.bg} ${colour.text} flex items-center justify-center flex-shrink-0 overflow-hidden hover:ring-2 hover:ring-indigo-400 hover:ring-offset-1 transition-all active:scale-95"
-                        aria-label="View ${buddy.display_name || buddy.username}'s profile">
+                        aria-label="View ${escapeHtml(name)}'s profile">
                     ${avatarHtml}
                 </button>
                 <!-- Row tap → drill-in -->
-                <button onclick="window.openBuddyDrillIn('${buddy.id}', '${safeName}')"
+                <button data-drill-buddy-id="${escapeHtml(buddy.id)}" data-drill-buddy-name="${escapeHtml(buddy.display_name || buddy.username || '')}"
                         class="flex-1 min-w-0 flex items-center gap-3 text-left active:scale-[0.99] transition-all"
-                        aria-label="View ${buddy.display_name || buddy.username}'s shows">
+                        aria-label="View ${escapeHtml(name)}'s shows">
                     <div class="flex-1 min-w-0">
-                        <p class="text-sm font-black text-slate-900 truncate">${buddy.display_name || buddy.username}</p>
+                        <p class="text-sm font-black text-slate-900 truncate">${escapeHtml(name)}</p>
                         <p class="text-[10px] text-slate-400 font-bold mt-0.5">
                             ${totalGigs} show${totalGigs !== 1 ? 's' : ''}
                             ${sharedGigs ? `<span class="text-indigo-500">· ${sharedGigs} in common</span>` : ''}
@@ -158,6 +160,16 @@ function renderBuddyTiles(buddies) {
                 </button>
             </div>`;
     }).join('');
+
+    // Row tap → drill-in (delegated; name travels in data-* not inline onclick)
+    if (!container._drillClickWired) {
+        container._drillClickWired = true;
+        container.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-drill-buddy-id]');
+            if (!btn) return;
+            window.openBuddyDrillIn(btn.dataset.drillBuddyId, btn.dataset.drillBuddyName);
+        });
+    }
 
     if (window.lucide) lucide.createIcons();
 }
@@ -290,7 +302,6 @@ async function _loadBuddyDrillData(buddyId, sharedOnly, requestId) {
         'WentWith':         r.went_with || '',
         'Comments':         r.comments || '',
         'Photos':           r.photos || '',
-        'safeKey':          (r.journal_key || '').replace(/'/g, "\\'"),
     }));
 
     // "Shared only" — filter to journal_keys that also exist in the logged-in user's data
@@ -386,23 +397,33 @@ function _renderDrillTable(rows) {
                     ${rows.map(gig => {
                         const isShared = myKeys.has(gig['Journal Key']);
                         return `
-                        <tr onclick="window.viewBuddyGig('${gig.safeKey}')"
+                        <tr data-buddy-gig-key="${escapeHtml(gig['Journal Key'])}"
                             class="group hover:bg-indigo-50/30 transition-all cursor-pointer">
-                            <td class="p-4 text-xs font-medium text-slate-500 font-mono tracking-tighter">${gig['Date']}</td>
+                            <td class="p-4 text-xs font-medium text-slate-500 font-mono tracking-tighter">${escapeHtml(gig['Date'])}</td>
                             <td class="p-4 leading-tight">
                                 <div class="flex flex-col gap-1">
-                                    <span class="text-sm font-bold text-slate-900">${gig['Band']}</span>
+                                    <span class="text-sm font-bold text-slate-900">${escapeHtml(gig['Band'])}</span>
                                     ${isShared ? `<span class="inline-flex items-center gap-1 text-[9px] bg-indigo-500/10 text-indigo-600 font-black uppercase px-2 py-0.5 rounded-full w-fit">
                                         <i data-lucide="check" class="w-2.5 h-2.5"></i> You were there
                                     </span>` : ''}
                                 </div>
                             </td>
-                            <td class="p-4 text-xs text-slate-600 font-medium">${gig['OfficialVenue']}</td>
+                            <td class="p-4 text-xs text-slate-600 font-medium">${escapeHtml(gig['OfficialVenue'])}</td>
                         </tr>`;
                     }).join('')}
                 </tbody>
             </table>
         </div>`;
+
+    // Row tap → read-only gig modal (delegated; key travels in data-* not inline onclick)
+    if (!container._gigClickWired) {
+        container._gigClickWired = true;
+        container.addEventListener('click', (e) => {
+            const row = e.target.closest('[data-buddy-gig-key]');
+            if (!row) return;
+            window.viewBuddyGig(row.dataset.buddyGigKey);
+        });
+    }
 
     if (window.lucide) lucide.createIcons();
 }

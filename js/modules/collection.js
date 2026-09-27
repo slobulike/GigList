@@ -25,7 +25,7 @@ import { supabase } from './supabase.js';
 import { updateRank } from './ui.js';
 import './collection-collage.js';
 import { renderEmptyStateTips } from './tip-nudges.js';
-import { escapeHtml } from './utils.js';
+import { escapeHtml, safeUrl } from './utils.js';
 
 // ─── STATE ────────────────────────────────────────────────────────────────────
 
@@ -96,6 +96,14 @@ function _hashColor(str) {
     let h = 0;
     for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) >>> 0;
     return SPINE_PALETTES[h % SPINE_PALETTES.length];
+}
+
+// hero_color is stored per item and lands in a style="" attribute, so only
+// accept a plain hex colour; anything else falls back to the title palette.
+function _itemColors(item) {
+    return (typeof item.hero_color === 'string' && /^#[0-9a-f]{3,8}$/i.test(item.hero_color))
+        ? [item.hero_color, '#f0deb0']
+        : _hashColor(item.title);
 }
 
 // Items marked no-longer-owned are hidden everywhere by default (main shelf
@@ -417,12 +425,12 @@ function _renderCurationStrip(items, containerId, activeKey) {
     if (!el) return;
     const chips = _buildCurationChips(items);
     el.innerHTML = chips.map(c => `
-        <button onclick="window._colSetCuration('${escapeHtml(c.key)}')"
+        <button data-col-curation-key="${escapeHtml(c.key)}"
                 class="col-curation-chip flex-shrink-0 text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-full border transition-all whitespace-nowrap
                        ${c.key === activeKey
                             ? 'bg-[#111008] border-[#c8a050] text-[#c8a050]'
                             : 'bg-white border-slate-200 text-slate-500 hover:border-[#c8a050] hover:text-[#c8a050]'}">
-            ${c.label}
+            ${escapeHtml(c.label)}
         </button>
     `).join('');
 }
@@ -453,9 +461,7 @@ function _curateShelf(items, max = 8) {
 }
 
 function _renderShelfItem(item) {
-    const [bg, text] = item.hero_color
-        ? [item.hero_color, '#f0deb0']
-        : _hashColor(item.title);
+    const [bg, text] = _itemColors(item);
 
     const isPortrait = ['poster', 'magazine', 'book', 'tab_book'].includes(item.subtype);
     const isRound    = item.subtype === 'vinyl';
@@ -468,10 +474,10 @@ function _renderShelfItem(item) {
     const icon      = SUBTYPE_ICONS[item.subtype] || '✦';
     const hasStory  = item.body ? `<div class="absolute top-1 right-1 w-2 h-2 rounded-full bg-[#c8a050]" title="Has a story"></div>` : '';
     const heroPath  = item.photos?.[0];
-    const heroUrl   = heroPath ? _signedUrlCache.get(heroPath) : null;
+    const heroUrl   = heroPath ? safeUrl(_signedUrlCache.get(heroPath)) : '';
 
     const coverInner = heroUrl
-        ? `<img src="${heroUrl}" alt="${escapeHtml(item.title)}"
+        ? `<img src="${escapeHtml(heroUrl)}" alt="${escapeHtml(item.title)}"
                 class="w-full h-full object-cover"
                 style="border-radius:${radius}"
                 onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`+
@@ -486,7 +492,7 @@ function _renderShelfItem(item) {
                 ${hasStory}
             </div>
             <p class="text-[11px] font-black text-slate-700 mt-1.5 leading-tight truncate" style="max-width:${coverW}">${escapeHtml(item.title)}</p>
-            <p class="text-[10px] text-slate-400 truncate" style="max-width:${coverW}">${item.item_date || ''}</p>
+            <p class="text-[10px] text-slate-400 truncate" style="max-width:${coverW}">${escapeHtml(item.item_date || '')}</p>
         </div>`;
 }
 
@@ -535,7 +541,7 @@ function _renderMemoryCard(item) {
              class="bg-white rounded-[1.5rem] border border-slate-100 shadow-sm p-4 cursor-pointer
                     border-l-4 hover:border-l-[#c8a050] transition-all active:scale-[0.99]"
              style="border-left-color:rgba(200,160,80,0.5)">
-            ${dateLabel ? `<p class="text-[9px] font-black uppercase tracking-widest mb-1" style="color:#c8a050">${dateLabel}</p>` : ''}
+            ${dateLabel ? `<p class="text-[9px] font-black uppercase tracking-widest mb-1" style="color:#c8a050">${escapeHtml(dateLabel)}</p>` : ''}
             <h3 class="text-sm font-black text-slate-800 leading-snug mb-1">${escapeHtml(item.title)}</h3>
             ${preview ? `<p class="text-[11px] text-slate-500 leading-relaxed italic">${escapeHtml(preview)}</p>` : ''}
             ${(item.labels || []).map(l =>
@@ -595,10 +601,10 @@ function _renderBandStrip(items) {
                 All
              </button>`;
     bandMap.forEach((name, id) => {
-        html += `<button onclick="window._colSetBand(${id})"
+        html += `<button data-col-band-id="${escapeHtml(id)}"
                          class="col-band-pill flex-shrink-0 text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-full border transition-all
                                 ${_activeBandId === id ? 'bg-[#111008] border-[#c8a050] text-[#c8a050]' : 'bg-white border-slate-200 text-slate-500'}">
-                    ${name}
+                    ${escapeHtml(name)}
                  </button>`;
     });
     html += `</div>`;
@@ -762,9 +768,7 @@ function _initShelfSwipe() {
 // ─── DRILL-DOWN ───────────────────────────────────────────────────────────────
 
 function _renderSpine(item) {
-    const [bg, text] = item.hero_color
-        ? [item.hero_color, '#f0deb0']
-        : _hashColor(item.title);
+    const [bg, text] = _itemColors(item);
 
     const w = ['poster', 'magazine', 'book', 'tab_book'].includes(item.subtype) ? 14 : 18;
 
@@ -782,14 +786,14 @@ function _renderSpine(item) {
 }
 
 function _renderGridCard(item) {
-    const [bg] = item.hero_color ? [item.hero_color] : _hashColor(item.title);
+    const [bg] = _itemColors(item);
     const icon     = SUBTYPE_ICONS[item.subtype] || '✦';
     const year     = item.item_date ? item.item_date.slice(0, 4) : '';
     const heroPath = item.photos?.[0];
-    const heroUrl  = heroPath ? _signedUrlCache.get(heroPath) : null;
+    const heroUrl  = heroPath ? safeUrl(_signedUrlCache.get(heroPath)) : '';
 
     const coverInner = heroUrl
-        ? `<img src="${heroUrl}" alt="${escapeHtml(item.title)}"
+        ? `<img src="${escapeHtml(heroUrl)}" alt="${escapeHtml(item.title)}"
                 class="w-full h-full object-cover absolute inset-0"
                 onerror="this.style.display='none'">`
         : `<span class="text-3xl">${icon}</span>`;
@@ -802,7 +806,7 @@ function _renderGridCard(item) {
             </div>
             <div class="p-3">
                 <p class="text-[12px] font-black text-slate-800 truncate leading-tight">${escapeHtml(item.title)}</p>
-                <p class="text-[10px] text-slate-400 mt-0.5">${year}${item.format ? ' · ' + escapeHtml(item.format) : ''}</p>
+                <p class="text-[10px] text-slate-400 mt-0.5">${escapeHtml(year)}${item.format ? ' · ' + escapeHtml(item.format) : ''}</p>
                 ${item.body ? `<span class="inline-block text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full mt-2" style="background:rgba(200,160,80,0.12);color:#c8a050">Story</span>` : ''}
                 ${item.signed_by ? `<span class="inline-block text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full mt-2 ml-1 bg-slate-100 text-slate-400">Signed</span>` : ''}
             </div>
@@ -858,7 +862,7 @@ function _renderDrillDown(subtype) {
                 <i data-lucide="chevron-left" class="w-5 h-5" aria-hidden="true"></i>
             </button>
             <div class="flex-1 min-w-0">
-                <p class="text-base font-black text-slate-900 leading-none">${label}</p>
+                <p class="text-base font-black text-slate-900 leading-none">${escapeHtml(label)}</p>
                 <p class="text-[10px] font-bold text-slate-400 mt-0.5">${allOfType.length} item${allOfType.length !== 1 ? 's' : ''}</p>
             </div>
         <!-- View toggle -->
@@ -937,7 +941,7 @@ function _renderItemDetail(item) {
     const sheet = document.getElementById('col-item-sheet');
     if (!sheet) return;
 
-    const [bg] = item.hero_color ? [item.hero_color] : _hashColor(item.title);
+    const [bg] = _itemColors(item);
     const icon  = SUBTYPE_ICONS[item.subtype] || '✦';
     const year  = item.item_date ? item.item_date.slice(0, 4) : '';
     const typeLabel = item.type === 'memory'
@@ -962,8 +966,8 @@ function _renderItemDetail(item) {
         `<span class="inline-block text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 mr-1">${escapeHtml(l)}</span>`
     ).join('');
 
-    const linksHtml = (item.links || []).map(url =>
-        `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer"
+    const linksHtml = (item.links || []).filter(url => safeUrl(url)).map(url =>
+        `<a href="${escapeHtml(safeUrl(url))}" target="_blank" rel="noopener noreferrer"
             class="inline-flex items-center gap-1 text-[10px] font-black px-2.5 py-1 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors mr-1.5 mb-1.5 max-w-full">
             <i data-lucide="link" class="w-3 h-3 flex-shrink-0" aria-hidden="true"></i>
             <span class="truncate" style="max-width:220px">${escapeHtml(url.replace(/^https?:\/\/(www\.)?/, ''))}</span>
@@ -986,14 +990,14 @@ function _renderItemDetail(item) {
             const known = (window._buddyNamesCache || {})[uid];
             return `<span class="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700">
                 <span aria-hidden="true">👤</span>
-                <span data-buddy-id="${uid}">${known ? escapeHtml(known) : '…'}</span>
+                <span data-buddy-id="${escapeHtml(uid)}">${known ? escapeHtml(known) : '…'}</span>
             </span>`;
         }).join('')
         : '';
 
 const heroPath  = item.photos?.[0];
-const heroUrl   = heroPath ? _signedUrlCache.get(heroPath) : null;
-const allPhotoUrls = (item.photos || []).map(p => _signedUrlCache.get(p)).filter(Boolean);
+const heroUrl   = heroPath ? safeUrl(_signedUrlCache.get(heroPath)) : '';
+const allPhotoUrls = (item.photos || []).map(p => safeUrl(_signedUrlCache.get(p))).filter(Boolean);
 
     sheet.innerHTML = `
         <div class="col-item-sheet-inner flex flex-col bg-white rounded-t-[2rem] w-full max-w-md mx-auto max-h-[85vh] overflow-hidden"
@@ -1021,7 +1025,7 @@ const allPhotoUrls = (item.photos || []).map(p => _signedUrlCache.get(p)).filter
                     <button data-col-lightbox-url="${escapeHtml(heroUrl)}" data-col-lightbox-total="${allPhotoUrls.length}"
                             class="w-16 h-16 rounded-xl overflow-hidden flex-shrink-0 active:scale-95 transition-transform focus:outline-none"
                             aria-label="View photo">
-                        <img src="${heroUrl}" alt="${escapeHtml(item.title)}" class="w-full h-full object-cover">
+                        <img src="${escapeHtml(heroUrl)}" alt="${escapeHtml(item.title)}" class="w-full h-full object-cover">
                     </button>
                 ` : `
                     <div class="w-16 h-16 rounded-xl flex items-center justify-center text-2xl flex-shrink-0"
@@ -1030,7 +1034,7 @@ const allPhotoUrls = (item.photos || []).map(p => _signedUrlCache.get(p)).filter
 
                 <div class="flex-1 min-w-0">
                     <h2 class="text-lg font-black text-slate-900 leading-tight">${escapeHtml(item.title)}</h2>
-                    <p class="text-[11px] text-slate-400 mt-0.5">${year}${item.label ? ' · ' + escapeHtml(item.label) : ''}</p>
+                    <p class="text-[11px] text-slate-400 mt-0.5">${escapeHtml(year)}${item.label ? ' · ' + escapeHtml(item.label) : ''}</p>
                     <span class="inline-block text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full mt-1.5"
                           style="background:rgba(200,160,80,0.12);color:#c8a050">${escapeHtml(typeLabel)}</span>
                 </div>
@@ -1091,7 +1095,7 @@ ${allPhotoUrls.length > 0 ? `
             <button data-col-lightbox-url="${escapeHtml(url)}" data-col-lightbox-total="${allPhotoUrls.length}"
                     class="flex-shrink-0 w-24 h-24 rounded-xl overflow-hidden border border-slate-100 active:scale-95 transition-transform focus:outline-none focus:ring-2 focus:ring-amber-400"
                     aria-label="View photo ${i + 1}">
-                <img src="${url}" alt="Photo ${i + 1}" class="w-full h-full object-cover">
+                <img src="${escapeHtml(url)}" alt="Photo ${i + 1}" class="w-full h-full object-cover">
             </button>`).join('')}
     </div>
 </div>` : ''}
@@ -1178,7 +1182,7 @@ window._colOpenLightbox = (url, _total) => {
             <i data-lucide="x" class="w-5 h-5" aria-hidden="true"></i>
         </button>
         <!-- Photo -->
-        <img src="${url}"
+        <img src="${escapeHtml(safeUrl(url))}"
              alt="Full size photo"
              class="max-w-full max-h-full rounded-2xl object-contain shadow-2xl select-none"
              draggable="false">
@@ -1214,6 +1218,19 @@ function _handleCollectionClick(e) {
 
     const filterEl = e.target.closest('[data-col-drill-filter]');
     if (filterEl) { window._colSetDrillFilter(filterEl.dataset.colDrillFilter); return; }
+
+    const curationEl = e.target.closest('[data-col-curation-key]');
+    if (curationEl) { window._colSetCuration(curationEl.dataset.colCurationKey); return; }
+
+    const bandEl = e.target.closest('[data-col-band-id]');
+    if (bandEl) {
+        // Map back to the original (possibly numeric) band_id so the strict
+        // === comparison in _applyBandFilter still matches.
+        const bandId = bandEl.dataset.colBandId;
+        const match  = _items.find(i => i.band_id != null && String(i.band_id) === bandId);
+        window._colSetBand(match ? match.band_id : bandId);
+        return;
+    }
 }
 
 function _wireCollectionClicks(root) {
@@ -1515,9 +1532,9 @@ async function _renderBuddyCollection(userId, container) {
         const icon  = SUBTYPE_ICONS[subtype] || '✦';
 
         const photoGridHtml = items.map(item => {
-            const [bg] = item.hero_color ? [item.hero_color] : _hashColor(item.title);
+            const [bg] = _itemColors(item);
             const heroPath = item.photos?.[0];
-            const heroUrl  = heroPath ? _signedUrlCache.get(heroPath) : null;
+            const heroUrl  = heroPath ? safeUrl(_signedUrlCache.get(heroPath)) : '';
             const isRound  = item.subtype === 'vinyl';
 
             return `
@@ -1525,7 +1542,7 @@ async function _renderBuddyCollection(userId, container) {
                     <div class="w-[72px] h-[72px] flex items-center justify-center overflow-hidden text-xl"
                          style="background:${bg};border-radius:${isRound ? '50%' : '8px'}">
                         ${heroUrl
-                            ? `<img src="${heroUrl}" alt="${escapeHtml(item.title)}" class="w-full h-full object-cover" style="border-radius:${isRound ? '50%' : '8px'}">`
+                            ? `<img src="${escapeHtml(heroUrl)}" alt="${escapeHtml(item.title)}" class="w-full h-full object-cover" style="border-radius:${isRound ? '50%' : '8px'}">`
                             : icon}
                     </div>
                     <p class="text-[9px] font-bold text-slate-600 mt-1 leading-tight truncate">${escapeHtml(item.title)}</p>
@@ -1558,7 +1575,7 @@ async function _renderBuddyCollection(userId, container) {
                     return `
                     <div class="bg-white rounded-[1.5rem] border border-slate-100 shadow-sm p-4 border-l-4"
                          style="border-left-color:rgba(200,160,80,0.5)">
-                        ${year ? `<p class="text-[9px] font-black uppercase tracking-widest mb-0.5" style="color:#c8a050">${year}</p>` : ''}
+                        ${year ? `<p class="text-[9px] font-black uppercase tracking-widest mb-0.5" style="color:#c8a050">${escapeHtml(year)}</p>` : ''}
                         <p class="text-sm font-black text-slate-800">${escapeHtml(item.title)}</p>
                     </div>`;
                 }).join('')}

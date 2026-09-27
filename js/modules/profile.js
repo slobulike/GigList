@@ -21,6 +21,7 @@ import { renderBadges, renderBadgeStrip, buildBadgeDefs, deriveFanType } from '.
 import { initPushUI } from './push.js';
 import { initTips, syncSeenState, getSeenCount, getTotalCount, TIP_GROUPS, getGroupProgress } from './tips-registry.js';
 import { initTipsHub } from './tips-hub.js';
+import { escapeHtml, safeUrl } from './utils.js';
 
 // ─── MODULE STATE ─────────────────────────────────────────────────────────────
 
@@ -650,9 +651,9 @@ function _wireShowSearch() {
 
         listbox.innerHTML = matches.map(g =>
             `<li role="option"
-                 data-key="${g['Journal Key']}"
+                 data-key="${escapeHtml(g['Journal Key'])}"
                  class="px-4 py-3 text-sm font-bold text-slate-800 hover:bg-indigo-50 cursor-pointer">
-                ${g.Band} <span class="font-normal text-slate-400">– ${g.OfficialVenue} (${g.Date})</span>
+                ${escapeHtml(g.Band)} <span class="font-normal text-slate-400">– ${escapeHtml(g.OfficialVenue)} (${escapeHtml(g.Date)})</span>
              </li>`
         ).join('');
 
@@ -737,16 +738,16 @@ export function renderBuddyStrip(buddies) {
         const chips = preview.map(f => {
             const shared   = f.sharedGigs ?? 0;
             const name     = f.display_name || f.username;
-            const safeName = name.replace(/'/g, "\\'");
-            const avatarHtml = f.avatar_url
-                ? `<img src="${f.avatar_url}" alt="${name}" class="w-12 h-12 rounded-full object-cover">`
+            const avatarUrl = safeUrl(f.avatar_url);
+            const avatarHtml = avatarUrl
+                ? `<img src="${escapeHtml(avatarUrl)}" alt="${escapeHtml(name)}" class="w-12 h-12 rounded-full object-cover">`
                 : `<div class="w-12 h-12 rounded-full flex items-center justify-center text-white text-sm font-black"
-                        style="background:${_stableColour(name)}">${_initials(name)}</div>`;
+                        style="background:${_stableColour(name)}">${escapeHtml(_initials(name))}</div>`;
             return `
-            <button onclick="window.openBuddyDrillIn('${f.id}', '${safeName}')"
+            <button data-drill-buddy-id="${escapeHtml(f.id)}" data-drill-buddy-name="${escapeHtml(name)}"
                     class="flex flex-col items-center gap-1.5 hover:opacity-80 transition-opacity">
                 ${avatarHtml}
-                <span class="text-[8px] font-black text-slate-500 text-center leading-tight truncate">${name}</span>
+                <span class="text-[8px] font-black text-slate-500 text-center leading-tight truncate">${escapeHtml(name)}</span>
                 ${shared > 0
                     ? `<span class="text-[8px] font-black text-indigo-500">${shared} shared</span>`
                     : `<span class="text-[8px] text-slate-300 font-bold">no shows yet</span>`}
@@ -774,6 +775,7 @@ export function renderBuddyStrip(buddies) {
             <div class="grid grid-cols-5 gap-2">
                             ${chips}${findSlot}
                         </div>`;
+        _wireBuddyDrillClicks(stripContainer);
 
         if (window.lucide) lucide.createIcons();
     }
@@ -784,27 +786,27 @@ export function renderBuddyStrip(buddies) {
             const last      = f.lastSharedShow ?? null;
             const lastDate  = f.lastSharedDate ?? null;
             const name      = f.display_name || f.username;
-            const safeName  = name.replace(/'/g, "\\'");
             const totalGigs = f.totalGigs ?? '—';
-            const avatarHtml = f.avatar_url
-                ? `<img src="${f.avatar_url}" alt="${name}" class="w-11 h-11 rounded-full object-cover">`
+            const avatarUrl = safeUrl(f.avatar_url);
+            const avatarHtml = avatarUrl
+                ? `<img src="${escapeHtml(avatarUrl)}" alt="${escapeHtml(name)}" class="w-11 h-11 rounded-full object-cover">`
                 : `<div class="w-11 h-11 rounded-full flex items-center justify-center text-white text-sm font-black"
-                        style="background:${_stableColour(name)}">${_initials(name)}</div>`;
+                        style="background:${_stableColour(name)}">${escapeHtml(_initials(name))}</div>`;
 
             return `
             <div class="flex items-center gap-3 pb-6 mb-6 border-b border-slate-100 last:border-0 last:mb-0 last:pb-0">
                 <!-- Avatar → profile screen -->
                 <button onclick="window.openProfile('${f.id}')"
                         class="flex-shrink-0 rounded-full overflow-hidden hover:ring-2 hover:ring-indigo-400 hover:ring-offset-1 transition-all active:scale-95"
-                        aria-label="View ${name}'s profile">
+                        aria-label="View ${escapeHtml(name)}'s profile">
                     ${avatarHtml}
                 </button>
                 <!-- Rest of row → buddy drill-in -->
-                <button onclick="window.openBuddyDrillIn('${f.id}', '${safeName}')"
+                <button data-drill-buddy-id="${escapeHtml(f.id)}" data-drill-buddy-name="${escapeHtml(name)}"
                         class="flex-1 min-w-0 flex items-center gap-2 text-left hover:opacity-80 transition-opacity active:scale-[0.99]"
-                        aria-label="View ${name}'s shows">
+                        aria-label="View ${escapeHtml(name)}'s shows">
                     <div class="flex-1 min-w-0">
-                        <span class="text-sm font-black text-slate-800">${name}</span>
+                        <span class="text-sm font-black text-slate-800">${escapeHtml(name)}</span>
                         <div class="flex gap-2 mt-1.5">
                             <span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">${totalGigs} gigs</span>
                             ${shared > 0
@@ -817,7 +819,7 @@ export function renderBuddyStrip(buddies) {
                                     ? (() => { const [dd,mm,yy] = lastDate.split('/'); return new Date(`${yy}-${mm}-${dd}`) >= new Date(); })()
                                     : false;
                                 const label = isUpcoming ? 'Next together:' : 'Last together:';
-                                return `<p class="text-[9px] text-slate-400 italic mt-1 truncate">${label} ${last}</p>`;
+                                return `<p class="text-[9px] text-slate-400 italic mt-1 truncate">${label} ${escapeHtml(last)}</p>`;
                               })()
                             : `<p class="text-[9px] text-slate-300 italic mt-1">Plan your first show together →</p>`}
                     </div>
@@ -825,6 +827,7 @@ export function renderBuddyStrip(buddies) {
                 </button>
             </div>`;
         }).join('');
+        _wireBuddyDrillClicks(listContainer);
 
         if (window.lucide) lucide.createIcons();
     }
@@ -985,7 +988,7 @@ function _renderFanType(gigs) {
                         class="text-[9px] font-black text-indigo-400 hover:text-indigo-600 uppercase tracking-widest transition-colors">
                     why?
                 </button>
-                <span class="hidden text-[10px] text-slate-500 font-bold italic">${fanType.desc}</span>
+                <span class="hidden text-[10px] text-slate-500 font-bold italic">${escapeHtml(fanType.desc)}</span>
             </div>
         </div>`;
     if (window.lucide) lucide.createIcons();
@@ -1114,6 +1117,17 @@ function _memberSince(createdAt) {
 }
 
 /** Returns initials (up to 2 chars) from a display name */
+// Buddy strip/list → drill-in (delegated; name travels in data-* not inline onclick)
+function _wireBuddyDrillClicks(el) {
+    if (el._drillClickWired) return;
+    el._drillClickWired = true;
+    el.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-drill-buddy-id]');
+        if (!btn) return;
+        window.openBuddyDrillIn(btn.dataset.drillBuddyId, btn.dataset.drillBuddyName);
+    });
+}
+
 function _initials(name) {
     if (!name) return '?';
     const parts = name.trim().split(/\s+/);

@@ -10,6 +10,7 @@
  */
 
 import { supabase } from './supabase.js';
+import { escapeHtml } from './utils.js';
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
 
@@ -90,15 +91,18 @@ function _buildSwitcherPanel() {
     panel.setAttribute('role', 'menu');
     panel.setAttribute('aria-label', 'Switch mode');
 
-    const row = (label, sublabel, active, onclick, icon = 'check') => `
-        <button onclick="${onclick}" role="menuitem"
+    // onclick is only ever a fixed string; band names travel in dataAttrs
+    // (data-switch-band) and are dispatched by the panel listener below,
+    // since they come from user-submitted band requests.
+    const row = (label, sublabel, active, onclick, icon = 'check', dataAttrs = '') => `
+        <button ${onclick ? `onclick="${onclick}"` : ''} ${dataAttrs} role="menuitem"
                 class="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-colors ${active ? 'opacity-50 cursor-default pointer-events-none' : ''}">
             <span class="w-5 flex-shrink-0 flex items-center justify-center">
                 ${active ? `<i data-lucide="${icon}" class="w-4 h-4 text-indigo-600"></i>` : ''}
             </span>
             <span class="flex-1 min-w-0">
-                <span class="block text-sm font-black text-slate-900 truncate">${label}</span>
-                ${sublabel ? `<span class="block text-[10px] text-slate-400 font-bold uppercase tracking-widest">${sublabel}</span>` : ''}
+                <span class="block text-sm font-black text-slate-900 truncate">${escapeHtml(label)}</span>
+                ${sublabel ? `<span class="block text-[10px] text-slate-400 font-bold uppercase tracking-widest">${escapeHtml(sublabel)}</span>` : ''}
             </span>
         </button>`;
 
@@ -120,7 +124,8 @@ function _buildSwitcherPanel() {
                 ${bands.map(b => row(
                     b.name, 'Band Page',
                     currentBand === b.name,
-                    `window._switchToBand('${b.name.replace(/'/g, "\\'")}')`
+                    '', 'check',
+                    `data-switch-band="${escapeHtml(b.name)}"`
                 )).join('')}
                 ${bands.length === 0 ? '<p class="px-4 py-3 text-xs text-slate-400">No band pages yet.</p>' : ''}
             </div>
@@ -167,6 +172,10 @@ function _buildSwitcherPanel() {
     panel.style.top = '64px';
     panel.style.left = '12px';
     panel.classList.remove('absolute', 'top-full');
+    panel.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-switch-band]');
+        if (btn) window._switchToBand(btn.dataset.switchBand);
+    });
     document.body.appendChild(panel);
 
     if (window.lucide) lucide.createIcons();

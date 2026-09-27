@@ -23,6 +23,7 @@
  */
 
 import { supabase } from './supabase.js';
+import { escapeHtml } from './utils.js';
 
 
 // ─── MODAL FRAGMENT ─────────────────────────────────────────────────────────
@@ -744,10 +745,10 @@ async function _onArtistInputChange(e) {
 
         suggestionsEl.innerHTML = data.map(a =>
             `<button type="button"
-                     data-artist-name="${a.name.replace(/"/g, '&quot;')}"
-                     data-artist-id="${a.id}"
+                     data-artist-name="${escapeHtml(a.name)}"
+                     data-artist-id="${escapeHtml(a.id)}"
                      class="w-full text-left px-4 py-3 text-sm font-bold text-slate-800 hover:bg-indigo-50 transition-colors border-b border-slate-100 last:border-0">
-                ${a.name}
+                ${escapeHtml(a.name)}
              </button>`
         ).join('');
         suggestionsEl.classList.remove('hidden');
@@ -878,8 +879,8 @@ export async function loadPendingCaptureReminder() {
         ? new Date(capture.captured_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
         : null;
 
-    const venuePart  = capture.matched_venue  ? ` at ${capture.matched_venue}`  : '';
-    const artistPart = capture.matched_artist ? ` — ${capture.matched_artist}` : '';
+    const venuePart  = capture.matched_venue  ? ` at ${escapeHtml(capture.matched_venue)}`  : '';
+    const artistPart = capture.matched_artist ? ` — ${escapeHtml(capture.matched_artist)}` : '';
     const datePart   = capturedDate ? `on ${capturedDate}` : 'recently';
 
     container.innerHTML = `
@@ -895,12 +896,12 @@ export async function loadPendingCaptureReminder() {
                 </p>
                 <div class="flex items-center gap-3 mt-3">
                     <button type="button"
-                            onclick="window._openPendingCapture('${capture.id}')"
+                            data-capture-action="open"
                             class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black uppercase tracking-widest rounded-xl px-3 py-2 transition-all">
                         Finish logging
                     </button>
                     <button type="button"
-                            onclick="window._dismissPendingCapture('${capture.id}')"
+                            data-capture-action="dismiss"
                             class="text-xs font-black uppercase tracking-widest text-slate-400 hover:text-slate-600 transition-colors">
                         Dismiss
                     </button>
@@ -908,6 +909,10 @@ export async function loadPendingCaptureReminder() {
             </div>
         </div>
     `;
+
+    // Wired with capture.id in closure scope rather than inline onclick strings.
+    container.querySelector('[data-capture-action="open"]')?.addEventListener('click', () => window._openPendingCapture(capture.id));
+    container.querySelector('[data-capture-action="dismiss"]')?.addEventListener('click', () => window._dismissPendingCapture(capture.id));
 
     if (window.lucide) lucide.createIcons();
 }

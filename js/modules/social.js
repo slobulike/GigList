@@ -11,6 +11,7 @@
  */
 
 import { supabase } from './supabase.js';
+import { escapeHtml, safeUrl } from './utils.js';
 
 // ─── MODULE STATE ─────────────────────────────────────────────────────────────
 
@@ -33,6 +34,47 @@ function _buddyPair(idA, idB, initiatorId) {
 function _buddyFilter(q, myId, otherId) {
     const pair = _buddyPair(myId, otherId);
     return q.eq('requester_id', pair.requester_id).eq('addressee_id', pair.addressee_id);
+}
+
+// ─── DELEGATED CLICKS ─────────────────────────────────────────────────────────
+// Buttons that pass usernames / companion names carry them in data-* attributes
+// (read back via dataset) rather than inline onclick, so the text can't break
+// out into JS. One listener per container, attached once.
+
+function _handleSocialClick(e) {
+    const btn = e.target.closest('[data-social-action]');
+    if (!btn) return;
+    const { socialAction, socialId, socialName } = btn.dataset;
+    if (socialAction === 'accept') {
+        window.acceptFollowRequest(socialId, socialName, btn.closest('.flex'));
+    } else if (socialAction === 'decline') {
+        window.declineFollowRequest(socialId, btn.closest('.flex'));
+    } else if (socialAction === 'follow') {
+        window.followUser(socialId, socialName, btn.dataset.socialTarget === 'row' ? btn.closest('[data-user-id]') : btn);
+    } else if (socialAction === 'unfollow') {
+        window.unfollowUser(socialId, socialName);
+    } else if (socialAction === 'profile') {
+        window._openProfileFromModal(socialId);
+    } else if (socialAction === 'invite') {
+        _shareInvite(btn.dataset.inviteText, btn.dataset.inviteUrl);
+    }
+}
+
+function _wireSocialClicks(el) {
+    if (!el || el._socialClickWired) return;
+    el._socialClickWired = true;
+    el.addEventListener('click', _handleSocialClick);
+}
+
+async function _shareInvite(text, url) {
+    try {
+        if (navigator.share) {
+            await navigator.share({ title: 'Join me on GigList', text, url });
+        } else {
+            await navigator.clipboard.writeText(`${text} ${url}`);
+            window.showToast('Invite link copied!', 'success');
+        }
+    } catch (e) {}
 }
 
 // ─── SWITCHER REBUILD ─────────────────────────────────────────────────────────
@@ -105,18 +147,19 @@ export async function initSocial(currentUser) {
         if (banner && list) {
             list.innerHTML = pendingRequestProfiles.map(f => `
                 <div class="flex items-center justify-between gap-3">
-                    <span class="text-sm font-black text-indigo-900">${f.username} wants to be gig buddies</span>
+                    <span class="text-sm font-black text-indigo-900">${escapeHtml(f.username)} wants to be gig buddies</span>
                     <div class="flex gap-2 flex-shrink-0">
-                        <button onclick="window.acceptFollowRequest('${f.id}', '${f.username}', this.closest('.flex'))"
+                        <button data-social-action="accept" data-social-id="${escapeHtml(f.id)}" data-social-name="${escapeHtml(f.username)}"
                                 class="bg-indigo-600 text-white text-[10px] font-black px-3 py-1.5 rounded-full hover:bg-indigo-700 transition-all active:scale-95 uppercase tracking-widest">
                             Accept
                         </button>
-                        <button onclick="window.declineFollowRequest('${f.id}', this.closest('.flex'))"
+                        <button data-social-action="decline" data-social-id="${escapeHtml(f.id)}"
                                 class="text-slate-400 text-[10px] font-black px-3 py-1.5 rounded-full hover:text-slate-600 transition-colors uppercase tracking-widest">
                             Decline
                         </button>
                     </div>
                 </div>`).join('');
+            _wireSocialClicks(list);
             banner.classList.remove('hidden');
         }
     }
@@ -219,12 +262,13 @@ function _renderBuddyList() {
             const hash    = f.id.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
             const colour  = tileColours[hash % tileColours.length];
             const initials = (f.display_name || f.username).slice(0, 2).toUpperCase();
-            const avatarEl = f.avatar_url
-                ? `<img src="${f.avatar_url}" alt="${f.display_name || f.username}"
+            const avatarUrl = safeUrl(f.avatar_url);
+            const avatarEl = avatarUrl
+                ? `<img src="${escapeHtml(avatarUrl)}" alt="${escapeHtml(f.display_name || f.username)}"
                         class="w-12 h-12 rounded-full object-cover border-2 border-white shadow-sm"
                         onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
                 : '';
-            const initialsEl = `<div class="w-12 h-12 rounded-full flex items-center justify-center text-sm font-black ${colour.bg} ${colour.text} ${f.avatar_url ? 'hidden' : ''}">${initials}</div>`;
+            const initialsEl = `<div class="w-12 h-12 rounded-full flex items-center justify-center text-sm font-black ${colour.bg} ${colour.text} ${avatarUrl ? 'hidden' : ''}">${escapeHtml(initials)}</div>`;
 
             return `
             <button onclick="window.openProfile('${f.id}')"
@@ -232,7 +276,7 @@ function _renderBuddyList() {
                 <div class="relative">
                     ${avatarEl}${initialsEl}
                 </div>
-                <span class="text-[8px] font-black text-slate-500 text-center leading-tight max-w-[48px]">${f.display_name || f.username}</span>
+                <span class="text-[8px] font-black text-slate-500 text-center leading-tight max-w-[48px]">${escapeHtml(f.display_name || f.username)}</span>
                 ${f.sharedCount > 0
                     ? `<span class="text-[8px] font-black text-indigo-500">${f.sharedCount} shared</span>`
                     : `<span class="text-[8px] text-slate-300 font-bold">no shows yet</span>`}
@@ -271,15 +315,16 @@ function _renderBuddyList() {
         const myCount = myJournal.length;
         const buddyGigCount = (buddyKeys[f.id]?.size ?? 0); // approximate from shared data
 
-        const avatarEl = f.avatar_url
-            ? `<img src="${f.avatar_url}" alt="${f.display_name || f.username}"
+        const avatarUrl = safeUrl(f.avatar_url);
+        const avatarEl = avatarUrl
+            ? `<img src="${escapeHtml(avatarUrl)}" alt="${escapeHtml(f.display_name || f.username)}"
                     class="w-11 h-11 rounded-full object-cover border-2 border-white shadow-sm flex-shrink-0"
                     onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
             : '';
-        const initialsEl = `<div class="w-11 h-11 rounded-full flex items-center justify-center text-sm font-black flex-shrink-0 ${colour.bg} ${colour.text} ${f.avatar_url ? 'hidden' : ''}">${initials}</div>`;
+        const initialsEl = `<div class="w-11 h-11 rounded-full flex items-center justify-center text-sm font-black flex-shrink-0 ${colour.bg} ${colour.text} ${avatarUrl ? 'hidden' : ''}">${escapeHtml(initials)}</div>`;
 
         const lastLine = f.lastTogether
-            ? `<span class="text-[9px] text-slate-400 italic mt-0.5">Last together: ${f.lastTogether}</span>`
+            ? `<span class="text-[9px] text-slate-400 italic mt-0.5">Last together: ${escapeHtml(f.lastTogether)}</span>`
             : `<span class="text-[9px] text-indigo-400 italic mt-0.5">No shows together yet — change that! 🎸</span>`;
 
         return `
@@ -291,9 +336,9 @@ function _renderBuddyList() {
                 <div class="flex items-center justify-between">
                     <button onclick="window.openProfile('${f.id}')"
                             class="text-sm font-black text-slate-800 hover:text-indigo-600 transition-colors">
-                        ${f.display_name || f.username}
+                        ${escapeHtml(f.display_name || f.username)}
                     </button>
-                    <button onclick="window.unfollowUser('${f.id}', '${f.username}')"
+                    <button data-social-action="unfollow" data-social-id="${escapeHtml(f.id)}" data-social-name="${escapeHtml(f.username)}"
                             class="text-[9px] font-bold text-slate-300 hover:text-red-400 transition-colors uppercase tracking-widest ml-2 flex-shrink-0">
                         Remove
                     </button>
@@ -308,6 +353,7 @@ function _renderBuddyList() {
             <i data-lucide="chevron-right" class="w-4 h-4 text-slate-300 flex-shrink-0"></i>
         </div>`;
     }).join('');
+    _wireSocialClicks(container);
 
     if (window.lucide) lucide.createIcons();
 }
@@ -338,7 +384,7 @@ window.searchFriends = async () => {
 
         results.innerHTML = `
             <div class="flex items-center justify-between gap-2 py-1">
-                <p class="text-xs text-slate-400 italic">No users found for "${q}".</p>
+                <p class="text-xs text-slate-400 italic">No users found for "${escapeHtml(q)}".</p>
                 <button id="buddy-invite-btn"
                         class="flex items-center gap-1.5 bg-slate-100 border border-slate-200 text-slate-600 text-[10px] font-black px-3 py-1.5 rounded-full hover:bg-indigo-50 hover:border-indigo-200 hover:text-indigo-600 transition-all active:scale-95 uppercase tracking-widest">
                     <i data-lucide="share-2" class="w-3 h-3"></i>
@@ -370,16 +416,17 @@ window.searchFriends = async () => {
         const isBuddy = buddyIds.has(u.id);
         return `
         <div class="flex items-center justify-between gap-2 py-1">
-            <span class="text-sm font-black text-slate-700">${u.username}</span>
+            <span class="text-sm font-black text-slate-700">${escapeHtml(u.username)}</span>
             ${isBuddy
                 ? `<span class="text-[10px] font-bold text-indigo-400 uppercase tracking-widest">Gig Buddy</span>`
-                : `<button onclick="window.followUser('${u.id}', '${u.username}', this)"
+                : `<button data-social-action="follow" data-social-id="${escapeHtml(u.id)}" data-social-name="${escapeHtml(u.username)}"
                           class="bg-indigo-600 text-white text-[10px] font-black px-3 py-1.5 rounded-full hover:bg-indigo-700 transition-all active:scale-95 uppercase tracking-widest">
                        Add Gig Buddy
                    </button>`
             }
         </div>`;
     }).join('');
+    _wireSocialClicks(results);
 };
 
 // ─── ADD GIG BUDDY ────────────────────────────────────────────────────────────
@@ -452,7 +499,7 @@ window.followUser = async (userId, username, btn) => {
     bannerRow?.closest('[data-dismiss]')?.remove() ||
     bannerRow?.closest('.flex')?.remove();
 
-    document.querySelectorAll(`button[onclick*="followUser('${userId}"]`).forEach(b => {
+    document.querySelectorAll(`button[data-social-action="follow"][data-social-id="${CSS.escape(userId)}"]`).forEach(b => {
         b.outerHTML = `<span class="text-indigo-300 text-[9px] font-black">✓</span>`;
     });
 };
@@ -468,7 +515,7 @@ window.unfollowUser = async (userId, username) => {
         const yesId = 'toast-yes-' + Date.now();
         const noId  = 'toast-no-'  + Date.now();
         toast.innerHTML =
-            '<span class="flex-1">Remove <strong>' + username + '</strong> as a gig buddy?</span>' +
+            '<span class="flex-1">Remove <strong>' + escapeHtml(username) + '</strong> as a gig buddy?</span>' +
             '<button id="' + yesId + '" class="bg-red-500 text-white px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-red-600 transition-colors">Yes</button>' +
             '<button id="' + noId  + '" class="bg-slate-100 text-slate-600 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-colors">No</button>';
         container.appendChild(toast);
@@ -602,20 +649,21 @@ export async function checkGigOverlap(currentUser) {
         return `
         <div class="flex items-start justify-between gap-3" data-user-id="${c.id}">
             <div class="flex-1 min-w-0">
-                <p class="text-sm font-black text-indigo-900">${c.username}</p>
+                <p class="text-sm font-black text-indigo-900">${escapeHtml(c.username)}</p>
                 <p class="text-[10px] text-indigo-500 mt-0.5">
-                    ${c.count} show${c.count !== 1 ? 's' : ''} in common${example ? ' &mdash; incl. ' + example : ''}
+                    ${c.count} show${c.count !== 1 ? 's' : ''} in common${example ? ' &mdash; incl. ' + escapeHtml(example) : ''}
                 </p>
             </div>
             ${isBuddy
                 ? '<span class="text-[10px] font-black text-emerald-600 uppercase tracking-widest flex-shrink-0 pt-0.5">Gig Buddy</span>'
-                : `<button onclick="window.followUser('${c.id}', '${c.username}', this.closest('[data-user-id]'))"
+                : `<button data-social-action="follow" data-social-id="${escapeHtml(c.id)}" data-social-name="${escapeHtml(c.username)}" data-social-target="row"
                           class="flex-shrink-0 bg-indigo-600 text-white text-[10px] font-black px-3 py-1.5 rounded-full hover:bg-indigo-700 transition-all active:scale-95 uppercase tracking-widest">
                        Add Gig Buddy
                    </button>`
             }
         </div>`;
     }).join('');
+    _wireSocialClicks(list);
 
     banner.classList.remove('hidden');
     window.track('connections_banner_shown', { count: connections.length });
@@ -689,9 +737,9 @@ window.loadGigAttendees = async (journalKey, journalId) => {
             const inviteUrl = window.location.origin + window.location.pathname.replace(/\/[^/]*$/, '/index.html');
             chips.push(`
                 <span class="inline-flex items-center gap-1.5 bg-slate-100 border border-slate-200 text-slate-600 text-[9px] px-2 py-1 rounded-md font-bold uppercase tracking-wider">
-                    ${name}
-                    <button onclick="(async()=>{try{if(navigator.share){await navigator.share({title:'Join me on GigList',text:'${inviteMsg.replace(/'/g,"\\'")}',url:'${inviteUrl}'});}else{await navigator.clipboard.writeText('${inviteMsg.replace(/'/g,"\\'")} ${inviteUrl}');window.showToast('Invite link copied!','success');}}catch(e){}})()"
-                            class="text-slate-400 hover:text-indigo-600 transition-colors" title="Invite ${name} to GigList">
+                    ${escapeHtml(name)}
+                    <button data-social-action="invite" data-invite-text="${escapeHtml(inviteMsg)}" data-invite-url="${escapeHtml(inviteUrl)}"
+                            class="text-slate-400 hover:text-indigo-600 transition-colors" title="Invite ${escapeHtml(name)} to GigList">
                         <i data-lucide="share-2" class="w-2.5 h-2.5"></i>
                     </button>
                 </span>`);
@@ -699,24 +747,24 @@ window.loadGigAttendees = async (journalKey, journalId) => {
         } else if (isBuddy) {
             // State 3: companion + confirmed buddy → tappable name
             chips.push(`
-                <button onclick="window._openProfileFromModal('${userId}')"
+                <button data-social-action="profile" data-social-id="${escapeHtml(userId)}"
                         class="inline-flex items-center gap-1 bg-indigo-50 border border-indigo-200 text-indigo-700 text-[9px] px-2 py-1 rounded-md font-black uppercase tracking-wider hover:bg-indigo-100 transition-colors">
                     <i data-lucide="music" class="w-2.5 h-2.5"></i>
-                    ${name}
+                    ${escapeHtml(name)}
                 </button>`);
 
         } else {
             // State 2: companion + on GigList, not yet a buddy
             const isPublic = profile?.is_public;
             const nameEl = isPublic
-                ? `<button onclick="window._openProfileFromModal('${userId}')" class="hover:underline">${name}</button>`
-                : `<span>${name}</span>`;
+                ? `<button data-social-action="profile" data-social-id="${escapeHtml(userId)}" class="hover:underline">${escapeHtml(name)}</button>`
+                : `<span>${escapeHtml(name)}</span>`;
             chips.push(`
                 <span class="inline-flex items-center gap-1.5 bg-indigo-50 border border-indigo-200 text-indigo-700 text-[9px] px-2 py-1 rounded-md font-bold uppercase tracking-wider">
                     <i data-lucide="music" class="w-2.5 h-2.5"></i>
                     ${nameEl}
-                    <button onclick="window.followUser('${userId}', '${profile?.username || name}', this)"
-                            class="text-indigo-400 hover:text-indigo-700 font-black transition-colors" title="Add ${name} as Gig Buddy">
+                    <button data-social-action="follow" data-social-id="${escapeHtml(userId)}" data-social-name="${escapeHtml(profile?.username || name)}"
+                            class="text-indigo-400 hover:text-indigo-700 font-black transition-colors" title="Add ${escapeHtml(name)} as Gig Buddy">
                         <i data-lucide="user-plus" class="w-2.5 h-2.5"></i>
                     </button>
                 </span>`);
@@ -736,22 +784,22 @@ window.loadGigAttendees = async (journalKey, journalId) => {
         if (isBuddy) {
             // State 3: at the show, confirmed buddy
             chips.push(`
-                <button onclick="window._openProfileFromModal('${userId}')"
+                <button data-social-action="profile" data-social-id="${escapeHtml(userId)}"
                         class="inline-flex items-center gap-1 bg-indigo-50 border border-indigo-200 text-indigo-700 text-[9px] px-2 py-1 rounded-md font-black uppercase tracking-wider hover:bg-indigo-100 transition-colors">
                     <i data-lucide="music" class="w-2.5 h-2.5"></i>
-                    ${username}
+                    ${escapeHtml(username)}
                 </button>`);
         } else {
             // State 2: at the show, not a buddy
             const nameEl = isPublic
-                ? `<button onclick="window._openProfileFromModal('${userId}')" class="hover:underline">${username}</button>`
-                : `<span>${username}</span>`;
+                ? `<button data-social-action="profile" data-social-id="${escapeHtml(userId)}" class="hover:underline">${escapeHtml(username)}</button>`
+                : `<span>${escapeHtml(username)}</span>`;
             chips.push(`
                 <span class="inline-flex items-center gap-1.5 bg-indigo-50 border border-indigo-200 text-indigo-700 text-[9px] px-2 py-1 rounded-md font-bold uppercase tracking-wider">
                     <i data-lucide="music" class="w-2.5 h-2.5"></i>
                     ${nameEl}
-                    <button onclick="window.followUser('${userId}', '${username}', event.currentTarget)"
-                            class="text-indigo-400 hover:text-indigo-700 font-black transition-colors" title="Add ${username} as Gig Buddy">
+                    <button data-social-action="follow" data-social-id="${escapeHtml(userId)}" data-social-name="${escapeHtml(username)}"
+                            class="text-indigo-400 hover:text-indigo-700 font-black transition-colors" title="Add ${escapeHtml(username)} as Gig Buddy">
                         <i data-lucide="user-plus" class="w-2.5 h-2.5"></i>
                     </button>
                 </span>`);
@@ -761,6 +809,7 @@ window.loadGigAttendees = async (journalKey, journalId) => {
     // ── 4. Render ───────────────────────────────────────────────────────────
     if (chips.length) {
         container.innerHTML = chips.join('');
+        _wireSocialClicks(container);
     } else {
         container.innerHTML = `<span class="text-[9px] opacity-60 italic text-slate-400">Solo Mission</span>`;
     }

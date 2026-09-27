@@ -64,7 +64,7 @@
  * card is shown at all — see selectCards() for the round-robin selection.
  */
 
-import { parseDate, slugify, slugifyArtist } from './utils.js';
+import { parseDate, slugify, slugifyArtist, escapeHtml, safeUrl } from './utils.js';
 import { supabase } from './supabase.js';
 
 // Bump this on every deploy that touches card-selection or card-building
@@ -74,7 +74,10 @@ import { supabase } from './supabase.js';
 // cached under the old logic for the rest of the day. Bumping unnecessarily
 // just costs one extra rebuild per user per day — cheap insurance, so when
 // in doubt, bump it.
-const FEED_LOGIC_VERSION = 2;
+// v3: card fields are now HTML-escaped at render time and taps use data-*
+// attributes + a delegated listener — bumped so any previously cached,
+// unescaped feed HTML is discarded rather than replayed via innerHTML.
+const FEED_LOGIC_VERSION = 3;
 import { startNewPuzzle, setPuzzleDifficulty, resetPuzzleImage } from './games.js';
 import { buildTipDiscoveryCards, renderTipDiscoveryCard } from './tip-nudges.js';
 import { renderEmptyStateTips } from './tip-nudges.js';
@@ -1117,15 +1120,16 @@ function buddyAvatarPill(buddyOrBuddies) {
         const name     = buddy.display_name || buddy.username || '';
         const initials = name.slice(0, 2).toUpperCase();
         const ringClass = stacked ? 'ring-2 ring-slate-900' : '';
-        const imgTag   = buddy.avatar_url
-            ? `<img src="${buddy.avatar_url}"
-                    alt="${name}"
+        const avatarSrc = safeUrl(buddy.avatar_url);
+        const imgTag   = avatarSrc
+            ? `<img src="${escapeHtml(avatarSrc)}"
+                    alt="${escapeHtml(name)}"
                     class="w-5 h-5 rounded-full object-cover flex-shrink-0 ${ringClass}"
                     onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
             : '';
         const fallback = `<span class="w-5 h-5 rounded-full bg-indigo-200 text-indigo-700 text-[8px] font-black
                                flex items-center justify-center flex-shrink-0 ${ringClass}
-                               ${buddy.avatar_url ? 'hidden' : ''}">${initials}</span>`;
+                               ${avatarSrc ? 'hidden' : ''}">${escapeHtml(initials)}</span>`;
         return `<span class="inline-flex ${stacked && i > 0 ? '-ml-2' : ''}">${imgTag}${fallback}</span>`;
     }).join('');
 
@@ -1206,6 +1210,28 @@ const BUDDY_COLLECTION_TYPES = new Set([
 ]);
 
 // ─── CARD TEMPLATE ────────────────────────────────────────────────────────────
+// Card builders hold RAW text in eyebrow/headline/subline/badge (buddy names,
+// band/venue names, collection titles). renderCard() is the single escaping
+// layer — do not pre-escape in the builders.
+//
+// Taps are wired via data-* attributes + one delegated listener on the feed
+// container (_handleFeedClick / _wireFeedClicks) rather than inline onclick,
+// because journal keys and buddy names are user-controlled text.
+
+function _handleFeedClick(e) {
+    const el = e.target.closest('[data-feed-toggle], [data-feed-gig-key], [data-feed-buddy-col-id]');
+    if (!el || !e.currentTarget.contains(el)) return;
+    const ds = el.dataset;
+    if (ds.feedToggle !== undefined)      window._feedToggleDetail(ds.feedToggle, ds.feedType);
+    else if (ds.feedGigKey !== undefined) window.viewGigDetails(ds.feedGigKey);
+    else                                  window._feedOpenBuddyCollection(ds.feedBuddyColId, ds.feedBuddyColName);
+}
+
+function _wireFeedClicks(container) {
+    if (!container || container._feedClickWired) return;
+    container._feedClickWired = true;
+    container.addEventListener('click', _handleFeedClick);
+}
 
 function renderCard(card, index) {
     // tip_discovery cards have their own renderer
@@ -1218,10 +1244,10 @@ function renderCard(card, index) {
     // Social cards get the buddy avatar woven into the eyebrow
     const eyebrowHtml = isSocial && (card.buddies?.length || card.buddy)
         ? `<span class="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-white/60 mb-2">
-               ${buddyAvatarPill(card.buddies || card.buddy)}${card.eyebrow}
+               ${buddyAvatarPill(card.buddies || card.buddy)}${escapeHtml(card.eyebrow)}
            </span>`
         : `<span class="text-[9px] font-black uppercase tracking-widest text-white/60 mb-2 block">
-               ${card.eyebrow}
+               ${escapeHtml(card.eyebrow)}
            </span>`;
 
     // Top accent stripe colour for social cards
@@ -1232,15 +1258,15 @@ function renderCard(card, index) {
         card.type === 'buddy_collection_this_month' ? 'bg-amber-400'  :
                                                         'bg-rose-500';
 
-    // Primary tap action
+    // Primary tap action (data-* attributes, dispatched by _handleFeedClick)
     const primaryAction = hasDetail
-        ? `window._feedToggleDetail('${safeKey}', '${card.type}')`
-        : `window.viewGigDetails('${(card.journalKey || '').replace(/'/g, "\\'")}')`;
+        ? `data-feed-toggle="${escapeHtml(safeKey)}" data-feed-type="${escapeHtml(card.type)}"`
+        : `data-feed-gig-key="${escapeHtml(card.journalKey || '')}"`;
 
     // For gig-based social cards the tap opens the gig modal (read-only for buddy cards).
     // Buddy collection cards have no gig — they open the buddy's Collection tab instead.
-    const socialAction = `window.viewGigDetails('${(card.gig?.['Journal Key'] || '').replace(/'/g, "\\'")}')`;
-    const buddyCollectionAction = `window._feedOpenBuddyCollection('${card.buddy?.id || ''}', '${(card.buddyName || '').replace(/'/g, "\\'")}')`;
+    const socialAction = `data-feed-gig-key="${escapeHtml(card.gig?.['Journal Key'] || '')}"`;
+    const buddyCollectionAction = `data-feed-buddy-col-id="${escapeHtml(card.buddy?.id || '')}" data-feed-buddy-col-name="${escapeHtml(card.buddyName || '')}"`;
 
     const tapAction = BUDDY_COLLECTION_TYPES.has(card.type)
         ? buddyCollectionAction
@@ -1268,7 +1294,7 @@ function renderCard(card, index) {
     return `
         <div class="relative overflow-hidden rounded-[2rem] bg-slate-900 shadow-xl min-h-[260px] flex flex-col"
              role="article"
-             data-card-type="${card.type}">
+             data-card-type="${escapeHtml(card.type)}">
 
             <!-- Hero image -->
             <img id="feed-img-${safeKey}"
@@ -1288,21 +1314,21 @@ function renderCard(card, index) {
 
                 ${eyebrowHtml}
 
-                <div onclick="${tapAction}" class="cursor-pointer">
+                <div ${tapAction} class="cursor-pointer">
                     <h3 class="text-3xl font-black italic uppercase tracking-tighter text-white leading-none mb-1">
-                        ${card.headline}
+                        ${escapeHtml(card.headline)}
                     </h3>
-                    <p class="text-sm font-bold text-white/60">${card.subline}</p>
+                    <p class="text-sm font-bold text-white/60">${escapeHtml(card.subline)}</p>
                 </div>
 
                 <div class="flex items-center justify-between mt-4">
                     <span class="${card.badgeColor} text-white text-[9px] font-black uppercase tracking-widest px-3 py-1 rounded-full">
-                        ${card.badge}
+                        ${escapeHtml(card.badge)}
                     </span>
                     ${ctaLabel ? `
-                    <button onclick="${tapAction}"
+                    <button ${tapAction}
                             class="text-[10px] font-black text-white/50 hover:text-white uppercase tracking-widest transition-colors flex items-center gap-1">
-                        ${ctaLabel}
+                        ${escapeHtml(ctaLabel)}
                         <i data-lucide="${ctaIcon}" class="w-3.5 h-3.5" ${chevronAttr} aria-hidden="true"></i>
                     </button>` : ''}
                 </div>
@@ -1342,12 +1368,12 @@ window._feedToggleDetail = (safeKey, cardType) => {
                 detailEl.innerHTML = `
                     <div class="mt-4 pt-4 border-t border-white/20 space-y-2">
                         ${shows.map((g, i) => `
-                        <div onclick="window.viewGigDetails('${(g['Journal Key'] || '').replace(/'/g, "\\'")}')"
+                        <div data-feed-gig-key="${escapeHtml(g['Journal Key'] || '')}"
                              class="flex items-center gap-3 cursor-pointer hover:bg-white/10 rounded-xl px-2 py-1.5 transition-colors">
                             <span class="text-[9px] font-black text-white/50 w-8 text-right">${gigYear(g)}</span>
                             <div class="w-1.5 h-1.5 rounded-full bg-indigo-400 flex-shrink-0"></div>
                             <div class="flex-1 min-w-0">
-                                <p class="text-xs font-bold text-white truncate">${g.OfficialVenue}</p>
+                                <p class="text-xs font-bold text-white truncate">${escapeHtml(g.OfficialVenue)}</p>
                             </div>
                             <span class="text-[9px] text-white/40 font-bold">#${i + 1}</span>
                         </div>`).join('')}
@@ -1367,12 +1393,12 @@ window._feedToggleDetail = (safeKey, cardType) => {
                 detailEl.innerHTML = `
                     <div class="mt-4 pt-4 border-t border-white/20 space-y-2">
                         ${shows.map(g => `
-                        <div onclick="window.viewGigDetails('${(g['Journal Key'] || '').replace(/'/g, "\\'")}')"
+                        <div data-feed-gig-key="${escapeHtml(g['Journal Key'] || '')}"
                              class="flex items-center gap-3 cursor-pointer hover:bg-white/10 rounded-xl px-2 py-1.5 transition-colors">
                             <span class="text-[9px] font-black text-white/50 w-8 text-right">${gigYear(g)}</span>
                             <div class="w-1.5 h-1.5 rounded-full bg-teal-400 flex-shrink-0"></div>
                             <div class="flex-1 min-w-0">
-                                <p class="text-xs font-bold text-white truncate">${g.Band}</p>
+                                <p class="text-xs font-bold text-white truncate">${escapeHtml(g.Band)}</p>
                             </div>
                         </div>`).join('')}
                     </div>`;
@@ -1396,13 +1422,13 @@ window._feedToggleDetail = (safeKey, cardType) => {
             detailEl.innerHTML = `
                 <div class="mt-4 pt-4 border-t border-white/20 space-y-2">
                     ${seasonGigs.slice(0, 8).map(g => `
-                    <div onclick="window.viewGigDetails('${(g['Journal Key'] || '').replace(/'/g, "\\'")}')"
+                    <div data-feed-gig-key="${escapeHtml(g['Journal Key'] || '')}"
                          class="flex items-center gap-3 cursor-pointer hover:bg-white/10 rounded-xl px-2 py-1.5 transition-colors">
                         <span class="text-[9px] font-black text-white/50 w-8 text-right">${gigYear(g)}</span>
                         <div class="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0"></div>
                         <div class="flex-1 min-w-0">
-                            <p class="text-xs font-bold text-white truncate">${g.Band}</p>
-                            <p class="text-[10px] text-white/50 truncate">${g.OfficialVenue}</p>
+                            <p class="text-xs font-bold text-white truncate">${escapeHtml(g.Band)}</p>
+                            <p class="text-[10px] text-white/50 truncate">${escapeHtml(g.OfficialVenue)}</p>
                         </div>
                     </div>`).join('')}
                     ${seasonGigs.length > 8
@@ -1439,12 +1465,12 @@ window._feedToggleDetail = (safeKey, cardType) => {
                     <div class="flex items-center gap-3 px-2 py-1.5">
                         <div class="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0"></div>
                         <div class="flex-1 min-w-0">
-                            <p class="text-xs font-bold text-white truncate">${item.title}</p>
+                            <p class="text-xs font-bold text-white truncate">${escapeHtml(item.title)}</p>
                             ${item.acquired_date
-                                ? `<p class="text-[10px] text-white/50">${_formatAcquiredDate(item.acquired_date)}</p>`
+                                ? `<p class="text-[10px] text-white/50">${escapeHtml(_formatAcquiredDate(item.acquired_date))}</p>`
                                 : ''}
                         </div>
-                        <span class="text-[9px] text-white/40 font-bold uppercase">${item.subtype || ''}</span>
+                        <span class="text-[9px] text-white/40 font-bold uppercase">${escapeHtml(item.subtype || '')}</span>
                     </div>`).join('')}
                     ${items.length > 8
                         ? `<p class="text-[10px] text-white/40 text-center pt-1">+${items.length - 8} more</p>`
@@ -1611,6 +1637,7 @@ window._openFeedGame = (gameType) => {
 export async function init(journalData, performanceData, _ignored = []) {
     const container = document.getElementById('feed-cards-container');
     if (!container) return;
+    _wireFeedClicks(container);
 
     // 1. Collection items
     let collectionItems = [];

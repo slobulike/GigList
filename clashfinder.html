@@ -344,6 +344,26 @@
 <script type="module">
     import { initClashfinderSync } from './js/modules/clashfinder-sync.js';
 
+    // Local copy of escapeHtml from js/modules/utils.js (kept in sync by hand) —
+    // not imported because utils.js isn't in the service worker's precache
+    // list, and this page has to keep working offline at the festival.
+    const escapeHtml = (val) => {
+        if (val == null) return '';
+        return String(val)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    };
+
+    // Act slots / lineup cards carry data-act-id instead of an inline
+    // onclick="openPicker('${id}')" string; one listener handles them all.
+    document.addEventListener('click', (e) => {
+        const el = e.target.closest('[data-act-id]');
+        if (el) window.openPicker(el.dataset.actId);
+    });
+
     // ── Read event slug from URL (?event=slam-dunk-2026) ──────────────────────
     const EVENT_SLUG = new URLSearchParams(location.search).get('event') || 'slam-dunk-2026';
 
@@ -604,7 +624,7 @@
             if (!stageActs.length) return;
 
             bHtml += `<div class="tl-row" style="height:${ROW_H}px;">`;
-            bHtml += `<div class="tl-stage-label" style="width:${LABEL_W}px;height:${ROW_H}px;"><div class="tl-stage-name">${stage.short_name}</div></div>`;
+            bHtml += `<div class="tl-stage-label" style="width:${LABEL_W}px;height:${ROW_H}px;"><div class="tl-stage-name">${escapeHtml(stage.short_name)}</div></div>`;
             bHtml += `<div style="position:relative;width:${totalW}px;height:${ROW_H}px;flex-shrink:0;">`;
 
             for (let m = minT; m <= maxT; m += 60) {
@@ -618,8 +638,8 @@
                 const left  = (toMin(act.start) - minT) * ppm;
                 const width = Math.max((toMin(act.end) - toMin(act.start)) * ppm - 3, 18);
                 const cc    = p !== 'none' ? (clashes.get(act.id) || '') : '';
-                bHtml += `<div class="slot slot-${p} ${cc}" style="left:${left}px;width:${width}px;" onclick="openPicker('${act.id}')">
-                    <div class="slot-name">${act.name}</div>
+                bHtml += `<div class="slot slot-${escapeHtml(p)} ${cc}" style="left:${left}px;width:${width}px;" data-act-id="${escapeHtml(act.id)}">
+                    <div class="slot-name">${escapeHtml(act.name)}</div>
                     ${width > 55 ? `<div class="slot-time">${fmt(act.start)}–${fmt(act.end)}</div>` : ''}
                 </div>`;
             });
@@ -748,7 +768,7 @@
             ? payload.bands.map(b => `
                 <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #1e1e2e;">
                     <span class="pdot pdot-did_see"></span>
-                    <span style="font-size:13px;font-weight:800;color:#a78bfa;">${b}</span>
+                    <span style="font-size:13px;font-weight:800;color:#a78bfa;">${escapeHtml(b)}</span>
                 </div>`).join('')
             : '<p style="color:#4a4a6a;font-size:12px;">No acts marked as "Did See" yet.</p>';
         document.getElementById('archive-sheet').classList.add('open');
@@ -796,14 +816,14 @@
             const p=priorities[act.id], stg=STAGES.find(s=>s.stage_id===act.stage);
             const cc=clashMap.get(act.id)||'';
             const clashLabel=cc==='clash-red'?'CLASH':cc==='clash-amber'?'OVERLAP':'';
-            return `<div class="lineup-card" style="border-color:${CLASH_C[cc]};" onclick="openPicker('${act.id}')">
+            return `<div class="lineup-card" style="border-color:${CLASH_C[cc]};" data-act-id="${escapeHtml(act.id)}">
                 <div style="font-size:9px;font-weight:800;color:#4a4a6a;min-width:38px;text-align:center;line-height:1.5;">${fmt(act.start)}<br>${fmt(act.end)}</div>
                 <div style="flex:1;min-width:0;">
                     <div style="display:flex;align-items:center;gap:5px;margin-bottom:2px;">
                         <span class="pdot ${DOT[p]}"></span>
-                        <span style="font-size:13px;font-weight:800;color:${C[p]};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${act.name}</span>
+                        <span style="font-size:13px;font-weight:800;color:${C[p]};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(act.name)}</span>
                     </div>
-                    <div style="font-size:9px;font-weight:700;color:#4a4a6a;text-transform:uppercase;letter-spacing:0.06em;">${stg?.short_name||''}</div>
+                    <div style="font-size:9px;font-weight:700;color:#4a4a6a;text-transform:uppercase;letter-spacing:0.06em;">${escapeHtml(stg?.short_name||'')}</div>
                 </div>
                 ${clashLabel?`<div style="font-size:8px;font-weight:800;color:${CLASH_C[cc]};text-transform:uppercase;letter-spacing:0.06em;flex-shrink:0;">${clashLabel}</div>`:''}
             </div>`;

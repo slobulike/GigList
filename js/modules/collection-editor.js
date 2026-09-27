@@ -28,7 +28,7 @@
 
 import { supabase, authedFetch } from './supabase.js';
 import { enrichNewArtist } from './artist-enrichment.js';
-import { escapeHtml } from './utils.js';
+import { escapeHtml, safeUrl } from './utils.js';
 import { openPhotoCropModal } from './photo-crop.js';
 
 // Collection cards render hero photos in a square tile (see collection.js
@@ -247,7 +247,7 @@ function _wireLabelInput() {
             e.preventDefault();
             const first = dropdown.querySelector('li');
             if (first && !dropdown.classList.contains('hidden')) {
-                first.dispatchEvent(new MouseEvent('mousedown'));
+                first.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
             } else if (input.value.trim()) {
                 window.colEditorAddLabel(input.value.trim());
             }
@@ -333,7 +333,7 @@ async function _applyDiscogsLookup(data) {
 
     // Adding the Discogs page itself to the links chips means it's still
     // there even if the discogs_data snapshot below ever falls out of sync.
-    if (data.discogs_uri && !_links.includes(data.discogs_uri)) {
+    if (data.discogs_uri && /^https?:/i.test(safeUrl(data.discogs_uri)) && !_links.includes(data.discogs_uri)) {
         _links.push(data.discogs_uri);
         _renderLinks();
     }
@@ -442,6 +442,19 @@ function _wireFormatSuggestions(subtype) {
 
     const opts = FORMAT_SUGGESTIONS[subtype] || [];
 
+    // One delegated listener for the suggestion items (data-* rather than
+    // inline onmousedown JS strings — see _wireBandCombobox).
+    if (!dropdown._formatPickWired) {
+        dropdown._formatPickWired = true;
+        dropdown.addEventListener('mousedown', (e) => {
+            const li = e.target.closest('[data-format-option]');
+            if (!li) return;
+            e.preventDefault();
+            input.value = li.dataset.formatOption;
+            dropdown.classList.add('hidden');
+        });
+    }
+
     input.addEventListener('input', () => {
         const q = input.value.trim().toLowerCase();
         const matches = q
@@ -449,7 +462,7 @@ function _wireFormatSuggestions(subtype) {
             : opts.slice(0, 6);
         dropdown.innerHTML = matches.map(m =>
             `<li class="px-4 py-2.5 text-sm font-bold text-slate-700 cursor-pointer hover:bg-slate-50 transition-colors"
-                 onmousedown="event.preventDefault();document.getElementById('col-editor-format').value='${escapeHtml(m)}';document.getElementById('col-editor-format-list').classList.add('hidden')">${m}</li>`
+                 data-format-option="${escapeHtml(m)}">${escapeHtml(m)}</li>`
         ).join('');
         dropdown.classList.toggle('hidden', !matches.length);
     });
@@ -458,7 +471,7 @@ function _wireFormatSuggestions(subtype) {
         if (!input.value) {
             dropdown.innerHTML = opts.slice(0, 6).map(m =>
                 `<li class="px-4 py-2.5 text-sm font-bold text-slate-700 cursor-pointer hover:bg-slate-50 transition-colors"
-                     onmousedown="event.preventDefault();document.getElementById('col-editor-format').value='${escapeHtml(m)}';document.getElementById('col-editor-format-list').classList.add('hidden')">${m}</li>`
+                     data-format-option="${escapeHtml(m)}">${escapeHtml(m)}</li>`
             ).join('');
             dropdown.classList.toggle('hidden', !opts.length);
         }
@@ -486,10 +499,18 @@ function _wireConditionSuggestions() {
     const _show = (opts) => {
         dropdown.innerHTML = opts.map(m =>
             `<li class="px-4 py-2.5 text-sm font-bold text-slate-700 cursor-pointer hover:bg-slate-50 transition-colors"
-                 onmousedown="event.preventDefault();document.getElementById('col-editor-condition').value='${escapeHtml(m)}';document.getElementById('col-editor-condition-list').classList.add('hidden')">${m}</li>`
+                 data-condition-option="${escapeHtml(m)}">${escapeHtml(m)}</li>`
         ).join('');
         dropdown.classList.toggle('hidden', !opts.length);
     };
+
+    dropdown.addEventListener('mousedown', (e) => {
+        const li = e.target.closest('[data-condition-option]');
+        if (!li) return;
+        e.preventDefault();
+        input.value = li.dataset.conditionOption;
+        dropdown.classList.add('hidden');
+    });
 
     input.addEventListener('focus', () => {
         const q = input.value.trim().toLowerCase();
@@ -566,7 +587,7 @@ function _renderPhotoPreviews() {
                     class="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-black/60 text-white text-[10px] flex items-center justify-center hover:bg-amber-500 transition-colors">★</button>` : '';
         return `
         <div class="relative w-16 h-16 rounded-xl overflow-hidden border ${isNew ? 'border-amber-200' : 'border-slate-200'} flex-shrink-0 group">
-            <img src="${src}" alt="Photo ${i + 1}" class="w-full h-full object-cover">
+            <img src="${escapeHtml(safeUrl(src))}" alt="Photo ${i + 1}" class="w-full h-full object-cover">
             ${badge}
             ${heroBtn}
             <button type="button"
@@ -941,10 +962,10 @@ function _renderBuddyTags() {
     if (!container) return;
     container.innerHTML = _taggedBuddies.map((b, i) => `
         <span class="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700">
-            <span>👤</span>${b.name}
+            <span>👤</span>${escapeHtml(b.name)}
             <button type="button"
                     onclick="window._colEditorRemoveBuddy(${i})"
-                    aria-label="Remove ${b.name}"
+                    aria-label="Remove ${escapeHtml(b.name)}"
                     class="hover:text-red-500 transition-colors leading-none ml-0.5">×</button>
         </span>`).join('');
 }
@@ -961,11 +982,20 @@ function _wireBuddyCombobox() {
         if (!available.length) { dropdown.classList.add('hidden'); return; }
         dropdown.innerHTML = available.map(b => `
             <li class="px-4 py-2.5 text-sm font-bold text-slate-700 cursor-pointer hover:bg-indigo-50 transition-colors flex items-center gap-2"
-                onmousedown="event.preventDefault();window._colEditorTagBuddy('${b.id}','${b.name.replace(/'/g,"\\'")}')">
-                <span class="text-base">👤</span>${b.name}
+                data-buddy-id="${escapeHtml(b.id)}" data-buddy-name="${escapeHtml(b.name)}">
+                <span class="text-base">👤</span>${escapeHtml(b.name)}
             </li>`).join('');
         dropdown.classList.remove('hidden');
     };
+
+    // One delegated listener — buddy names are other users' display names,
+    // so they go through data-* attributes rather than an inline JS string.
+    dropdown.addEventListener('mousedown', (e) => {
+        const li = e.target.closest('[data-buddy-id]');
+        if (!li) return;
+        e.preventDefault();
+        window._colEditorTagBuddy(li.dataset.buddyId, li.dataset.buddyName);
+    });
 
     input.addEventListener('focus', () => {
         const q = input.value.trim().toLowerCase();
@@ -983,7 +1013,7 @@ function _wireBuddyCombobox() {
             e.preventDefault();
             const first = dropdown.querySelector('li');
             if (first && !dropdown.classList.contains('hidden')) {
-                first.dispatchEvent(new MouseEvent('mousedown'));
+                first.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
             }
         }
     });
@@ -1193,7 +1223,7 @@ function _wireBandCombobox() {
             e.preventDefault();
             const first = dropdown.querySelector('li:not(.italic)');
             if (first && !dropdown.classList.contains('hidden')) {
-                first.dispatchEvent(new MouseEvent('mousedown'));
+                first.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
             } else {
                 dropdown.classList.add('hidden');
             }
@@ -1680,6 +1710,8 @@ window.colEditorAddLinkFromInput = () => {
     if (!input) return;
     const trimmed = input.value.trim();
     if (!trimmed || _links.includes(trimmed)) { input.value = ''; return; }
+    // Only http(s) links — anything else (javascript:, data:, …) is ignored.
+    if (!/^https?:/i.test(safeUrl(trimmed))) return;
     _links.push(trimmed);
     input.value = '';
     _renderLinks();
@@ -1713,3 +1745,4 @@ export const initCollectionEditor = () => {
         });
     }
 };
+

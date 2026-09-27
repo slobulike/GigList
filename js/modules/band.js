@@ -16,7 +16,7 @@
  */
 
 import { supabase }             from './supabase.js';
-import { parseDate }            from './utils.js';
+import { parseDate, escapeHtml, safeUrl } from './utils.js';
 import * as Charts              from './charts.js';
 import { loadPerformances }     from './data.js';
 
@@ -132,20 +132,20 @@ async function _renderBandHero() {
     if (photoUrl) {
         container.innerHTML = `
             <div class="relative w-full h-52 overflow-hidden rounded-3xl shadow-sm">
-                <img src="${photoUrl}" alt="${bandName}"
+                <img src="${escapeHtml(safeUrl(photoUrl))}" alt="${escapeHtml(bandName)}"
                      class="absolute inset-0 w-full h-full object-cover">
                 <div class="absolute inset-0 bg-gradient-to-t from-black/65 via-black/15 to-transparent"></div>
                 <div class="absolute bottom-0 left-0 right-0 p-5">
-                    <p class="text-white font-black text-2xl leading-tight drop-shadow">${bandName}</p>
+                    <p class="text-white font-black text-2xl leading-tight drop-shadow">${escapeHtml(bandName)}</p>
                 </div>
             </div>`;
     } else {
         // Styled gradient placeholder with large translucent initial
         container.innerHTML = `
             <div class="relative w-full h-36 overflow-hidden rounded-3xl shadow-sm bg-gradient-to-br from-indigo-600 to-[#189BCC]">
-                <span class="absolute inset-0 flex items-center justify-center text-white/10 font-black text-[9rem] leading-none select-none pointer-events-none">${initial}</span>
+                <span class="absolute inset-0 flex items-center justify-center text-white/10 font-black text-[9rem] leading-none select-none pointer-events-none">${escapeHtml(initial)}</span>
                 <div class="absolute bottom-0 left-0 right-0 p-5">
-                    <p class="text-white font-black text-2xl leading-tight drop-shadow">${bandName}</p>
+                    <p class="text-white font-black text-2xl leading-tight drop-shadow">${escapeHtml(bandName)}</p>
                 </div>
             </div>`;
     }
@@ -200,20 +200,22 @@ function _renderBandShows() {
 
     const rows = sorted.map(g => {
         const typeClass = typeColors[g.Type] || typeColors['Headline'];
-        const keyAttr   = g['Journal Key'] ? `data-key="${g['Journal Key']}"` : '';
+        // Journal Key is built from date + venue text, so it is escaped into
+        // data-key and opened via the delegated listener (_wireBandShowsClicks)
+        // rather than interpolated into an inline onclick.
+        const keyAttr   = g['Journal Key'] ? `data-key="${escapeHtml(g['Journal Key'])}"` : '';
         // Shows with a real user_id were logged by a GigList user — show a subtle indicator
         const hasUser   = g.user_id && g.user_id !== 'null';
         return `
             <tr class="border-t border-slate-100 hover:bg-indigo-50/30 cursor-pointer transition-colors"
-                onclick="window.viewGigDetails('${g['Journal Key']}')"
                 ${keyAttr}>
-                <td class="p-3 text-[11px] font-bold text-slate-500 whitespace-nowrap">${g.Date || '--'}</td>
+                <td class="p-3 text-[11px] font-bold text-slate-500 whitespace-nowrap">${escapeHtml(g.Date || '--')}</td>
                 <td class="p-3 text-sm font-bold text-slate-800 truncate max-w-0">
-                    <span class="block truncate">${g.OfficialVenue || g.Venue || '--'}</span>
+                    <span class="block truncate">${escapeHtml(g.OfficialVenue || g.Venue || '--')}</span>
                 </td>
                 <td class="p-3">
                     <span class="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border ${typeClass}">
-                        ${g.Type || 'Headline'}
+                        ${escapeHtml(g.Type || 'Headline')}
                     </span>
                 </td>
                 <td class="p-3 w-6 text-center">
@@ -244,7 +246,20 @@ function _renderBandShows() {
         </div>
         <p class="text-center text-[10px] text-slate-400 font-bold mt-3">${footerNote}</p>`;
 
+    _wireBandShowsClicks(container);
+
     if (window.lucide) lucide.createIcons();
+}
+
+// Delegated row-open click for the shows table (replaces the per-row inline
+// onclick). Attached once per container element via a guard flag.
+function _wireBandShowsClicks(container) {
+    if (!container || container._bandShowsClickWired) return;
+    container._bandShowsClickWired = true;
+    container.addEventListener('click', (e) => {
+        const row = e.target.closest('tr[data-key]');
+        if (row && container.contains(row)) window.viewGigDetails(row.dataset.key);
+    });
 }
 
 // ─── LAZY PERFORMANCE LOADER ──────────────────────────────────────────────────
@@ -318,7 +333,7 @@ function _renderSummaryNarrative() {
     const attendedCount = _fanAttendance ?? userLoggedShows.length;
     const sentence = `${bandName} ${plural ? 'have' : 'has'} ${totalShows} show${plural ? 's' : ''} archived on GigList${venuePhrase}. ${attendedCount} ${attendedCount === 1 ? 'has' : 'have'} been attended${fanPhrase}.${firstPhrase}${lastPhrase}`;
 
-    container.innerHTML = `<p class="text-sm font-bold text-slate-600 leading-relaxed">${sentence}</p>`;
+    container.innerHTML = `<p class="text-sm font-bold text-slate-600 leading-relaxed">${escapeHtml(sentence)}</p>`;
 }
 
 function _renderStoryStats() {
@@ -427,9 +442,9 @@ function _renderStoryStats() {
 
     container.innerHTML = cards.map(c => `
         <div class="bg-white p-4 rounded-[1.5rem] border border-slate-100 shadow-sm text-center">
-            <p class="text-[8px] font-black uppercase text-slate-400 tracking-widest mb-1">${c.label}</p>
-            <p class="text-xl font-black text-indigo-700 leading-none">${c.value}</p>
-            ${c.sub ? `<p class="text-[9px] text-slate-400 font-bold mt-1 leading-snug">${c.sub}</p>` : ''}
+            <p class="text-[8px] font-black uppercase text-slate-400 tracking-widest mb-1">${escapeHtml(c.label)}</p>
+            <p class="text-xl font-black text-indigo-700 leading-none">${escapeHtml(c.value)}</p>
+            ${c.sub ? `<p class="text-[9px] text-slate-400 font-bold mt-1 leading-snug">${escapeHtml(c.sub)}</p>` : ''}
         </div>`).join('');
 }
 
@@ -568,6 +583,7 @@ async function _renderBandFans() {
 
         if (loadingEl) loadingEl.classList.add('hidden');
         container.innerHTML = fans.map(fan => _fanTileHTML(fan)).join('');
+        _wireBandFansClicks(container);
 
         if (window.lucide) lucide.createIcons();
 
@@ -589,9 +605,10 @@ function _fanTileHTML(fan) {
     const label       = displayName || 'GigList Fan';
     const initials    = displayName ? displayName.slice(0, 2).toUpperCase() : '♪';
 
-    const avatarHTML = fan.avatar_url
-        ? `<img src="${fan.avatar_url}" alt="" class="w-12 h-12 rounded-full object-cover ring-2 ring-white flex-shrink-0">`
-        : `<div class="w-12 h-12 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center text-sm font-black flex-shrink-0">${initials}</div>`;
+    const avatarSrc  = safeUrl(fan.avatar_url);
+    const avatarHTML = avatarSrc
+        ? `<img src="${escapeHtml(avatarSrc)}" alt="" class="w-12 h-12 rounded-full object-cover ring-2 ring-white flex-shrink-0">`
+        : `<div class="w-12 h-12 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center text-sm font-black flex-shrink-0">${escapeHtml(initials)}</div>`;
 
     const firstShowYear  = fan.firstShow ? fan.firstShow.getFullYear() : null;
     const firstShowLabel = firstShowYear ? `Fan since ${firstShowYear}` : '';
@@ -602,7 +619,7 @@ function _fanTileHTML(fan) {
         <div class="bg-white rounded-[1.5rem] border border-slate-100 shadow-sm p-4 flex items-center gap-4">
             ${avatarHTML}
             <div class="flex-1 min-w-0">
-                <p class="text-sm font-black text-slate-900 truncate">${label}</p>
+                <p class="text-sm font-black text-slate-900 truncate">${escapeHtml(label)}</p>
                 <p class="text-[10px] font-bold text-slate-400 mt-0.5">
                     ${fan.showCount} show${fan.showCount !== 1 ? 's' : ''}
                     ${firstShowLabel ? ` · ${firstShowLabel}` : ''}
@@ -636,12 +653,25 @@ function _buddyCTA(userId, isViewer, displayName) {
         return `<span class="text-[9px] font-black uppercase tracking-widest text-slate-400">Requested</span>`;
     }
 
-    // No relationship — show Connect button
+    // No relationship — show Connect button. Opened via the delegated
+    // listener (_wireBandFansClicks) — display_name is user-controlled, so it
+    // must not be interpolated into an inline onclick.
     return `<button
-                onclick="window._sendBandBuddyRequest('${userId}', '${displayName.replace(/'/g, "\\'")}', this)"
+                data-band-buddy-id="${escapeHtml(userId)}" data-band-buddy-name="${escapeHtml(displayName)}"
                 class="text-[9px] font-black uppercase tracking-widest text-white bg-indigo-600 hover:bg-indigo-700 active:scale-95 transition-all px-3 py-1.5 rounded-full">
                 Connect
             </button>`;
+}
+
+function _wireBandFansClicks(container) {
+    if (!container || container._bandFansClickWired) return;
+    container._bandFansClickWired = true;
+    container.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-band-buddy-id]');
+        if (btn && container.contains(btn)) {
+            window._sendBandBuddyRequest(btn.dataset.bandBuddyId, btn.dataset.bandBuddyName, btn);
+        }
+    });
 }
 
 function _renderFansEmpty(container) {

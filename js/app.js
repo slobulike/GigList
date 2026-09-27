@@ -1,8 +1,8 @@
 /**
  * GigList Core Engine
- * v8.8.1 — 2026-09-27
+ * v8.8.2 — 2026-09-27
  * ------------------------------------------------------------------
- * ✅ Patches to other workers inc band archive and setlist fm
+ * ✅ Patches to fix all escaping opportunities with new utils helper
  */
 
 import * as Data from './modules/data.js';
@@ -38,7 +38,7 @@ import { openPhotoCropModal } from './modules/photo-crop.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "8.8.1";
+const APP_VERSION = "8.8.2";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
@@ -62,7 +62,11 @@ window.showToast = (message, type = 'info', duration = 3500) => {
 
     const toast = document.createElement('div');
     toast.className = `pointer-events-auto flex items-center gap-2.5 px-5 py-3 rounded-2xl shadow-xl text-sm font-bold max-w-xs text-center transition-all duration-300 translate-y-2 opacity-0 ${colours[type] || colours.info}`;
-    toast.innerHTML = `<i data-lucide="${icons[type] || 'info'}" class="w-4 h-4 flex-shrink-0" aria-hidden="true"></i><span>${message}</span>`;
+    toast.innerHTML = `<i data-lucide="${icons[type] || 'info'}" class="w-4 h-4 flex-shrink-0" aria-hidden="true"></i>`;
+    // Message is plain text (often includes usernames / band names) — never parse it as HTML
+    const text = document.createElement('span');
+    text.textContent = message;
+    toast.appendChild(text);
     container.appendChild(toast);
     if (window.lucide) lucide.createIcons();
 

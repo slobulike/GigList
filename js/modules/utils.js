@@ -91,6 +91,29 @@ export const escapeHtml = (val) => {
 };
 
 /**
+ * Returns the URL as an absolute string if it's http(s) or blob: (relative
+ * URLs are resolved against the current page), or '' for anything else —
+ * most importantly `javascript:` and `data:` URLs, which run code or load
+ * arbitrary content when used in href/src. blob: is allowed because only
+ * this page's own scripts can create one (e.g. local photo previews).
+ *
+ * Use for every href/src built from data (avatar_url, review_url,
+ * setlist_url, photo links, anything a user or an external API supplied),
+ * and still escape the result for the attribute:
+ *     `<a href="${escapeHtml(safeUrl(row.review_url))}">`
+ * Callers should skip rendering the link/image when this returns ''.
+ */
+export const safeUrl = (val) => {
+    if (val == null || val === '') return '';
+    try {
+        const u = new URL(String(val).trim(), window.location.href);
+        return ['https:', 'http:', 'blob:'].includes(u.protocol) ? u.href : '';
+    } catch {
+        return '';
+    }
+};
+
+/**
  * Normalizes an artist name for case/whitespace-insensitive comparison.
  */
 export const normalizeArtist = (s) => (s || '').toLowerCase().trim().replace(/\s+/g, ' ');
