@@ -38,7 +38,7 @@ import { openPhotoCropModal } from './modules/photo-crop.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "8.7.3";
+const APP_VERSION = "8.8.1";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
