@@ -1,6 +1,6 @@
 /**
  * GigList — Collection Editor Module
- * v2.0.0 — Sept 2026
+ * v1.0.0 — April 2026
  *
  * Add / edit collection_items (artefacts and memories).
  *
@@ -1440,7 +1440,7 @@ window.saveCollectionItem = async () => {
 
         // Fire push notifications to each tagged buddy
         if (taggedUserIds.length && _selectedType === 'memory') {
-            _notifyTaggedBuddies(session.user.id, itemId, title, taggedUserIds);
+            _notifyTaggedBuddies(itemId);
         }
 
         closeCollectionEditor();
@@ -1498,27 +1498,18 @@ function _maybeImportSourceImages(itemId, userId, links) {
 // ─── PUSH NOTIFICATIONS ──────────────────────────────────────────────────────
 
 /**
- * Sends a push notification to each tagged buddy after saving a memory.
- * Delegates to the Cloudflare Worker (/push/webhook/memory-tag) so the Worker
- * handles subscription lookup and delivery — matching the buddy-request pattern.
- * Runs non-blocking — failures are logged but don't surface to the user.
+ * Asks the push Worker to notify buddies tagged in this memory. Only the
+ * item id is sent: the Worker verifies the signed-in user owns the item,
+ * reads the saved tagged_user_ids itself, notifies only accepted buddies,
+ * and skips anyone it has already notified about this item — so this is
+ * safe to call on every save. Runs non-blocking — failures are logged but
+ * don't surface to the user.
  */
-async function _notifyTaggedBuddies(taggerUserId, itemId, memoryTitle, buddyIds) {
+async function _notifyTaggedBuddies(itemId) {
     try {
-        await fetch(`${PUSH_WORKER_URL}/push/webhook/memory-tag`, {
-            method:  'POST',
-            headers: {
-                'Content-Type':      'application/json',
-                'x-webhook-secret':  'CLIENT_TRIGGER',   // ← see note below
-            },
-            body: JSON.stringify({
-                record: {
-                    tagger_id:    taggerUserId,
-                    item_id:      itemId,
-                    title:        memoryTitle,
-                    buddy_ids:    buddyIds,
-                },
-            }),
+        await authedFetch(`${PUSH_WORKER_URL}/push/client/memory-tag`, {
+            method: 'POST',
+            body:   JSON.stringify({ itemId }),
         });
     } catch (e) {
         console.warn('[ColEditor] _notifyTaggedBuddies error:', e.message);

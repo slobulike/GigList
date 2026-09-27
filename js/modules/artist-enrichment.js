@@ -20,7 +20,7 @@
  * against an already-enriched artist is a safe no-op, not a clobber.
  */
 
-import { supabase } from './supabase.js';
+import { supabase, authedFetch } from './supabase.js';
 import { WORKER_URL } from './setlist-sync.js';
 
 /**
@@ -43,7 +43,7 @@ export async function enrichNewArtist(artistName) {
 async function _hydrateMbid(name) {
     try {
         const searchUrl = `${WORKER_URL}/?endpoint=artist-search&name=${encodeURIComponent(name)}`;
-        const res = await fetch(searchUrl);
+        const res = await authedFetch(searchUrl);
         if (!res.ok) return null;
 
         const data = await res.json();
@@ -69,7 +69,7 @@ async function _hydrateMbid(name) {
 // ─── Spotify ──────────────────────────────────────────────────────────────────
 
 function _hydrateSpotify(name) {
-    fetch(`${WORKER_URL}/?endpoint=spotify-artist&name=${encodeURIComponent(name)}`)
+    authedFetch(`${WORKER_URL}/?endpoint=spotify-artist&name=${encodeURIComponent(name)}`)
         .then(r => r.json())
         .then(async spotifyData => {
             if (!spotifyData.id) return;

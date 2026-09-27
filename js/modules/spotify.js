@@ -145,7 +145,7 @@ const paintAudioSlot = (slotId, content) => {
         const wrapId = `${slotId}-embed`;
         slot.innerHTML = `
             <div id="${wrapId}" class="mt-3">
-                <button onclick="window.loadSpotifyEmbed('${wrapId}', 'playlist/${content.playlistId}')"
+                <button onclick="window.loadSpotifyEmbed('wrapId','playlist/{content.playlistId}')"
                         class="w-full flex items-center gap-2.5 ${theme.action} rounded-xl px-3 py-2.5 transition-colors text-left">
                     <i data-lucide="play-circle" class="w-4 h-4 ${theme.icon} flex-shrink-0" aria-hidden="true"></i>
                     <span class="text-[10px] font-black uppercase tracking-widest">Play ${gigIsPast ? 'relive the show' : 'get gig ready'} playlist</span>
@@ -155,7 +155,7 @@ const paintAudioSlot = (slotId, content) => {
         const wrapId = `${slotId}-embed`;
         slot.innerHTML = `
             <div id="${wrapId}" class="mt-3">
-                <button onclick="window.loadSpotifyEmbed('${wrapId}', 'artist/${entry.SpotifyArtistId}')"
+                <button onclick="window.loadSpotifyEmbed('wrapId','artist/{entry.SpotifyArtistId}')"
                         class="w-full flex items-center gap-2.5 ${theme.action} rounded-xl px-3 py-2.5 transition-colors text-left">
                     <span class="w-8 h-8 rounded-md bg-emerald-100 flex items-center justify-center flex-shrink-0" aria-hidden="true">
                         <i data-lucide="play-circle" class="w-4 h-4 ${theme.icon}"></i>
@@ -168,7 +168,7 @@ const paintAudioSlot = (slotId, content) => {
             </div>`;
     } else {
         slot.innerHTML = `
-            <button onclick="window.generateSlotPlaylist('${slotId}', '${escAttr(entry['Journal Key'])}', '${escAttr(entry.Band)}', '${escAttr(entry.Date)}', '${escAttr(entry.OfficialVenue)}', ${gigIsPast}, ${!!allowGenericFallback})"
+            <button onclick="window.generateSlotPlaylist('slotId','{escAttr(entry['Journal Key'])}', 'escAttr(entry.Band)','{escAttr(entry.Date)}', '${escAttr(entry.OfficialVenue)}', ${gigIsPast}, ${!!allowGenericFallback})"
                     class="mt-3 w-full flex items-center justify-center gap-1.5 ${theme.action} text-[10px] font-black uppercase tracking-widest rounded-xl px-3 py-2.5 transition-colors">
                 <i data-lucide="${gigIsPast ? 'list-music' : 'zap'}" class="w-3.5 h-3.5 ${theme.icon}" aria-hidden="true"></i>
                 ${gigIsPast ? 'Generate relive playlist' : 'Get gig ready'}
@@ -243,7 +243,7 @@ window.createRelivePlaylist = async (journalKey, artistName, gigDate, venueName,
         const el = document.getElementById(btnId);
         if (el) {
             el.outerHTML = `
-                <a id="${btnId}" href="${url}" target="_blank" rel="noopener"
+                <a id="btnId"href="{url}" target="_blank" rel="noopener"
                    class="bg-indigo-500 hover:bg-indigo-600 text-white text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
                     <i data-lucide="check-circle" class="w-3.5 h-3.5" aria-hidden="true"></i> OPEN PLAYLIST
                 </a>`;
@@ -369,7 +369,7 @@ window.initReliveButton = async (journalKey) => {
     if (!btn) return;
 
     btn.outerHTML = `
-        <a id="${btnId}" href="${existing.playlist_url}" target="_blank" rel="noopener"
+        <a id="btnId"href="{existing.playlist_url}" target="_blank" rel="noopener"
            class="bg-indigo-500 hover:bg-indigo-600 text-white text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
             <i data-lucide="check-circle" class="w-3.5 h-3.5" aria-hidden="true"></i> OPEN PLAYLIST
         </a>`;
@@ -388,7 +388,7 @@ const renderGigReadyReadyState = (btnId, url, journalKey, artistName, gigDate, v
                class="bg-green-500 hover:bg-green-600 text-white text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
                 <i data-lucide="check-circle" class="w-3.5 h-3.5" aria-hidden="true"></i> OPEN PLAYLIST
             </a>
-            <button onclick="window.refreshGigReadyPlaylist('${escAttr(journalKey)}','${escAttr(artistName)}','${escAttr(gigDate)}','${escAttr(venueName)}')"
+            <button onclick="window.refreshGigReadyPlaylist('escAttr(journalKey)','{escAttr(artistName)}','escAttr(gigDate)','{escAttr(venueName)}')"
                     title="Refresh with latest setlist"
                     class="text-green-400 hover:text-white transition-colors p-1 rounded-full active:scale-95">
                 <i data-lucide="refresh-cw" class="w-3 h-3" aria-hidden="true"></i>
@@ -466,8 +466,8 @@ window.createGigReadyPlaylist = async (journalKey, artistName, gigDate, venueNam
     }
 
     try {
-        const slRes = await fetch(
-            `${SETLISTFM_PROXY}/?endpoint=artist-setlists&mbid=${encodeURIComponent(mbid)}&page=1`
+        const slRes = await authedFetch(
+            `SETLISTFMPROXY/?endpoint=artist-setlists&mbid={encodeURIComponent(mbid)}&page=1`
         );
         if (!slRes.ok) throw new Error(`setlist.fm proxy returned ${slRes.status}`);
 
@@ -614,7 +614,7 @@ window.refreshGigReadyPlaylist = async (journalKey, artistName, gigDate, venueNa
     if (el) {
         el.outerHTML = `
             <button id="${btnId}"
-                    onclick="window.createGigReadyPlaylist('${escAttr(journalKey)}','${escAttr(artistName)}','${escAttr(gigDate)}','${escAttr(venueName)}')"
+                    onclick="window.createGigReadyPlaylist('escAttr(journalKey)','{escAttr(artistName)}','escAttr(gigDate)','{escAttr(venueName)}')"
                     class="bg-green-500 hover:bg-green-600 text-white text-[9px] font-black px-4 py-2 rounded-full flex items-center gap-1.5 transition-all active:scale-95">
                 <i data-lucide="zap" class="w-3.5 h-3.5" aria-hidden="true"></i> GET READY
             </button>`;
@@ -631,3 +631,5 @@ export const initPlaylistButton = async (journalKey, gigIsPast) => {
         await window.initGigReadyButton(journalKey);
     }
 };
+
+

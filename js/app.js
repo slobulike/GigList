@@ -1,9 +1,8 @@
 /**
  * GigList Core Engine
- * v8.8.0 — 2026-09-27
+ * v8.8.1 — 2026-09-27
  * ------------------------------------------------------------------
- * ✅ Security fixes provided by Claude Opus 5.5 (spotify auth approach)
- * ✅ Patches to collection-photo related functions
+ * ✅ Patches to other workers inc band archive and setlist fm
  */
 
 import * as Data from './modules/data.js';

@@ -53,7 +53,7 @@
  */
 
 
-import { supabase } from './supabase.js';
+import { supabase, authedFetch } from './supabase.js';
 
 
 export const WORKER_URL = 'https://setlistfm-proxy.richard-lipscombe.workers.dev';
@@ -78,7 +78,7 @@ const FESTIVAL_KEYWORDS = [
  */
 async function _workerFetch(params) {
     const qs  = new URLSearchParams(params).toString();
-    const res = await fetch(`${WORKER_URL}/?${qs}`);
+    const res = await authedFetch(`${WORKER_URL}/?${qs}`);
 
     if (res.status === 404) return null;
     if (res.status === 429) throw Object.assign(new Error('Rate limited by setlist.fm'), { code: 'rate_limited' });

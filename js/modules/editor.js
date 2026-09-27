@@ -8,7 +8,7 @@
  */
 
 import { parseDate } from './utils.js';
-import { supabase } from './supabase.js';
+import { supabase, authedFetch } from './supabase.js';
 import {
     groupByShow, buildJournalRow, buildVenueRow,
     upsertVenues, upsertPerformances, upsertJournals,
@@ -469,7 +469,7 @@ window.editorToggleFestival = () => {
  */
 async function lookupMbid(artistName) {
     const url = `${WORKER_URL}/?endpoint=artist-search&name=${encodeURIComponent(artistName)}`;
-    const res = await fetch(url);
+    const res = await authedFetch(url);
     if (!res.ok) return null;
     const data = await res.json();
     const artists = data?.artist || [];
@@ -487,7 +487,7 @@ async function lookupSetlistsByDate(mbid, dateUK) {
     const fmDate = dateUK.replace(/\//g, '-'); // DD/MM/YYYY → DD-MM-YYYY
 
     const url = `${WORKER_URL}/?endpoint=find-show&mbid=${encodeURIComponent(mbid)}&eventDate=${fmDate}`;
-    const res = await fetch(url);
+    const res = await authedFetch(url);
 
     if (res.status === 404) return null; // no show found for this date — expected
     if (res.status === 429) throw new Error('rate_limited');
@@ -890,7 +890,7 @@ window.showSpinner?.('Saving show…');
                                 // Date-filtered setlist lookup via find-show
                                 const workerDate = dateStr.replace(/\//g, '-');
                                 const setlistUrl = `${WORKER_URL}/?endpoint=find-show&mbid=${mbid}&eventDate=${workerDate}`;
-                                const setlistRes = await fetch(setlistUrl);
+                                const setlistRes = await authedFetch(setlistUrl);
 
                                 if (setlistRes.status === 429) {
                                     throw new Error("Setlist.fm rate limit reached. Please wait a moment and try again.");

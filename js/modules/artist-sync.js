@@ -15,7 +15,7 @@
  * so no full sync logic lives here — that keeps the service key server-side.
  */
 
-import { supabase } from './supabase.js';
+import { supabase, authedFetch } from './supabase.js';
 import { WORKER_URL } from './setlist-sync.js';
 
 // ─── Artist search ────────────────────────────────────────────────────────────
@@ -28,7 +28,7 @@ export async function searchArtists(name) {
     if (!name?.trim()) return [];
 
     const url = `${WORKER_URL}/?endpoint=artist-search&name=${encodeURIComponent(name.trim())}`;
-    const res  = await fetch(url);
+    const res  = await authedFetch(url);
 
     if (!res.ok) throw new Error(`Artist search failed: ${res.status}`);
 
