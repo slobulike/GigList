@@ -1,8 +1,9 @@
 /**
  * GigList Core Engine
- * v8.7.2 — 2026-09-26
+ * v8.8.0 — 2026-09-27
  * ------------------------------------------------------------------
- * ✅ Version bump for new worker
+ * ✅ Security fixes provided by Claude Opus 5.5 (spotify auth approach)
+ * ✅ Patches to collection-photo related functions
  */
 
 import * as Data from './modules/data.js';
@@ -38,7 +39,7 @@ import { openPhotoCropModal } from './modules/photo-crop.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "8.7.2";
+const APP_VERSION = "8.7.3";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 

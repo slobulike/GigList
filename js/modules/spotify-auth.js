@@ -5,7 +5,7 @@
  * Consumed by spotify.js to gate playlist creation behind auth.
  */
 
-import { supabase } from './supabase.js';
+import { supabase, authedFetch } from './supabase.js';
 
 const WORKER = 'https://giglist-spotify.richard-lipscombe.workers.dev';
 const LS_KEY = 'spotify-auth-result';
@@ -55,8 +55,10 @@ export const connectSpotify = (userId) => new Promise(async (resolve, reject) =>
 
     let authUrl;
     try {
-        const res = await fetch(
-            `${WORKER}/auth-url?userId=${encodeURIComponent(userId)}&redirectUri=${encodeURIComponent(redirectUri)}`
+        // The Worker identifies the user from the Supabase access token, not
+        // from a userId parameter, and signs that identity into the OAuth state.
+        const res = await authedFetch(
+            `${WORKER}/auth-url?redirectUri=${encodeURIComponent(redirectUri)}`
         );
         const data = await res.json();
         if (data.error) throw new Error(data.error);
@@ -86,6 +88,7 @@ export const connectSpotify = (userId) => new Promise(async (resolve, reject) =>
 
     function cleanup() {
         window.removeEventListener('storage', onStorage);
+        window.removeEventListener('message', onMessage);
         clearInterval(pollClosed);
         clearTimeout(timeout);
     }
@@ -110,7 +113,7 @@ export const connectSpotify = (userId) => new Promise(async (resolve, reject) =>
         if (event.key !== LS_KEY || !event.newValue) return;
         try {
             const data = JSON.parse(event.newValue);
-            if (!data?.type === 'SPOTIFY_AUTH') return;
+            if (data?.type !== 'SPOTIFY_AUTH') return;
             if (Date.now() - data.ts > 30000) return; // ignore if stale
             localStorage.removeItem(LS_KEY);
             settle(data.ok, data.error);

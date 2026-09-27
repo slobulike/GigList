@@ -6,7 +6,7 @@
  *                  setlist.fm setlist, for upcoming shows.
  */
 
-import { supabase } from './supabase.js';
+import { supabase, authedFetch } from './supabase.js';
 import {
     checkSpotifyConnection,
     isSpotifyConnected,
@@ -305,9 +305,8 @@ window.createRelivePlaylist = async (journalKey, artistName, gigDate, venueName,
         .maybeSingle();
 
     try {
-        const response = await fetch(SPOTIFY_WORKER, {
+        const response = await authedFetch(SPOTIFY_WORKER, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 setlist:          performance.Setlist,
                 artistName,
@@ -315,7 +314,6 @@ window.createRelivePlaylist = async (journalKey, artistName, gigDate, venueName,
                 gigDate,
                 venueName,
                 mode:             'relive',
-                userId:           window.currentUser.id,
             }),
         });
 
@@ -497,9 +495,8 @@ window.createGigReadyPlaylist = async (journalKey, artistName, gigDate, venueNam
             .filter(s => s.name && !s.tape)
             .map(s => s.name);
 
-        const response = await fetch(SPOTIFY_WORKER, {
+        const response = await authedFetch(SPOTIFY_WORKER, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 setlist:         songs.join(' | '),
                 artistName,
@@ -507,7 +504,6 @@ window.createGigReadyPlaylist = async (journalKey, artistName, gigDate, venueNam
                 gigDate,
                 venueName,
                 mode:            'gig_ready',
-                userId:          window.currentUser.id,
             }),
         });
 

@@ -11,3 +11,22 @@ const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFz
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON);
 window.supabase = supabase;
+
+/**
+ * fetch() wrapper for calls to GigList's own Cloudflare Workers.
+ * Attaches the signed-in user's Supabase access token so the Worker can
+ * verify who is calling — Workers must never trust a userId sent in the
+ * request body or query string.
+ */
+export async function authedFetch(url, opts = {}) {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) throw new Error('Please sign in again.');
+    return fetch(url, {
+        ...opts,
+        headers: {
+            'Content-Type': 'application/json',
+            ...opts.headers,
+            Authorization: `Bearer ${session.access_token}`,
+        },
+    });
+}

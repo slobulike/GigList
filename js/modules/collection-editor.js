@@ -1,6 +1,6 @@
 /**
  * GigList — Collection Editor Module
- * v1.0.0 — April 2026
+ * v2.0.0 — Sept 2026
  *
  * Add / edit collection_items (artefacts and memories).
  *
@@ -26,7 +26,7 @@
  *   window.colEditorLookupDiscogs()     — fetch + autofill from a pasted Discogs link
  */
 
-import { supabase } from './supabase.js';
+import { supabase, authedFetch } from './supabase.js';
 import { enrichNewArtist } from './artist-enrichment.js';
 import { escapeHtml } from './utils.js';
 import { openPhotoCropModal } from './photo-crop.js';
@@ -289,9 +289,8 @@ window.colEditorLookupDiscogs = async () => {
     window.showSpinner?.();
 
     try {
-        const res = await fetch(`${IMPORT_WORKER_URL}/lookup`, {
+        const res = await authedFetch(`${IMPORT_WORKER_URL}/lookup`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ discogsUrl }),
         });
         const data = await res.json();
@@ -1486,10 +1485,11 @@ function _maybeImportSourceImages(itemId, userId, links) {
     );
     if (!relevant.length) return;
 
-    fetch(`${IMPORT_WORKER_URL}/import`, {
+    // The Worker takes the owner from the item row and checks it against the
+    // signed-in user's token, so no userId is sent.
+    authedFetch(`${IMPORT_WORKER_URL}/import`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ itemId, userId, links: relevant }),
+        body: JSON.stringify({ itemId, links: relevant }),
     }).catch(err => {
         console.warn('[ColEditor] cover art import failed (non-fatal):', err);
     });
