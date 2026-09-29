@@ -179,14 +179,23 @@ const paintAudioSlot = (slotId, content) => {
     const btn = slot.querySelector('button');
     if (btn) {
         if (kind === 'embed') {
-            btn.addEventListener('click', () => window.loadSpotifyEmbed(`${slotId}-embed`, `playlist/${content.playlistId}`));
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                window.loadSpotifyEmbed(`${slotId}-embed`, `playlist/${content.playlistId}`);
+            });
         } else if (kind === 'generic') {
-            btn.addEventListener('click', () => window.loadSpotifyEmbed(`${slotId}-embed`, `artist/${encodeURIComponent(entry.SpotifyArtistId)}`));
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                window.loadSpotifyEmbed(`${slotId}-embed`, `artist/${encodeURIComponent(entry.SpotifyArtistId)}`);
+            });
         } else {
-            btn.addEventListener('click', () => window.generateSlotPlaylist(
-                slotId, entry['Journal Key'] || '', entry.Band || '', entry.Date || '', entry.OfficialVenue || '',
-                gigIsPast, !!allowGenericFallback
-            ));
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                window.generateSlotPlaylist(
+                    slotId, entry['Journal Key'] || '', entry.Band || '', entry.Date || '', entry.OfficialVenue || '',
+                    gigIsPast, !!allowGenericFallback
+                );
+            });
         }
     }
     if (window.lucide) lucide.createIcons();

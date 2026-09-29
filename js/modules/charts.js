@@ -12,13 +12,46 @@ let dashboardSongsChart     = null;
 let dashboardBandFrequencyChart = null;
 let dashboardAverageMetricsChart = null;
 
-const getChartColors = (count) => {
+export const getChartColors = (count) => {
     const colors = [
         '#6366f1', '#8b5cf6', '#ec4899', '#f43f5e', '#f97316',
         '#eab308', '#22c55e', '#06b6d4', '#3b82f6', '#4f46e5',
         '#a855f7', '#d946ef', '#fb7185', '#fb923c', '#facc15'
     ];
     return colors.slice(0, count);
+};
+
+/**
+ * Shows/hides a "nothing to chart" placeholder over a chart container,
+ * with distinct wording for "you have no data at all" vs "your current
+ * filters match nothing" — so an active-but-empty filter doesn't read as
+ * if the user has never logged anything. Call at the top of every
+ * render*Chart function, before touching the canvas, and bail out of the
+ * chart build early when isEmpty is true so an empty dataset never
+ * reaches Chart.js. containerId is the card wrapper (e.g.
+ * 'topBandsChartContainer'), not the canvas itself, so the placeholder
+ * covers the same footprint. Only called for dashboard (non-modal)
+ * renders — the expanded chart modal has its own empty handling via the
+ * filteredResults-with-fallback logic in openChartModal.
+ */
+export const setChartEmptyState = (containerId, isEmpty, { emptyMessage, filteredMessage, filtersActive }) => {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    let placeholder = container.querySelector('.chart-empty-state');
+    if (!placeholder) {
+        placeholder = document.createElement('div');
+        placeholder.className = 'chart-empty-state absolute inset-0 flex items-center justify-center text-xs font-bold text-slate-300 uppercase tracking-widest bg-white/80 rounded-[2rem] px-4 text-center pointer-events-none';
+        container.style.position = container.style.position || 'relative';
+        container.appendChild(placeholder);
+    }
+    placeholder.textContent = filtersActive ? filteredMessage : emptyMessage;
+    placeholder.classList.toggle('hidden', !isEmpty);
+
+    // Hide whatever's underneath so a stale chart/list doesn't peek through
+    container.querySelectorAll('canvas, #hotListBody').forEach(el => {
+        el.classList.toggle('invisible', isEmpty);
+    });
 };
 
 /**
@@ -44,6 +77,15 @@ export const renderCompanionChart = (data, canvasId, isModal = false) => {
     const sortedCompanions = Object.entries(companionCounts)
         .sort((a, b) => b[1] - a[1])
         .slice(0, limit);
+
+    if (!isModal) {
+        setChartEmptyState('companionChartContainer', sortedCompanions.length === 0, {
+            emptyMessage:    'No companions logged yet',
+            filteredMessage: 'No companions match your search',
+            filtersActive:   window._filtersModule?.hasActiveFilters?.() ?? false,
+        });
+    }
+    if (sortedCompanions.length === 0) { existingChart?.destroy(); return; }
 
     const labels = sortedCompanions.map(c => c[0]);
     const counts = sortedCompanions.map(c => c[1]);
@@ -103,6 +145,14 @@ export const renderYearChart = (data, canvasId, isModal = false) => {
     });
 
     const allYears = Object.keys(yearCounts).map(Number).filter(y => !isNaN(y));
+
+    if (!isModal) {
+        setChartEmptyState('yearChartContainer', allYears.length === 0, {
+            emptyMessage:    'No shows added yet',
+            filteredMessage: 'No shows match your search',
+            filtersActive:   window._filtersModule?.hasActiveFilters?.() ?? false,
+        });
+    }
     if (allYears.length === 0) return;
 
     const startYear = Math.min(...allYears);
@@ -329,6 +379,13 @@ export const renderTopBandsChart = (journalData, performanceData, canvasId, isMo
         .sort((a, b) => (b.headline + b.support) - (a.headline + a.support))
         .slice(0, topLimit);
 
+    if (!isModal) {
+        setChartEmptyState('topBandsChartContainer', topBands.length === 0, {
+            emptyMessage:    'No shows added yet',
+            filteredMessage: 'No shows match your search',
+            filtersActive:   window._filtersModule?.hasActiveFilters?.() ?? false,
+        });
+    }
     if (topBands.length === 0) return;
 
     const labels = topBands.map(t => t.display);
@@ -464,6 +521,16 @@ export const renderTopSongsChart = (filteredJournal, canvasId, isModal = false) 
 
     const limit       = isModal ? 25 : 12;
     const sortedSongs = Object.entries(songCounts).sort((a, b) => b[1] - a[1]).slice(0, limit);
+
+    if (!isModal) {
+        setChartEmptyState('songChartContainer', sortedSongs.length === 0, {
+            emptyMessage:    'No songs tracked yet',
+            filteredMessage: 'No songs match your search',
+            filtersActive:   window._filtersModule?.hasActiveFilters?.() ?? false,
+        });
+    }
+    if (sortedSongs.length === 0) { existingChart?.destroy(); return; }
+
     const labels      = sortedSongs.map(s => s[0]);
     const counts      = sortedSongs.map(s => s[1]);
 
@@ -620,6 +687,13 @@ export const renderBandFrequencyChart = (journalData, performanceData, canvasId,
         .map(band => ({ ...band, firstSeen: Math.min(...band.points.map(p => p.x)) }))
         .sort((a, b) => a.firstSeen - b.firstSeen); // display order: earliest-discovered at the top
 
+    if (!isModal) {
+        setChartEmptyState('bandFrequencyChartContainer', topBands.length === 0, {
+            emptyMessage:    'No shows added yet',
+            filteredMessage: 'No shows match your search',
+            filtersActive:   window._filtersModule?.hasActiveFilters?.() ?? false,
+        });
+    }
     if (topBands.length === 0) return;
 
     const bandLabels = topBands.map(b => b.display);
@@ -773,7 +847,11 @@ export const renderHotList = (journalData, performanceData, containerId, isModal
         .slice(0, limit);
 
     if (ranked.length === 0) {
-        container.innerHTML = `<p class="text-xs text-slate-400 text-center py-6">No shows in the last 5 years yet.</p>`;
+        const filtersActive = window._filtersModule?.hasActiveFilters?.() ?? false;
+        const message = filtersActive
+            ? 'No shows in the last 5 years match your search.'
+            : 'No shows in the last 5 years yet.';
+        container.innerHTML = `<p class="text-xs text-slate-400 text-center py-6">${message}</p>`;
         return;
     }
 
@@ -909,6 +987,14 @@ export const renderAverageMetricsChart = (journalData, venuesData = {}, homeLoca
     });
 
     const allYears = Object.keys(yearBuckets).map(Number).filter(y => !isNaN(y));
+
+    if (!isModal) {
+        setChartEmptyState('averageMetricsChartContainer', allYears.length === 0, {
+            emptyMessage:    'No shows added yet',
+            filteredMessage: 'No shows match your search',
+            filtersActive:   window._filtersModule?.hasActiveFilters?.() ?? false,
+        });
+    }
     if (allYears.length === 0) return;
 
     const startYear = Math.min(...allYears);

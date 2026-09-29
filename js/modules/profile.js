@@ -22,6 +22,7 @@ import { initPushUI } from './push.js';
 import { initTips, syncSeenState, getSeenCount, getTotalCount, TIP_GROUPS, getGroupProgress } from './tips-registry.js';
 import { initTipsHub } from './tips-hub.js';
 import { escapeHtml, safeUrl } from './utils.js';
+import { showInstallHelp, canShowInstallHelp } from './install-prompt.js';
 
 // ─── MODULE STATE ─────────────────────────────────────────────────────────────
 
@@ -303,6 +304,13 @@ async function _renderOwnProfile() {
 
     // Settings section — visible for own profile
     document.getElementById('profile-settings-section')?.classList.remove('hidden');
+
+    // Install app row — only on mobile web when not already installed
+    const installBtn = document.getElementById('profile-install-btn');
+    if (installBtn) {
+        installBtn.classList.toggle('hidden', !canShowInstallHelp());
+        installBtn.onclick = () => showInstallHelp();
+    }
 
     // Buddies section — visible for own profile
     document.getElementById('profile-buddies-section')?.classList.remove('hidden');

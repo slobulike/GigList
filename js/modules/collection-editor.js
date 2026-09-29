@@ -105,6 +105,22 @@ const FORMAT_SUGGESTIONS = {
 
 // CONDITION_OPTIONS defined below alongside _wireConditionSuggestions
 
+// ─── LABEL KEYWORD SEEDS ──────────────────────────────────────────────────────
+// Optional trigger keywords for a label, used only by the content-based
+// suggestion feature below (separate from label autocomplete, which already
+// works off every label in _labelCache with no seeding needed). A label with
+// no entry here still works as a suggestion — it just uses its own name as
+// the sole trigger keyword. Add entries here only for labels whose obvious
+// trigger words don't literally appear in the label name itself (era
+// nicknames, song titles, venues, etc.) — hand-seed and let it grow.
+const LABEL_KEYWORD_ALIASES = {
+    'Pinkerton Era': ['pinkerton', 'el scorcho', 'pink triangle', 'why bother', 'tired of sex'],
+    'Blue Album Era': ['blue album', 'buddy holly', 'undone', 'sweater song', 'say it aint so'],
+};
+
+const MAX_SUGGESTED_LABELS = 6;
+let _dismissedSuggestions = new Set(); // reset per editor open — see openCollectionEditor
+
 // Which extended-detail fields are relevant for each subtype. Drives both
 // per-field visibility (below) and whole-card visibility — a card whose
 // fields are all irrelevant for the current subtype collapses away instead
@@ -174,6 +190,12 @@ async function _getLabelOptions() {
         .eq('user_id', session.user.id);
     const all = new Set();
     (data || []).forEach(row => (row.labels || []).forEach(l => all.add(l)));
+    // Seeded alias labels (LABEL_KEYWORD_ALIASES) are candidates from the
+    // moment they're added to that constant, not just once they've been
+    // saved onto a real item — otherwise a freshly-seeded label can't be
+    // typed/autocompleted anywhere until it's been used once, which defeats
+    // "seed a few manually, let the rest evolve from usage."
+    Object.keys(LABEL_KEYWORD_ALIASES).forEach(l => all.add(l));
     _labelCache = [...all].sort();
     return _labelCache;
 }
@@ -202,6 +224,14 @@ function _wireLabelInput() {
     const input    = document.getElementById('col-editor-label-input');
     const dropdown = document.getElementById('col-editor-label-dropdown');
     if (!input || !dropdown) return;
+    // Guard so this is safe to call again from openCollectionEditor (needed
+    // because the modal markup isn't guaranteed to exist yet the first time
+    // initCollectionEditor() runs at page load — see the same pattern used
+    // for _wireLinkInput/_wireDiscogsInput). Without this guard, the dropdown
+    // was never actually getting its 'input'/'keydown' listeners attached at
+    // all, so autocomplete silently never fired for anyone, seeded alias or not.
+    if (input._labelAutocompleteWired) return;
+    input._labelAutocompleteWired = true;
 
     let _timer = null;
 
@@ -262,6 +292,91 @@ function _wireLabelInput() {
     });
 }
 
+// ─── CONTENT-BASED LABEL SUGGESTIONS ──────────────────────────────────────────
+// Distinct from autocomplete above: instead of matching what the user types
+// into the label field, this scans the other fields they've already filled in
+// (title, artist context, notes, body) and offers one-tap chips for labels
+// whose trigger keyword shows up in that text. Candidate labels are every
+// label already used anywhere in the collection (_labelCache) plus anything
+// in LABEL_KEYWORD_ALIASES — so a label a user typed once becomes suggestible
+// on future items without any manual seeding, as long as its own name (or a
+// seeded alias) appears in the text.
+function _escapeRegex(s) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+async function _computeSuggestedLabels() {
+    const haystack = [
+        _get('col-editor-title'),
+        _get('col-editor-artist-ctx'),
+        _get('col-editor-notes'),
+        _get('col-editor-body'),
+    ].join(' ').toLowerCase().trim();
+    if (!haystack) return [];
+
+    const options = await _getLabelOptions(); // ensures cache is populated
+    const candidates = new Set([...options, ...Object.keys(LABEL_KEYWORD_ALIASES)]);
+
+    const hits = [];
+    for (const label of candidates) {
+        if (_labels.includes(label) || _dismissedSuggestions.has(label)) continue;
+        const keywords = LABEL_KEYWORD_ALIASES[label] || [label];
+        const matched = keywords.some(kw => {
+            const trimmed = kw.trim();
+            return trimmed && new RegExp(`\\b${_escapeRegex(trimmed.toLowerCase())}\\b`).test(haystack);
+        });
+        if (matched) hits.push(label);
+        if (hits.length >= MAX_SUGGESTED_LABELS) break;
+    }
+    return hits;
+}
+
+async function _renderSuggestedLabels() {
+    const container = _ensureSuggestedLabelsContainer();
+    if (!container) return;
+    const suggestions = await _computeSuggestedLabels();
+    container.innerHTML = suggestions.map(l => `
+        <button type="button" data-suggest-label="${escapeHtml(l)}"
+            class="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full border border-dashed border-amber-300 text-amber-500 hover:bg-amber-50 transition-colors">
+            + ${escapeHtml(l)}
+        </button>`).join('');
+    container.classList.toggle('hidden', !suggestions.length);
+}
+
+// Creates the suggestion chip row just after the applied-labels container the
+// first time it's needed, so no HTML template changes are required. Cached
+// on the container itself to avoid re-inserting on every render.
+function _ensureSuggestedLabelsContainer() {
+    let container = document.getElementById('col-editor-suggested-labels');
+    if (container) return container;
+    const labelsEl = document.getElementById('col-editor-labels');
+    if (!labelsEl || !labelsEl.parentNode) return null;
+    container = document.createElement('div');
+    container.id = 'col-editor-suggested-labels';
+    container.className = 'flex flex-wrap gap-1.5 mt-1.5 hidden';
+    labelsEl.parentNode.insertBefore(container, labelsEl.nextSibling);
+    if (!container._wired) {
+        container._wired = true;
+        container.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-suggest-label]');
+            if (!btn) return;
+            const label = btn.dataset.suggestLabel;
+            window.colEditorAddLabel(label);
+            _dismissedSuggestions.add(label); // now applied — treat like any dismissal
+            _renderSuggestedLabels();
+        });
+    }
+    return container;
+}
+
+function _wireSuggestedLabels() {
+    const anchor = document.getElementById('col-editor-title');
+    if (anchor && anchor._suggestedLabelsWired) return; // same idempotency concern as _wireLabelInput
+    if (anchor) anchor._suggestedLabelsWired = true;
+    ['col-editor-title', 'col-editor-artist-ctx', 'col-editor-notes', 'col-editor-body']
+        .forEach(id => document.getElementById(id)?.addEventListener('blur', _renderSuggestedLabels));
+}
+
 // ─── DISCOGS LOOKUP / PREFILL ─────────────────────────────────────────────────
 // Autofill is all-or-nothing by design (per product decision): every
 // mapped field gets overwritten with whatever Discogs returned, and the
@@ -309,6 +424,7 @@ window.colEditorLookupDiscogs = async () => {
         if (!res.ok) throw new Error(data?.error || `lookup failed (${res.status})`);
 
         await _applyDiscogsLookup(data);
+        _renderSuggestedLabels(); // Discogs just filled title/etc. — re-scan for label matches
         _setDiscogsStatus('Filled in from Discogs — edit anything below as needed.');
     } catch (err) {
         console.error('[ColEditor] Discogs lookup failed:', err.message);
@@ -1246,6 +1362,7 @@ export const openCollectionEditor = async (type = null, itemId = null) => {
     _links           = [];
     _taggedBuddies   = [];
     _labelCache      = null; // refresh label suggestions on each open
+    _dismissedSuggestions = new Set();
     _discogsId       = null;
     _discogsData     = null;
     _selectedType    = type || 'artefact';
@@ -1256,6 +1373,8 @@ export const openCollectionEditor = async (type = null, itemId = null) => {
 
     const modal = document.getElementById('col-editor-modal');
     if (!modal) { console.error('[ColEditor] #col-editor-modal not found'); return; }
+    _wireLabelInput(); // idempotent — see comment inside; ensures this actually attaches
+    _wireSuggestedLabels(); // same idempotency concern applies here
 
     const titleEl = document.getElementById('col-editor-modal-title');
     if (titleEl) titleEl.textContent = itemId ? 'Edit item' : 'Add to collection';
@@ -1322,6 +1441,11 @@ export const openCollectionEditor = async (type = null, itemId = null) => {
         const buddyInput = document.getElementById('col-editor-buddy-input');
         if (buddyInput) buddyInput.value = '';
     }
+
+    // Run once on open for both add and edit mode — edit mode may already have
+    // title/notes/etc. populated from _populateForm, so suggestions can apply
+    // immediately rather than waiting for the user to touch a field.
+    _renderSuggestedLabels();
 
     modal.classList.remove('hidden');
     modal.setAttribute('aria-hidden', 'false');
@@ -1696,11 +1820,13 @@ window.colEditorAddLabel = (label) => {
     _renderLabels();
     // Add to cache immediately so it autocompletes in the same session
     if (_labelCache && !_labelCache.includes(trimmed)) _labelCache.push(trimmed);
+    _renderSuggestedLabels();
 };
 
 window.colEditorRemoveLabel = (i) => {
     _labels.splice(i, 1);
     _renderLabels();
+    _renderSuggestedLabels();
 };
 
 // Links get no autocomplete (unlike labels, URLs aren't reused across items) —
@@ -1734,6 +1860,7 @@ window.colEditorToggleDisposed = (checked) => {
 
 export const initCollectionEditor = () => {
     _wireLabelInput();
+    _wireSuggestedLabels();
     _wireLinkInput();
     _wireDiscogsInput();
     _wireConditionSuggestions();
@@ -1745,4 +1872,3 @@ export const initCollectionEditor = () => {
         });
     }
 };
-

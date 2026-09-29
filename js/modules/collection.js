@@ -41,6 +41,14 @@ let _drillFilter   = 'all';       // Sub-filter within drill-down
 let _searchQuery   = '';          // Current search string
 let _showDisposed  = false;       // Show items marked no-longer-owned
 
+// Fired whenever any filter/search dimension above changes, so other
+// consumers (Stats tab's Collection charts) can react without polling.
+// Not fired on the initial init()/refresh() load — those callers already
+// know to call getFilteredItems() themselves once loading finishes.
+function _dispatchViewChanged() {
+    document.dispatchEvent(new CustomEvent('collectionViewChanged'));
+}
+
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
 const SUBTYPE_LABELS = {
@@ -137,6 +145,29 @@ function _formatAcquiredDate(raw) {
         return `${monthName} ${parts[0]}`;
     }
     return parts[0];
+}
+
+// ─── SEARCH ───────────────────────────────────────────────────────────────────
+// Single shared predicate for every search-filtered view (main tab, drill-down,
+// collage builder). Previously each call site duplicated this field list by
+// hand and had drifted out of sync — the collage builder in particular was
+// missing labels/notes/provenance/country/signed_by, so a label search that
+// worked fine in the main tab silently found nothing when building a
+// shareable collage. Add new searchable fields here once, not per call site.
+function _matchesSearch(item, query) {
+    if (!query) return true;
+    return (
+        (item.title          || '').toLowerCase().includes(query) ||
+        (item.body           || '').toLowerCase().includes(query) ||
+        (item.notes          || '').toLowerCase().includes(query) ||
+        (item.label          || '').toLowerCase().includes(query) ||
+        (item.artist_context || '').toLowerCase().includes(query) ||
+        (item.provenance     || '').toLowerCase().includes(query) ||
+        (item.country        || '').toLowerCase().includes(query) ||
+        (item.signed_by      || '').toLowerCase().includes(query) ||
+        (item.labels || []).some(l => l.toLowerCase().includes(query)) ||
+        (item.band_name      || '').toLowerCase().includes(query)
+    );
 }
 
 // ─── DATA FETCHING ────────────────────────────────────────────────────────────
@@ -624,18 +655,7 @@ function _renderCollectionTab() {
 
     const bandFiltered  = _applyBandFilter(_visibleItems());
     const curated       = _applyCuration(bandFiltered, _activeCuration);
-    const searched      = _searchQuery ? curated.filter(i =>
-        (i.title          || '').toLowerCase().includes(_searchQuery) ||
-        (i.body           || '').toLowerCase().includes(_searchQuery) ||
-        (i.notes          || '').toLowerCase().includes(_searchQuery) ||
-        (i.label          || '').toLowerCase().includes(_searchQuery) ||
-        (i.artist_context || '').toLowerCase().includes(_searchQuery) ||
-        (i.provenance     || '').toLowerCase().includes(_searchQuery) ||
-        (i.country        || '').toLowerCase().includes(_searchQuery) ||
-        (i.signed_by      || '').toLowerCase().includes(_searchQuery) ||
-        (i.labels         || []).some(l => l.toLowerCase().includes(_searchQuery)) ||
-        (i.band_name      || '').toLowerCase().includes(_searchQuery)
-    ) : curated;
+    const searched      = curated.filter(i => _matchesSearch(i, _searchQuery));
     const artefacts     = searched.filter(i => i.type === 'artefact');
     const memories      = searched.filter(i => i.type === 'memory');
 
@@ -822,16 +842,7 @@ function _renderDrillDown(subtype) {
     // (including the still-owned/disposed toggle).
     const bandFiltered = _applyBandFilter(_visibleItems());
     const curated      = _applyCuration(bandFiltered, _activeCuration);
-    const searched     = _searchQuery ? curated.filter(i =>
-        (i.title          || '').toLowerCase().includes(_searchQuery) ||
-        (i.body           || '').toLowerCase().includes(_searchQuery) ||
-        (i.label          || '').toLowerCase().includes(_searchQuery) ||
-        (i.artist_context || '').toLowerCase().includes(_searchQuery) ||
-        (i.provenance     || '').toLowerCase().includes(_searchQuery) ||
-        (i.signed_by      || '').toLowerCase().includes(_searchQuery) ||
-        (i.labels         || []).some(l => l.toLowerCase().includes(_searchQuery)) ||
-        (i.band_name      || '').toLowerCase().includes(_searchQuery)
-    ) : curated;
+    const searched     = curated.filter(i => _matchesSearch(i, _searchQuery));
 
     // 'all' pseudo-subtype shows every artefact (no subtype restriction)
     const allOfType = subtype === 'all'
@@ -1260,12 +1271,7 @@ window._colSetView = (view) => {
         // Gather the currently-displayed items for the collage
         const bandFiltered = _applyBandFilter(_visibleItems());
         const curated      = _applyCuration(bandFiltered, _activeCuration);
-        const searched     = _searchQuery ? curated.filter(i =>
-            (i.title          || '').toLowerCase().includes(_searchQuery) ||
-            (i.body           || '').toLowerCase().includes(_searchQuery) ||
-            (i.artist_context || '').toLowerCase().includes(_searchQuery) ||
-            (i.band_name      || '').toLowerCase().includes(_searchQuery)
-        ) : curated;
+        const searched     = curated.filter(i => _matchesSearch(i, _searchQuery));
         const items = _drillType === 'all'
             ? searched.filter(i => i.type === 'artefact')
             : searched.filter(i => i.subtype === _drillType);
@@ -1323,21 +1329,25 @@ window._colCloseItem = () => {
 window._colSetCuration = (key) => {
     _activeCuration = key;
     _renderCollectionTab();
+    _dispatchViewChanged();
 };
 
 window._colSetBand = (bandId) => {
     _activeBandId = bandId;
     _renderCollectionTab();
+    _dispatchViewChanged();
 };
 
 window._colSearch = (query) => {
     _searchQuery = query.toLowerCase().trim();
     _renderCollectionTab();
+    _dispatchViewChanged();
 };
 
 window._colToggleDisposed = () => {
     _showDisposed = !_showDisposed;
     _renderCollectionTab();
+    _dispatchViewChanged();
 };
 
 // ─── BUDDY TAB SWITCHING ──────────────────────────────────────────────────────
@@ -1588,6 +1598,69 @@ async function _renderBuddyCollection(userId, container) {
 }
 
 // ─── PUBLIC API ───────────────────────────────────────────────────────────────
+
+/**
+ * Returns the collection items visible under the current filter/search
+ * state — same chain _renderCollectionTab uses (disposed → band →
+ * curation → search) — so the Stats tab's Collection charts show exactly
+ * what the Collection tab itself is showing, including the "no longer
+ * owned" toggle. Returns [] if items haven't loaded yet (e.g. the Stats
+ * tab is opened before the Collection tab ever has been).
+ */
+export function getFilteredItems() {
+    const bandFiltered = _applyBandFilter(_visibleItems());
+    const curated       = _applyCuration(bandFiltered, _activeCuration);
+    return curated.filter(i => _matchesSearch(i, _searchQuery));
+}
+
+/**
+ * Returns true if any Collection-tab filter/search dimension is currently
+ * away from its default — used by the Stats tab's Collection charts to
+ * pick between an "empty collection" and an "nothing matches" message,
+ * the same distinction Gigs stats makes via filters.js's hasActiveFilters.
+ */
+export function hasActiveFilters() {
+    return (
+        _activeCuration !== 'all' ||
+        _activeBandId !== null ||
+        _searchQuery.trim() !== '' ||
+        _showDisposed !== false
+    );
+}
+
+/**
+ * Ensures collection items are loaded without requiring the Collection
+ * tab's own DOM (#col-main-container) to exist yet — init() bails out
+ * early if that container isn't mounted, which happens if Stats is
+ * opened before the Collection tab has ever been visited. Safe to call
+ * repeatedly; only fetches once per session, same caching behaviour
+ * init() already relies on via the _items.length check.
+ */
+export async function ensureLoaded(userId) {
+    if (_items.length > 0) return _items;
+
+    [_items, _curations] = await Promise.all([
+        _fetchItems(userId),
+        _fetchCurations(userId),
+    ]);
+    _bandNames = await _fetchBandNames(userId);
+
+    window._collectionItems = _items;
+    window._collectionCount = _items.length;
+    updateRank();
+
+    return _items;
+}
+
+/**
+ * Returns all loaded collection items, ignoring every filter — the same
+ * set item-count badges elsewhere in the app already read from
+ * window._collectionItems. Provided as a named export alongside
+ * getFilteredItems for callers that explicitly want the unfiltered total.
+ */
+export function getAllItems() {
+    return _items;
+}
 
 /**
  * Called from app.js when the Collection tab is activated.

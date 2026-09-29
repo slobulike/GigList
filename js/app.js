@@ -1,8 +1,9 @@
 /**
  * GigList Core Engine
- * v8.8.2 — 2026-09-27
+ * v8.8.3 — 2026-09-29
  * ------------------------------------------------------------------
- * ✅ Patches to fix all escaping opportunities with new utils helper
+ * ✅ Added new Collection stats section
+ * ✅ Added install helper for web users, offering single click android installs and instructions for ios users
  */
 
 import * as Data from './modules/data.js';
@@ -33,12 +34,14 @@ import { initModalAudioAction } from './modules/spotify.js';
 import { teardownModalTips } from './modules/modal-tips.js';
 import { checkNudgeTrigger, initExploreCard } from './modules/tip-nudges.js';
 import { openPhotoCropModal } from './modules/photo-crop.js';
+import './modules/collection-charts.js';
+import './modules/stats-switcher.js';
 
 
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "8.8.2";
+const APP_VERSION = "8.8.3";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
