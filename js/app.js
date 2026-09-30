@@ -1,9 +1,8 @@
 /**
  * GigList Core Engine
- * v8.8.3 — 2026-09-29
+ * v8.8.4 — 2026-09-30
  * ------------------------------------------------------------------
- * ✅ Added new Collection stats section
- * ✅ Added install helper for web users, offering single click android installs and instructions for ios users
+ * ✅ Bug fix for install helper by adding manifest to vault as well as index.html
  */
 
 import * as Data from './modules/data.js';
@@ -41,7 +40,7 @@ import './modules/stats-switcher.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "8.8.3";
+const APP_VERSION = "8.8.4";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
