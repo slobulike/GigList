@@ -1,8 +1,8 @@
 /**
  * GigList Core Engine
- * v8.8.4 — 2026-09-30
+ * v8.9.0 — 2026-10-02
  * ------------------------------------------------------------------
- * ✅ Bug fix for install helper by adding manifest to vault as well as index.html
+ * ✅ Added new playlist generator "Your giglist playlist" with cron job to refresh every 3 days, randomly selecting 25 tracks from artists in a users journal
  */
 
 import * as Data from './modules/data.js';
@@ -35,12 +35,13 @@ import { checkNudgeTrigger, initExploreCard } from './modules/tip-nudges.js';
 import { openPhotoCropModal } from './modules/photo-crop.js';
 import './modules/collection-charts.js';
 import './modules/stats-switcher.js';
+import { initMixPlaylistCard } from './modules/mix-playlist.js';
 
 
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "8.8.4";
+const APP_VERSION = "8.9.0";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
@@ -353,6 +354,7 @@ export async function initApp() {
     refreshUI();
     initEventListeners();
     initEditor();
+    initMixPlaylistCard('home-mix-slot');
 
     // ── Tip nudge triggers ────────────────────────────────────────────────────
     // Listen for gig save events dispatched by editor.js.

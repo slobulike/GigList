@@ -172,6 +172,10 @@
             <div id="countdown-spotify-slot"></div>
         </div>
 
+        <!-- "Your GigList playlist" — filled by mix-playlist.js (initMixPlaylistCard('home-mix-slot')).
+             empty:hidden keeps it from adding a gap for anyone who shouldn't see it. -->
+        <div id="home-mix-slot" class="empty:hidden"></div>
+
         <div id="now-card" class="relative overflow-hidden bg-slate-900 rounded-[3rem] aspect-[4/5] shadow-2xl shadow-indigo-100 transition-all duration-500">
             <img id="hero-img" src="" alt="" aria-hidden="true" class="absolute inset-0 w-full h-full object-cover opacity-50 transition-opacity duration-700">
             <div class="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-transparent"></div>
