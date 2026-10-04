@@ -24,7 +24,7 @@ import { checkSpotifyConnection, renderConnectPrompt } from './spotify-auth.js';
 import { escapeHtml, safeUrl } from './utils.js';
 
 const SPOTIFY_WORKER = 'https://giglist-spotify.richard-lipscombe.workers.dev';
-const REFRESH_DAYS   = 3;
+const REFRESH_DAYS   = 1;
 const MIN_ARTISTS    = 5;   // don't offer the feature until there's something to mix
 const DISMISS_KEY    = 'giglist_mix_autoprompt_dismissed';
 const EMBED_ID       = 'mix-embed';
@@ -47,6 +47,9 @@ let stageTimer  = null;
 
 const icons = () => { if (window.lucide) window.lucide.createIcons(); };
 const toast = (message, type) => window.showToast?.(message, type);
+
+// "day" / "3 days", so copy reads "every day" rather than "every 1 days".
+const everyDays = (n) => (Number(n) === 1 ? 'day' : `${Number(n)} days`);
 
 const playlistIdFromUrl = (url) => (url || '').match(/playlist\/([a-zA-Z0-9]+)/)?.[1] || null;
 
@@ -128,14 +131,14 @@ const autoHtml = (mix) => {
         const when = next && next > new Date() ? `next mix around ${shortDate(mix.next_refresh_at)}` : 'next mix due soon';
         return `
             <div class="flex items-center justify-between gap-3 text-xs text-slate-600">
-                <span>Refreshes every ${Number(mix.refresh_every_days)} days · ${escapeHtml(when)}</span>
+                <span>Refreshes every ${everyDays(mix.refresh_every_days)} · ${escapeHtml(when)}</span>
                 <button id="mix-auto-off" class="font-bold text-slate-700 underline underline-offset-2 min-h-[44px] px-1">Turn off</button>
             </div>`;
     }
     if (!promptDismissed()) {
         return `
             <div class="bg-emerald-50 border border-emerald-100 rounded-xl p-3">
-                <p class="text-xs font-bold text-slate-800">Want a fresh mix every ${REFRESH_DAYS} days?</p>
+                <p class="text-xs font-bold text-slate-800">Want a fresh mix every ${everyDays(REFRESH_DAYS)}?</p>
                 <p class="text-xs text-slate-600 mt-0.5">We'll swap in different artists from your gigs. No need to open the app.</p>
                 <div class="flex items-center gap-2 mt-2">
                     <button id="mix-auto-on" class="${SOLID} min-h-[44px] px-4 rounded-full text-[11px] font-black uppercase tracking-wide transition-colors">Yes please</button>
@@ -143,7 +146,7 @@ const autoHtml = (mix) => {
                 </div>
             </div>`;
     }
-    return `<button id="mix-auto-on" class="text-xs font-bold text-emerald-700 underline underline-offset-2 min-h-[44px]">Refresh automatically every ${REFRESH_DAYS} days</button>`;
+    return `<button id="mix-auto-on" class="text-xs font-bold text-emerald-700 underline underline-offset-2 min-h-[44px]">Refresh automatically every ${everyDays(REFRESH_DAYS)}</button>`;
 };
 
 const emptyHtml = () => `
@@ -266,7 +269,7 @@ const setAuto = async (root, days) => {
         return;
     }
     dismissPrompt();   // they've answered the question either way
-    toast(days ? `Done. A fresh mix every ${days} days.` : 'Automatic refresh is off.', 'success');
+    toast(days ? `Done. A fresh mix every ${everyDays(days)}.` : 'Automatic refresh is off.', 'success');
     await render(root);
 };
 

@@ -1,8 +1,9 @@
 /**
  * GigList Core Engine
- * v8.9.0 — 2026-10-02
+ * v8.9.1 — 2026-10-04
  * ------------------------------------------------------------------
- * ✅ Added new playlist generator "Your giglist playlist" with cron job to refresh every 3 days, randomly selecting 25 tracks from artists in a users journal
+ * ✅ Change to logic to generate giglist playlist every day instead of every 3 days
+ * ✅ Bug fix so that On this day doesn't select current or future day gigs
  */
 
 import * as Data from './modules/data.js';
@@ -41,7 +42,7 @@ import { initMixPlaylistCard } from './modules/mix-playlist.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "8.9.0";
+const APP_VERSION = "8.9.1";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
