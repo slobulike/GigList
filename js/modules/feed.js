@@ -31,6 +31,9 @@
  *   collection_this_month   — items acquired this month in past years
  *
  * Social (Phase 2):
+ *   buddy_recent_show   — a buddy went to a show in the last 30 days (you weren't
+ *                         there). Hero is the buddy's own uploaded photo if they
+ *                         have one, else the usual artist / fallback image.
  *   buddy_together      — your show today's anniversary, buddy was there too
  *   buddy_collection_this_month — buddy added a collection item this month, in a past year
  *   buddy_on_this_day   — buddy had a solo show this month, 5+ years ago
@@ -41,6 +44,7 @@
  * ─── SCORING REFERENCE ────────────────────────────────────────────────────────
  *
  *   100  on_this_day (personal)
+ *    98  buddy_recent_show (drops 0.1/day over its 30-day window)
  *    95  buddy_together
  *    93  buddy_collection_this_month
  *    91  buddy_on_this_day
@@ -77,7 +81,10 @@ import { supabase } from './supabase.js';
 // v3: card fields are now HTML-escaped at render time and taps use data-*
 // attributes + a delegated listener — bumped so any previously cached,
 // unescaped feed HTML is discarded rather than replayed via innerHTML.
-const FEED_LOGIC_VERSION = 3;
+// v4: added buddy_recent_show cards + buddy-owned hero photo resolution.
+const FEED_LOGIC_VERSION = 4;
+const RECENT_SHOW_WINDOW_DAYS = 30;   // how long a buddy's show stays in the feed
+const MAX_RECENT_SHOW_CARDS   = 6;    // feed-wide cap on buddy_recent_show candidates
 import { startNewPuzzle, setPuzzleDifficulty, resetPuzzleImage } from './games.js';
 import { buildTipDiscoveryCards, renderTipDiscoveryCard } from './tip-nudges.js';
 import { renderEmptyStateTips } from './tip-nudges.js';
@@ -138,9 +145,10 @@ function isFestival(g) {
 
 /**
  * Fetches a lightweight subset of every buddy's journal in a single Supabase
- * query — only the five fields the feed engine needs.
+ * query — only the six fields the feed engine needs.
  *
- * Returns: { [userId]: [ { 'Journal Key', Date, Band, OfficialVenue } ] }
+ * Returns: { [userId]: [ { 'Journal Key', Date, Band, OfficialVenue, Photos } ] }
+ * (`Photos` is the buddy's own photo-album link, if they added one.)
  *
  * Stored on window._buddyJournalsByUser so subsequent feed activations
  * within the same session skip the network call.
@@ -156,7 +164,7 @@ async function fetchBuddyJournals() {
     try {
         const { data, error } = await supabase
             .from('journals')
-            .select('user_id, journal_key, date, band, official_venue')
+            .select('user_id, journal_key, date, band, official_venue, photos')
             .in('user_id', buddyIds);
 
         if (error) {
@@ -174,6 +182,7 @@ async function fetchBuddyJournals() {
                 Date:          row.date,
                 Band:          row.band,
                 OfficialVenue: row.official_venue,
+                Photos:        row.photos,
             });
         }
 
@@ -675,6 +684,63 @@ function buildBuddyCards(buddyJournalsByUser, myJournalData, buddyProfiles) {
     // selectCards() can suppress the plain on_this_day duplicate for the same show.
     const togetherKeys = new Set();
 
+    // ── BUDDY RECENT SHOW ─────────────────────────────────────────────────────
+    // A buddy went to a show in the last RECENT_SHOW_WINDOW_DAYS days and I
+    // wasn't there. One card per show (not per buddy) — if three buddies went
+    // to the same gig it's one card listing all three. Shows I also logged are
+    // skipped: I know about those already, and buddy_together owns them.
+    // Starts the day AFTER the show (d < today), matching the planned push.
+    const myJournalKeys = new Set(myJournalData.map(g => g['Journal Key']));
+    const recentByKey   = new Map();
+
+    buddyProfiles.forEach(buddy => {
+        (buddyJournalsByUser[buddy.id] || []).forEach(g => {
+            if (!g.Date || g.Date.split('/').length !== 3) return;
+            const d = parseDate(g.Date);
+            if (!d || d >= today) return;
+            const daysAgo = Math.round((today - d) / 86400000);
+            if (daysAgo > RECENT_SHOW_WINDOW_DAYS) return;
+            const key = g['Journal Key'];
+            if (!key || myJournalKeys.has(key)) return;
+            if (!recentByKey.has(key)) recentByKey.set(key, { gig: g, daysAgo, buddies: [] });
+            recentByKey.get(key).buddies.push(buddy);
+        });
+    });
+
+    // Used below to keep a just-happened show out of near-miss / venue-echo,
+    // so one buddy show doesn't produce two cards.
+    const recentKeys = new Set(recentByKey.keys());
+
+    [...recentByKey.entries()]
+        .sort((a, b) => a[1].daysAgo - b[1].daysAgo)
+        .slice(0, MAX_RECENT_SHOW_CARDS)
+        .forEach(([key, { gig, daysAgo, buddies }]) => {
+            const names = buddies.map(b => b.display_name || b.username || 'Your buddy');
+            const namesJoined = names.length <= 2
+                ? names.join(' and ')
+                : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+            const when = daysAgo === 1 ? 'yesterday'
+                       : daysAgo < 7  ? `${daysAgo} days ago`
+                       : daysAgo < 14 ? 'last week'
+                       :                `${Math.floor(daysAgo / 7)} weeks ago`;
+
+            cards.push({
+                type:        'buddy_recent_show',
+                score:       98 - Math.min(daysAgo, RECENT_SHOW_WINDOW_DAYS) * 0.1,
+                gig,
+                allGigs:     [gig],
+                buddies,
+                buddy:       buddies[0],
+                buddyName:   namesJoined,
+                headline:    gig.Band,
+                subline:     `${gig.OfficialVenue} · ${gig.Date}`,
+                eyebrow:     `${namesJoined} · ${when}`,
+                badge:       'Just Back',
+                badgeColor:  'bg-emerald-500',
+                journalKey:  `buddy_recent_${key}`,
+            });
+        });
+
     // ── BUDDY TOGETHER (one consolidated card per show, not per buddy) ────────
     // My on-this-day anniversaries where one or more buddies were also there.
     // A show with 5 buddies at it gets 1 card listing all 5, not 5 cards.
@@ -764,6 +830,7 @@ function buildBuddyCards(buddyJournalsByUser, myJournalData, buddyProfiles) {
         const buddyVenueGigsByVenue = {};
         buddyGigs.forEach(g => {
             if (!g.OfficialVenue) return;
+            if (recentKeys.has(g['Journal Key'])) return;   // owned by buddy_recent_show
             const d = parseDate(g.Date);
             if (!d || d >= today) return;
             if (!buddyVenueGigsByVenue[g.OfficialVenue]) buddyVenueGigsByVenue[g.OfficialVenue] = [];
@@ -1030,7 +1097,42 @@ function selectCards(gigCards, colCards, buddyCards) {
 
 // ─── IMAGE RESOLUTION ─────────────────────────────────────────────────────────
 
-async function resolveHeroImage(gig, imgEl, cardIndex) {
+/**
+ * Looks for a user-uploaded photo of a show in the `gig-photos` bucket, where
+ * files live at `{ownerId}/{date}-{venue}.jpg`. Tries each owner in order and
+ * returns the first signed URL found, or null.
+ *
+ * Reading a BUDDY's folder needs a buddy-read SELECT policy on storage.objects
+ * for the bucket; without it list() just comes back empty and callers fall
+ * through to the artist / fallback image.
+ */
+async function findGigPhotoUrl(ownerIds, fileName) {
+    for (const ownerId of ownerIds) {
+        if (!ownerId) continue;
+        try {
+            const { data: listed } = await supabase.storage
+                .from('gig-photos')
+                .list(ownerId, { search: fileName });
+            if (!listed?.some(f => f.name === fileName)) continue;
+            const { data, error } = await supabase.storage
+                .from('gig-photos')
+                .createSignedUrl(`${ownerId}/${fileName}`, 3600);
+            if (!error && data?.signedUrl) return data.signedUrl;
+        } catch (e) { /* try next owner */ }
+    }
+    return null;
+}
+
+// Whose uploaded photo should be this card's hero? Default is the signed-in
+// user; buddy_recent_show cards use the buddies who were at the show.
+function photoOwnerIds(card) {
+    if (card.type === 'buddy_recent_show') {
+        return (card.buddies || [card.buddy]).filter(Boolean).map(b => b.id);
+    }
+    return undefined;
+}
+
+async function resolveHeroImage(gig, imgEl, cardIndex, ownerIds) {
     if (!gig?.Date || !gig?.OfficialVenue) {
         imgEl.src = DEFAULT_IMAGES[cardIndex % DEFAULT_IMAGES.length];
         return;
@@ -1056,20 +1158,9 @@ async function resolveHeroImage(gig, imgEl, cardIndex) {
         probe.src = scrapbookPath;
     };
 
-    const userId = window.currentUser?.id;
-    if (userId) {
-        try {
-            const { data: listed } = await supabase.storage
-                .from('gig-photos')
-                .list(userId, { search: fileName });
-            if (listed?.length) {
-                const { data, error } = await supabase.storage
-                    .from('gig-photos')
-                    .createSignedUrl(`${userId}/${fileName}`, 3600);
-                if (!error && data?.signedUrl) { imgEl.src = data.signedUrl; return; }
-            }
-        } catch (e) { /* fall through to local */ }
-    }
+    const owners = ownerIds?.length ? ownerIds : [window.currentUser?.id];
+    const photoUrl = await findGigPhotoUrl(owners, fileName);
+    if (photoUrl) { imgEl.src = photoUrl; return; }
 
     tryLocal();
 }
@@ -1167,6 +1258,102 @@ window._feedOpenBuddyCollection = async (buddyId, buddyName) => {
     }
 };
 
+// ─── BUDDY SHOW VIEW ──────────────────────────────────────────────────────────
+
+/**
+ * Read-only view of a buddy's show, opened from buddy_recent_show cards in the
+ * shared #modal shell. openGigModal() can't be used here: it only looks up
+ * shows in the signed-in user's own journal, and it carries edit actions.
+ *
+ * Photo hierarchy matches the gig modal: the buddy's uploaded photo, then the
+ * artist photo, then the default image (via resolveHeroImage). The buddy's
+ * album link, support acts and setlist sit underneath.
+ */
+window._feedOpenBuddyShow = async (key, idsCsv) => {
+    const ids     = String(idsCsv || '').split(',').filter(Boolean);
+    const buddies = (window._following || []).filter(b => ids.includes(b.id));
+    const gig     = (window._buddyJournalsByUser?.[ids[0]] || []).find(g => g['Journal Key'] === key);
+    const modal   = document.getElementById('modal');
+    const content = document.getElementById('modal-content');
+    if (!gig || !modal || !content) return;
+
+    const names = buddies.map(b => b.display_name || b.username || 'Your buddy');
+    const namesJoined = names.length <= 2
+        ? names.join(' and ')
+        : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+
+    const photosRaw = (gig.Photos || '').trim();
+    const albumUrl  = (photosRaw && photosRaw !== 'nan') ? safeUrl(photosRaw) : '';
+
+    content.innerHTML = `
+        <div class="bg-white rounded-[2.5rem] overflow-hidden">
+            <div class="relative h-40 md:h-56 w-full bg-slate-900">
+                <img id="buddy-show-hero" src="" alt="" class="absolute inset-0 w-full h-full object-cover">
+                <button onclick="window.closeModal()"
+                        aria-label="Close details"
+                        class="absolute top-4 right-4 z-10 bg-black/40 backdrop-blur-md text-white p-2 rounded-full hover:bg-black/60 transition-all focus:ring-2 focus:ring-white">
+                    <i data-lucide="x" class="w-5 h-5" aria-hidden="true"></i>
+                </button>
+            </div>
+            <div class="px-6 pt-4 pb-6 space-y-4">
+                <div>
+                    <span class="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-slate-400 mb-2">
+                        ${buddyAvatarPill(buddies)}${escapeHtml(namesJoined)} ${buddies.length > 1 ? 'were' : 'was'} there
+                    </span>
+                    <h2 id="modal-title" tabindex="-1" class="text-2xl font-black italic uppercase tracking-tighter text-slate-900 leading-none mb-1">
+                        ${escapeHtml(gig.Band)}
+                    </h2>
+                    <p class="text-sm font-bold text-slate-500">${escapeHtml(gig.OfficialVenue)} · ${escapeHtml(gig.Date)}</p>
+                </div>
+                ${albumUrl ? `
+                <a href="${escapeHtml(albumUrl)}" target="_blank" rel="noopener"
+                   class="inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-widest text-indigo-600 hover:text-indigo-800">
+                    <i data-lucide="images" class="w-4 h-4" aria-hidden="true"></i>
+                    See ${escapeHtml(names[0] || 'their')}${names.length > 1 ? ' &amp; co.' : ''}'s photos
+                </a>` : ''}
+                <div id="buddy-show-details"></div>
+            </div>
+        </div>`;
+
+    modal.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+    if (window.lucide) lucide.createIcons();
+    setTimeout(() => document.getElementById('modal-title')?.focus(), 100);
+
+    const heroEl = document.getElementById('buddy-show-hero');
+    if (heroEl) resolveHeroImage(gig, heroEl, 0, ids);
+
+    // Support acts + setlist from the shared performances pool. Best-effort:
+    // if the query fails or returns nothing the view is still complete.
+    try {
+        const { data, error } = await supabase
+            .from('performances')
+            .select('artist, role, setlist')
+            .eq('journal_key', key);
+        const target = document.getElementById('buddy-show-details');
+        if (error || !data?.length || !target) return;
+        if (data.some(r => r.role === 'Festival')) return;   // festival lineups get their own treatment
+
+        const headliner = data.find(r => r.role === 'Headline') ||
+                          data.find(r => (r.artist || '').toLowerCase() === (gig.Band || '').toLowerCase());
+        const supports  = data.filter(r => r.role === 'Support').map(r => r.artist).filter(Boolean);
+        const rawSet    = (headliner?.setlist || '').trim();
+        const songs     = /^(NOT_FOUND|NO_SONGS_LISTED)$/i.test(rawSet)
+            ? []
+            : rawSet.split('|').map(x => x.trim()).filter(Boolean);
+
+        target.innerHTML = `
+            ${supports.length ? `<p class="text-xs font-bold text-slate-500 mb-3">with ${escapeHtml(supports.join(', '))}</p>` : ''}
+            ${songs.length ? `
+                <div>
+                    <p class="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">Setlist</p>
+                    <ol class="list-decimal list-inside text-sm text-slate-700 space-y-0.5 max-h-64 overflow-y-auto pr-2">
+                        ${songs.map(song => `<li>${escapeHtml(song)}</li>`).join('')}
+                    </ol>
+                </div>` : ''}`;
+    } catch (e) { /* leave the basic view as is */ }
+};
+
 // ─── RENDERING ────────────────────────────────────────────────────────────────
 
 function renderEmptyState(container) {
@@ -1199,7 +1386,7 @@ const EXPANDABLE_TYPES = new Set([
 
 // Social card types — rendered with a coloured top border + buddy avatar
 const SOCIAL_TYPES = new Set([
-    'buddy_together', 'buddy_on_this_day', 'buddy_near_miss', 'buddy_venue_echo',
+    'buddy_recent_show', 'buddy_together', 'buddy_on_this_day', 'buddy_near_miss', 'buddy_venue_echo',
     'buddy_collection_together', 'buddy_collection_this_month',
 ]);
 
@@ -1219,11 +1406,12 @@ const BUDDY_COLLECTION_TYPES = new Set([
 // because journal keys and buddy names are user-controlled text.
 
 function _handleFeedClick(e) {
-    const el = e.target.closest('[data-feed-toggle], [data-feed-gig-key], [data-feed-buddy-col-id]');
+    const el = e.target.closest('[data-feed-toggle], [data-feed-gig-key], [data-feed-buddy-col-id], [data-feed-buddy-show-key]');
     if (!el || !e.currentTarget.contains(el)) return;
     const ds = el.dataset;
     if (ds.feedToggle !== undefined)      window._feedToggleDetail(ds.feedToggle, ds.feedType);
     else if (ds.feedGigKey !== undefined) window.viewGigDetails(ds.feedGigKey);
+    else if (ds.feedBuddyShowKey !== undefined) window._feedOpenBuddyShow(ds.feedBuddyShowKey, ds.feedBuddyShowIds);
     else                                  window._feedOpenBuddyCollection(ds.feedBuddyColId, ds.feedBuddyColName);
 }
 
@@ -1252,6 +1440,7 @@ function renderCard(card, index) {
 
     // Top accent stripe colour for social cards
     const socialStripeClass =
+        card.type === 'buddy_recent_show'           ? 'bg-emerald-500' :
         card.type === 'buddy_near_miss'             ? 'bg-cyan-600'  :
         card.type === 'buddy_venue_echo'            ? 'bg-cyan-500'  :
         card.type === 'buddy_collection_together'   ? 'bg-indigo-400' :
@@ -1268,12 +1457,19 @@ function renderCard(card, index) {
     const socialAction = `data-feed-gig-key="${escapeHtml(card.gig?.['Journal Key'] || '')}"`;
     const buddyCollectionAction = `data-feed-buddy-col-id="${escapeHtml(card.buddy?.id || '')}" data-feed-buddy-col-name="${escapeHtml(card.buddyName || '')}"`;
 
-    const tapAction = BUDDY_COLLECTION_TYPES.has(card.type)
-        ? buddyCollectionAction
-        : (isSocial ? socialAction : primaryAction);
+    // buddy_recent_show opens the read-only buddy show view (the gig modal only
+    // knows the signed-in user's own journal).
+    const buddyShowAction = `data-feed-buddy-show-key="${escapeHtml(card.gig?.['Journal Key'] || '')}" data-feed-buddy-show-ids="${escapeHtml((card.buddies || [card.buddy]).filter(Boolean).map(b => b.id).join(','))}"`;
+
+    const tapAction = card.type === 'buddy_recent_show'
+        ? buddyShowAction
+        : BUDDY_COLLECTION_TYPES.has(card.type)
+            ? buddyCollectionAction
+            : (isSocial ? socialAction : primaryAction);
 
     // CTA label
     const ctaLabel = (() => {
+        if (card.type === 'buddy_recent_show') return card.buddies?.length > 1 ? 'See the show' : `See ${card.buddyName}'s show`;
         if (card.type === 'buddy_together')    return 'View your show';
         if (card.type === 'buddy_on_this_day') return `See ${card.buddyName}'s show`;
         if (card.type === 'buddy_near_miss')   return 'View your show';
@@ -1299,7 +1495,7 @@ function renderCard(card, index) {
             <!-- Hero image -->
             <img id="feed-img-${safeKey}"
                  src=""
-                 class="absolute inset-0 w-full h-full object-cover ${isSocial ? 'opacity-35' : 'opacity-50'}"
+                 class="absolute inset-0 w-full h-full object-cover ${isSocial && card.type !== 'buddy_recent_show' ? 'opacity-35' : 'opacity-50'}"
                  alt=""
                  aria-hidden="true">
 
@@ -1662,7 +1858,8 @@ export async function init(journalData, performanceData, _ignored = []) {
 
     // 3. Cache check
     const buddyCollectionCount = Object.values(buddyCollectionItemsByUser).reduce((n, items) => n + items.length, 0);
-    const cacheKey   = `giglist_feed_v${FEED_LOGIC_VERSION}_${new Date().toDateString()}_j${journalData.length}_c${collectionItems.length}_b${buddyProfiles.length}_bc${buddyCollectionCount}`;
+    const buddyJournalCount    = Object.values(buddyJournalsByUser).reduce((n, rows) => n + rows.length, 0);
+    const cacheKey   = `giglist_feed_v${FEED_LOGIC_VERSION}_${new Date().toDateString()}_j${journalData.length}_c${collectionItems.length}_b${buddyProfiles.length}_bc${buddyCollectionCount}_bj${buddyJournalCount}`;
     // TEMP DEBUG — skip the cache entirely so every load rebuilds from scratch
     // and actually reaches the window._feedCards / console.table logging below.
     // Otherwise a same-day reload just replays the cached HTML and skips it.
@@ -1677,7 +1874,7 @@ export async function init(journalData, performanceData, _ignored = []) {
             const imgEl   = document.getElementById(`feed-img-${safeKey}`);
             if (!imgEl) return;
             if (card.collectionItem) resolveCollectionHeroImage(card.collectionItem, imgEl, i);
-            else if (card.gig)       resolveHeroImage(card.gig, imgEl, i);
+            else if (card.gig)       resolveHeroImage(card.gig, imgEl, i, photoOwnerIds(card));
         });
         renderGameCard(container, journalData);
         return;
@@ -1735,6 +1932,8 @@ export async function init(journalData, performanceData, _ignored = []) {
             gig:            c.gig            || null,
             collectionItem: c.collectionItem || null,
             buddy:          c.buddy          || null,
+            buddies:        c.buddies        || null,
+            type:           c.type,
             buddyName:      c.buddyName      || null,
         }))
     ));
@@ -1745,7 +1944,7 @@ export async function init(journalData, performanceData, _ignored = []) {
         const imgEl   = document.getElementById(`feed-img-${safeKey}`);
         if (!imgEl) return;
         if (card.collectionItem) resolveCollectionHeroImage(card.collectionItem, imgEl, i);
-        else if (card.gig)       resolveHeroImage(card.gig, imgEl, i);
+        else if (card.gig)       resolveHeroImage(card.gig, imgEl, i, photoOwnerIds(card));
     });
 
     if (window.lucide) lucide.createIcons();
