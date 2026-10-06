@@ -1,9 +1,9 @@
 /**
  * GigList Core Engine
- * v8.9.3 — 2026-10-06
+ * v8.9.4 — 2026-10-06
  * ------------------------------------------------------------------
- * ✅ Added new feed card for buddies recent collection items
- * ✅ Added push notifications for new Collection and Shows added by buddies with deep link through to buddies items
+ * ✅ Likes, Wishes and Next Time Together reactions added to buddy Feed cards
+ * ✅ Reactions table added to supabase DB
  */
 
 import * as Data from './modules/data.js';
@@ -42,7 +42,7 @@ import { initMixPlaylistCard } from './modules/mix-playlist.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "8.9.3";
+const APP_VERSION = "8.9.4";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 

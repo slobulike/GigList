@@ -86,7 +86,9 @@ import { supabase } from './supabase.js';
 // unescaped feed HTML is discarded rather than replayed via innerHTML.
 // v4: added buddy_recent_show cards + buddy-owned hero photo resolution.
 // v5: added buddy_recent_collection cards.
-const FEED_LOGIC_VERSION = 5;
+// v6: reaction pills on buddy cards (markup changed).
+// v7: reactions collapsed into one compact footer button with a tray.
+const FEED_LOGIC_VERSION = 7;
 const RECENT_SHOW_WINDOW_DAYS = 30;   // how long a buddy's show stays in the feed
 const MAX_RECENT_SHOW_CARDS   = 6;    // feed-wide cap on buddy_recent_show candidates
 const RECENT_COLLECTION_WINDOW_DAYS = 30;   // how long a buddy's new collection item stays in the feed
@@ -179,7 +181,7 @@ async function fetchBuddyJournals() {
     try {
         const { data, error } = await supabase
             .from('journals')
-            .select('user_id, journal_key, date, band, official_venue, photos')
+            .select('id, user_id, journal_key, date, band, official_venue, photos')
             .in('user_id', buddyIds);
 
         if (error) {
@@ -193,6 +195,7 @@ async function fetchBuddyJournals() {
         for (const row of (data || [])) {
             if (!byUser[row.user_id]) byUser[row.user_id] = [];
             byUser[row.user_id].push({
+                JournalId:     row.id,
                 'Journal Key': row.journal_key,
                 Date:          normaliseJournalDate(row.date),
                 Band:          row.band,
@@ -730,8 +733,9 @@ function buildBuddyCards(buddyJournalsByUser, myJournalData, buddyProfiles) {
             if (daysAgo > RECENT_SHOW_WINDOW_DAYS) return;
             const key = g['Journal Key'];
             if (!key || myJournalKeys.has(key)) return;
-            if (!recentByKey.has(key)) recentByKey.set(key, { gig: g, daysAgo, buddies: [] });
+            if (!recentByKey.has(key)) recentByKey.set(key, { gig: g, daysAgo, buddies: [], jids: [] });
             recentByKey.get(key).buddies.push(buddy);
+            recentByKey.get(key).jids.push(g.JournalId);
         });
     });
 
@@ -742,7 +746,7 @@ function buildBuddyCards(buddyJournalsByUser, myJournalData, buddyProfiles) {
     [...recentByKey.entries()]
         .sort((a, b) => a[1].daysAgo - b[1].daysAgo)
         .slice(0, MAX_RECENT_SHOW_CARDS)
-        .forEach(([key, { gig, daysAgo, buddies }]) => {
+        .forEach(([key, { gig, daysAgo, buddies, jids }]) => {
             const names = buddies.map(b => b.display_name || b.username || 'Your buddy');
             const namesJoined = names.length <= 2
                 ? names.join(' and ')
@@ -766,6 +770,7 @@ function buildBuddyCards(buddyJournalsByUser, myJournalData, buddyProfiles) {
                 badge:       'Just Back',
                 badgeColor:  'bg-emerald-500',
                 journalKey:  `buddy_recent_${key}`,
+                reactTargets: jids.filter(Boolean).map(id => ({ type: 'journal', id })),
             });
         });
 
@@ -847,6 +852,7 @@ function buildBuddyCards(buddyJournalsByUser, myJournalData, buddyProfiles) {
                 badge:       'Throwback',
                 badgeColor:  'bg-rose-400',
                 journalKey:  `buddy_otd_${buddy.id}_${bg['Journal Key']}`,
+                reactTargets: bg.JournalId ? [{ type: 'journal', id: bg.JournalId }] : [],
             });
         });
 
@@ -1037,6 +1043,7 @@ function buildBuddyCollectionCards(buddyCollectionItemsByUser, myJournalData, bu
                 badge:          count > 1 ? `${count} New Items` : 'New Find',
                 badgeColor:     'bg-orange-500',
                 journalKey:     `col_buddy_recent_${buddy.id}_${featured.id}`,
+                reactTargets:   [{ type: 'collection_item', id: featured.id }],
             });
         }
 
@@ -1330,6 +1337,236 @@ window._feedOpenBuddyCollection = async (buddyId, buddyName) => {
     }
 };
 
+// ─── REACTIONS ────────────────────────────────────────────────────────────────
+// A reaction is a small commitment, not engagement: seeing a buddy's show and
+// tapping "Wish I was there" or "Next time, together" is the first step
+// towards actually going. One reaction per person per show/item (tapping a
+// different one switches it, tapping the same one removes it). Reactions are
+// never counted or listed to other people — only the owner is told (phase 2).
+//
+// Reactions attach to the underlying row (journals.id / collection_items.id),
+// not the card, so they follow the show wherever it appears. State is kept in
+// window._myReactions and applied to the DOM after every render, so cached
+// card HTML never holds stale state. If the `reactions` table isn't there yet
+// the whole UI quietly doesn't render (window._reactionsAvailable stays false).
+
+const REACTION_KINDS = {
+    like:     { label: 'Love it',             icon: 'heart'    },
+    wish:     { label: 'Wish I was there',    icon: 'sparkles' },
+    together: { label: 'Next time, together', icon: 'users'    },
+};
+const REACTION_KINDS_FOR = {
+    journal:         ['like', 'wish', 'together'],
+    collection_item: ['like'],
+};
+const REACT_BTN_BASE = 'inline-flex items-center justify-center w-8 h-8 rounded-full border transition-colors';
+const REACT_OPT_BASE = 'flex w-full items-center gap-2 px-3 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider whitespace-nowrap transition-colors';
+const REACT_STYLES = {
+    dark: {   // on photo cards: tray opens upwards
+        idle: 'border-white/25 text-white/70 hover:bg-white/10',
+        active: 'bg-white border-white text-slate-900',
+        tray: 'bg-slate-900/95 border border-white/15 backdrop-blur',
+        optIdle: 'text-white/70 hover:bg-white/10',
+        optOn: 'bg-white text-slate-900',
+        pos: 'bottom-full mb-2',
+    },
+    light: {  // in the white buddy show modal: tray opens downwards
+        idle: 'border-slate-200 text-slate-500 hover:bg-slate-50',
+        active: 'bg-indigo-600 border-indigo-600 text-white',
+        tray: 'bg-white border border-slate-200',
+        optIdle: 'text-slate-600 hover:bg-slate-50',
+        optOn: 'bg-indigo-600 text-white',
+        pos: 'top-full mt-2',
+    },
+};
+
+const _reactKey = (type, id) => `${type === 'journal' ? 'j' : 'c'}:${id}`;
+
+async function fetchMyReactions() {
+    if (window._myReactions) return window._myReactions;
+    window._myReactions = new Map();
+    try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const uid = session?.user?.id;
+        if (!uid) return window._myReactions;
+        const { data, error } = await supabase
+            .from('reactions')
+            .select('journal_id, collection_item_id, kind')
+            .eq('user_id', uid);
+        if (error) {
+            console.warn('[Feed] reactions unavailable:', error.message);
+            return window._myReactions;
+        }
+        window._myReactionsUid   = uid;
+        window._reactionsAvailable = true;
+        for (const r of (data || [])) {
+            const key = r.journal_id != null
+                ? _reactKey('journal', r.journal_id)
+                : _reactKey('collection_item', r.collection_item_id);
+            window._myReactions.set(key, r.kind);
+        }
+    } catch (e) {
+        console.warn('[Feed] reactions fetch exception:', e.message);
+    }
+    return window._myReactions;
+}
+
+/**
+ * One small round button. Tapping it opens a tray of labelled options
+ * (shows: Love it / Wish I was there / Next time, together). Once reacted,
+ * the button shows the chosen kind's icon, filled in. Items with only one
+ * kind (collection) skip the tray: the button IS the reaction.
+ *
+ * targets: [{ type: 'journal' | 'collection_item', id }] — one per underlying row
+ */
+function renderReactionRow(targets, theme = 'dark') {
+    if (window._reactionsAvailable !== true || !targets?.length) return '';
+    const type  = targets[0].type;
+    const kinds = REACTION_KINDS_FOR[type] || [];
+    const ids   = targets.map(t => t.id).filter(Boolean);
+    if (!ids.length || !kinds.length) return '';
+    const st = REACT_STYLES[theme] || REACT_STYLES.dark;
+
+    const rowAttrs = `data-react-row data-react-type="${escapeHtml(type)}" data-react-ids="${escapeHtml(ids.join(','))}" data-react-theme="${escapeHtml(theme)}"`;
+    const icon = (k) => `<span data-react-icon="${k}" class="${k === 'like' ? '' : 'hidden'}"><i data-lucide="${REACTION_KINDS[k].icon}" class="w-4 h-4" aria-hidden="true"></i></span>`;
+
+    if (kinds.length === 1) {
+        const k = kinds[0];
+        return `
+            <div class="relative" ${rowAttrs}>
+                <button type="button" data-react-kind="${k}" aria-pressed="false"
+                        aria-label="${escapeHtml(REACTION_KINDS[k].label)}" title="${escapeHtml(REACTION_KINDS[k].label)}"
+                        class="${REACT_BTN_BASE} ${st.idle}">${icon(k)}</button>
+            </div>`;
+    }
+
+    return `
+        <div class="relative" ${rowAttrs}>
+            <button type="button" data-react-toggle aria-haspopup="true" aria-expanded="false"
+                    aria-label="React to this show" title="React"
+                    class="${REACT_BTN_BASE} ${st.idle}">${kinds.map(icon).join('')}</button>
+            <div data-react-tray role="group" aria-label="React"
+                 class="hidden absolute left-0 ${st.pos} z-20 min-w-[12rem] rounded-2xl p-1.5 shadow-xl ${st.tray}">
+                ${kinds.map(k => `
+                <button type="button" data-react-kind="${k}" aria-pressed="false" class="${REACT_OPT_BASE} ${st.optIdle}">
+                    <i data-lucide="${REACTION_KINDS[k].icon}" class="w-4 h-4" aria-hidden="true"></i>${escapeHtml(REACTION_KINDS[k].label)}
+                </button>`).join('')}
+            </div>
+        </div>`;
+}
+
+function _rowReactionKind(row) {
+    const type = row.dataset.reactType;
+    for (const id of (row.dataset.reactIds || '').split(',')) {
+        const k = window._myReactions?.get(_reactKey(type, id));
+        if (k) return k;
+    }
+    return null;
+}
+
+function applyReactionState(root = document) {
+    root.querySelectorAll('[data-react-row]').forEach(row => {
+        const st      = REACT_STYLES[row.dataset.reactTheme] || REACT_STYLES.dark;
+        const current = _rowReactionKind(row);
+
+        // The round button: filled when reacted, showing the chosen kind's icon
+        const main = row.querySelector('[data-react-toggle]') || row.querySelector('[data-react-kind]');
+        if (main) {
+            main.className = `${REACT_BTN_BASE} ${current ? st.active : st.idle}`;
+            if (main.hasAttribute('data-react-kind')) main.setAttribute('aria-pressed', String(!!current));
+            main.querySelectorAll('[data-react-icon]').forEach(el =>
+                el.classList.toggle('hidden', el.dataset.reactIcon !== (current || 'like')));
+        }
+
+        // Tray options: highlight the one currently chosen
+        row.querySelectorAll('[data-react-tray] [data-react-kind]').forEach(btn => {
+            const on = btn.dataset.reactKind === current;
+            btn.setAttribute('aria-pressed', String(on));
+            btn.className = `${REACT_OPT_BASE} ${on ? st.optOn : st.optIdle}`;
+        });
+    });
+}
+
+async function toggleReaction(row, kind) {
+    if (!window._reactionsAvailable || !window._myReactionsUid) return;
+    const type = row.dataset.reactType;
+    const col  = type === 'journal' ? 'journal_id' : 'collection_item_id';
+    const ids  = (row.dataset.reactIds || '').split(',').filter(Boolean);
+    const dbId = (id) => (type === 'journal' ? Number(id) : id);
+
+    const current = _rowReactionKind(row);
+    const next    = current === kind ? null : kind;
+    const before  = ids.map(id => [id, window._myReactions.get(_reactKey(type, id)) ?? null]);
+    const setLocal = (id, k) => {
+        const key = _reactKey(type, id);
+        if (k) window._myReactions.set(key, k); else window._myReactions.delete(key);
+    };
+
+    // Optimistic: update everywhere this show appears (card + open modal)
+    ids.forEach(id => setLocal(id, next));
+    applyReactionState(document);
+
+    try {
+        const uid = window._myReactionsUid;
+        const { error } = next
+            ? await supabase.from('reactions').upsert(
+                ids.map(id => ({ user_id: uid, [col]: dbId(id), kind: next })),
+                { onConflict: `user_id,${col}` })
+            : await supabase.from('reactions').delete().eq('user_id', uid).in(col, ids.map(dbId));
+        if (error) throw error;
+    } catch (e) {
+        console.warn('[Feed] reaction save failed:', e.message);
+        before.forEach(([id, k]) => setLocal(id, k));
+        applyReactionState(document);
+        window.showToast?.('Couldn\'t save that — try again', 'error');
+    }
+}
+
+function _closeReactTrays(except) {
+    document.querySelectorAll('[data-react-tray]').forEach(tray => {
+        if (tray === except) return;
+        tray.classList.add('hidden');
+        tray.parentElement?.querySelector('[data-react-toggle]')?.setAttribute('aria-expanded', 'false');
+    });
+}
+
+// One delegated listener for feed cards AND the buddy show modal. Registered
+// once at import time so reactions work however the view was opened.
+// Tap the round button → tray opens. Tap an option → saved, tray closes.
+// Tap anywhere else (or press Escape) → tray closes.
+if (typeof document !== 'undefined' && !window._reactClickWired) {
+    window._reactClickWired = true;
+
+    document.addEventListener('click', (e) => {
+        const kindBtn = e.target.closest?.('[data-react-kind]');
+        const toggle  = e.target.closest?.('[data-react-toggle]');
+        const row     = (kindBtn || toggle)?.closest('[data-react-row]');
+
+        if (row && toggle) {
+            e.preventDefault();
+            e.stopPropagation();
+            const tray    = row.querySelector('[data-react-tray]');
+            const opening = tray.classList.contains('hidden');
+            _closeReactTrays(tray);
+            tray.classList.toggle('hidden', !opening);
+            toggle.setAttribute('aria-expanded', String(opening));
+            return;
+        }
+        if (row && kindBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            _closeReactTrays();
+            toggleReaction(row, kindBtn.dataset.reactKind);
+            return;
+        }
+        _closeReactTrays();
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') _closeReactTrays();
+    });
+}
+
 // ─── BUDDY SHOW VIEW ──────────────────────────────────────────────────────────
 
 /**
@@ -1357,13 +1594,14 @@ window._feedOpenBuddyShow = async (key, idsCsv) => {
         try {
             const { data } = await supabase
                 .from('journals')
-                .select('journal_key, date, band, official_venue, photos')
+                .select('id, journal_key, date, band, official_venue, photos')
                 .eq('user_id', ids[0])
                 .eq('journal_key', key)
                 .limit(1);
             const row = data?.[0];
             if (row) {
                 gig = {
+                    JournalId:     row.id,
                     'Journal Key': row.journal_key,
                     Date:          normaliseJournalDate(row.date),
                     Band:          row.band,
@@ -1386,6 +1624,12 @@ window._feedOpenBuddyShow = async (key, idsCsv) => {
             buddies = data || [];
         } catch (e) { /* names fall back to "Your buddy" */ }
     }
+
+    await fetchMyReactions();
+    const reactTargets = [...new Set([
+        gig.JournalId,
+        ...ids.map(bid => (window._buddyJournalsByUser?.[bid] || []).find(g => g['Journal Key'] === key)?.JournalId),
+    ].filter(Boolean))].map(id => ({ type: 'journal', id }));
 
     const names = buddies.map(b => b.display_name || b.username || 'Your buddy');
     const namesJoined = names.length <= 2
@@ -1421,6 +1665,7 @@ window._feedOpenBuddyShow = async (key, idsCsv) => {
                     <i data-lucide="images" class="w-4 h-4" aria-hidden="true"></i>
                     See ${escapeHtml(names[0] || 'their')}${names.length > 1 ? ' &amp; co.' : ''}'s photos
                 </a>` : ''}
+                ${renderReactionRow(reactTargets, 'light')}
                 <div id="buddy-show-details"></div>
             </div>
         </div>`;
@@ -1428,6 +1673,7 @@ window._feedOpenBuddyShow = async (key, idsCsv) => {
     modal.classList.remove('hidden');
     document.body.style.overflow = 'hidden';
     if (window.lucide) lucide.createIcons();
+    applyReactionState(content);
     setTimeout(() => document.getElementById('modal-title')?.focus(), 100);
 
     const heroEl = document.getElementById('buddy-show-hero');
@@ -1629,10 +1875,13 @@ function renderCard(card, index) {
                     <p class="text-sm font-bold text-white/60">${escapeHtml(card.subline)}</p>
                 </div>
 
-                <div class="flex items-center justify-between mt-4">
-                    <span class="${card.badgeColor} text-white text-[9px] font-black uppercase tracking-widest px-3 py-1 rounded-full">
-                        ${escapeHtml(card.badge)}
-                    </span>
+                <div class="flex items-center justify-between gap-2 mt-4">
+                    <div class="flex items-center gap-2">
+                        <span class="${card.badgeColor} text-white text-[9px] font-black uppercase tracking-widest px-3 py-1 rounded-full">
+                            ${escapeHtml(card.badge)}
+                        </span>
+                        ${renderReactionRow(card.reactTargets)}
+                    </div>
                     ${ctaLabel ? `
                     <button ${tapAction}
                             class="text-[10px] font-black text-white/50 hover:text-white uppercase tracking-widest transition-colors flex items-center gap-1">
@@ -1967,6 +2216,7 @@ export async function init(journalData, performanceData, _ignored = []) {
     const buddyJournalsByUser        = await fetchBuddyJournals();
     const buddyCollectionItemsByUser = await fetchBuddyCollectionItems();
     const buddyProfiles              = window._following || [];
+    if (buddyProfiles.length) await fetchMyReactions();   // before render: decides whether reaction pills appear
 
     // 3. Cache check
     const buddyCollectionCount = Object.values(buddyCollectionItemsByUser).reduce((n, items) => n + items.length, 0);
@@ -1981,6 +2231,7 @@ export async function init(journalData, performanceData, _ignored = []) {
     if (cachedHtml && cachedJson) {
         container.innerHTML = cachedHtml;
         if (window.lucide) lucide.createIcons();
+        applyReactionState(container);
         JSON.parse(cachedJson).forEach((card, i) => {
             const safeKey = (card.journalKey || `card-${i}`).replace(/[^a-z0-9]/gi, '_');
             const imgEl   = document.getElementById(`feed-img-${safeKey}`);
@@ -2060,4 +2311,5 @@ export async function init(journalData, performanceData, _ignored = []) {
     });
 
     if (window.lucide) lucide.createIcons();
+    applyReactionState(container);
 }
