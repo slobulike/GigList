@@ -35,6 +35,8 @@
  *                         there). Hero is the buddy's own uploaded photo if they
  *                         have one, else the usual artist / fallback image.
  *   buddy_together      — your show today's anniversary, buddy was there too
+ *   buddy_recent_collection     — buddy added something to their collection in the last
+ *                         30 days (one card per buddy, newest item featured)
  *   buddy_collection_this_month — buddy added a collection item this month, in a past year
  *   buddy_on_this_day   — buddy had a solo show this month, 5+ years ago
  *   buddy_near_miss     — you + buddy same venue, current calendar month + same year, different show
@@ -46,6 +48,7 @@
  *   100  on_this_day (personal)
  *    98  buddy_recent_show (drops 0.1/day over its 30-day window)
  *    95  buddy_together
+ *    96  buddy_recent_collection (drops 0.1/day over its 30-day window)
  *    93  buddy_collection_this_month
  *    91  buddy_on_this_day
  *    90  collection_this_month
@@ -82,9 +85,11 @@ import { supabase } from './supabase.js';
 // attributes + a delegated listener — bumped so any previously cached,
 // unescaped feed HTML is discarded rather than replayed via innerHTML.
 // v4: added buddy_recent_show cards + buddy-owned hero photo resolution.
-const FEED_LOGIC_VERSION = 4;
+// v5: added buddy_recent_collection cards.
+const FEED_LOGIC_VERSION = 5;
 const RECENT_SHOW_WINDOW_DAYS = 30;   // how long a buddy's show stays in the feed
 const MAX_RECENT_SHOW_CARDS   = 6;    // feed-wide cap on buddy_recent_show candidates
+const RECENT_COLLECTION_WINDOW_DAYS = 30;   // how long a buddy's new collection item stays in the feed
 import { startNewPuzzle, setPuzzleDifficulty, resetPuzzleImage } from './games.js';
 import { buildTipDiscoveryCards, renderTipDiscoveryCard } from './tip-nudges.js';
 import { renderEmptyStateTips } from './tip-nudges.js';
@@ -153,6 +158,16 @@ function isFestival(g) {
  * Stored on window._buddyJournalsByUser so subsequent feed activations
  * within the same session skip the network call.
  */
+// journals.date is stored as 'DD/MM/YYYY' (legacy import) OR 'YYYY-MM-DD'
+// (Grab Gig / newer entries). The rest of the app, including window.journalData
+// and the photo filename convention, uses DD/MM/YYYY, so normalise here —
+// otherwise the newest shows (the ISO ones) silently fail every date check.
+function normaliseJournalDate(raw) {
+    if (!raw || raw === 'nan') return raw;
+    const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(raw);
+    return iso ? `${iso[3]}/${iso[2]}/${iso[1]}` : raw;
+}
+
 async function fetchBuddyJournals() {
     const buddies = window._following || [];
     if (!buddies.length) return {};
@@ -179,7 +194,7 @@ async function fetchBuddyJournals() {
             if (!byUser[row.user_id]) byUser[row.user_id] = [];
             byUser[row.user_id].push({
                 'Journal Key': row.journal_key,
-                Date:          row.date,
+                Date:          normaliseJournalDate(row.date),
                 Band:          row.band,
                 OfficialVenue: row.official_venue,
                 Photos:        row.photos,
@@ -200,7 +215,7 @@ async function fetchBuddyJournals() {
  * Supabase query. RLS already grants buddies read access to `collection_items`
  * (same pattern as fetchBuddyJournals above, just a different table).
  *
- * Returns: { [userId]: [ { id, type, title, band_name, acquired_date, photos } ] }
+ * Returns: { [userId]: [ { id, type, title, band_name, acquired_date, photos, created_at } ] }
  *
  * Stored on window._buddyCollectionItemsByUser so subsequent feed activations
  * within the same session skip the network call.
@@ -214,10 +229,22 @@ async function fetchBuddyCollectionItems() {
     const buddyIds = buddies.map(b => b.id);
 
     try {
-        const { data, error } = await supabase
+        // created_at = when the item was ADDED (acquired_date is often years ago).
+        // If the column isn't there the query errors, so retry without it —
+        // the existing buddy collection cards keep working, and
+        // buddy_recent_collection simply has nothing to show.
+        let { data, error } = await supabase
             .from('collection_items')
-            .select('id, user_id, type, title, band_name, acquired_date, photos')
+            .select('id, user_id, type, title, band_name, acquired_date, photos, created_at')
             .in('user_id', buddyIds);
+
+        if (error) {
+            console.warn('[Feed] buddy collection fetch with created_at failed, retrying without:', error.message);
+            ({ data, error } = await supabase
+                .from('collection_items')
+                .select('id, user_id, type, title, band_name, acquired_date, photos')
+                .in('user_id', buddyIds));
+        }
 
         if (error) {
             console.warn('[Feed] buddy collection fetch failed:', error.message);
@@ -234,6 +261,7 @@ async function fetchBuddyCollectionItems() {
                 band_name:     row.band_name,
                 acquired_date: row.acquired_date,
                 photos:        row.photos,
+                created_at:    row.created_at || null,
             });
         }
 
@@ -968,6 +996,50 @@ function buildBuddyCollectionCards(buddyCollectionItemsByUser, myJournalData, bu
         const buddyItems = buddyCollectionItemsByUser[buddy.id] || [];
         if (!buddyItems.length) return;
 
+        // ── BUDDY RECENT COLLECTION ──────────────────────────────────────────
+        // Buddy ADDED something in the last RECENT_COLLECTION_WINDOW_DAYS days
+        // (keyed off created_at, not acquired_date). One card per buddy so a
+        // bulk add doesn't flood the feed: the newest item is featured and the
+        // rest are counted in the badge/subline.
+        const recentItems = buddyItems
+            .map(item => {
+                if (!item.created_at) return null;
+                const added = new Date(item.created_at);
+                if (isNaN(added)) return null;
+                added.setHours(0, 0, 0, 0);
+                const daysAgo = Math.round((today - added) / 86400000);
+                return (daysAgo >= 0 && daysAgo <= RECENT_COLLECTION_WINDOW_DAYS)
+                    ? { item, daysAgo, ts: new Date(item.created_at).getTime() }
+                    : null;
+            })
+            .filter(Boolean)
+            .sort((a, b) => b.ts - a.ts);
+
+        if (recentItems.length > 0) {
+            const { item: featured, daysAgo } = recentItems[0];
+            const count = recentItems.length;
+            const when  = daysAgo === 0 ? 'today'
+                        : daysAgo === 1 ? 'yesterday'
+                        : daysAgo < 7   ? `${daysAgo} days ago`
+                        : daysAgo < 14  ? 'last week'
+                        :                 `${Math.floor(daysAgo / 7)} weeks ago`;
+
+            cards.push({
+                type:           'buddy_recent_collection',
+                score:          96 - Math.min(daysAgo, RECENT_COLLECTION_WINDOW_DAYS) * 0.1,
+                collectionItem: featured,
+                allItems:       recentItems.map(r => r.item),
+                buddy,
+                buddyName,
+                headline:       featured.title,
+                subline:        `${featured.band_name ? featured.band_name + ' · ' : ''}${count > 1 ? `+${count - 1} more added recently` : 'just added to their collection'}`,
+                eyebrow:        `${buddyName} · ${when}`,
+                badge:          count > 1 ? `${count} New Items` : 'New Find',
+                badgeColor:     'bg-orange-500',
+                journalKey:     `col_buddy_recent_${buddy.id}_${featured.id}`,
+            });
+        }
+
         // ── BUDDY COLLECTION TOGETHER ────────────────────────────────────────
         // Buddy owns collection items for a band you've also seen live.
         const bandCounts = {};
@@ -1235,7 +1307,7 @@ function buddyAvatarPill(buddyOrBuddies) {
 // ─── BUDDY COLLECTION NAVIGATION ──────────────────────────────────────────────
 
 /**
- * Tap target for buddy_collection_together / buddy_collection_this_month
+ * Tap target for buddy_recent_collection / buddy_collection_together / buddy_collection_this_month
  * cards. There's no read-only single-item viewer for a buddy's collection
  * item, so instead of trying to build one, this reuses the existing buddy
  * drill-in panel and jumps straight to its Collection tab.
@@ -1271,11 +1343,49 @@ window._feedOpenBuddyCollection = async (buddyId, buddyName) => {
  */
 window._feedOpenBuddyShow = async (key, idsCsv) => {
     const ids     = String(idsCsv || '').split(',').filter(Boolean);
-    const buddies = (window._following || []).filter(b => ids.includes(b.id));
-    const gig     = (window._buddyJournalsByUser?.[ids[0]] || []).find(g => g['Journal Key'] === key);
+    let buddies   = (window._following || []).filter(b => ids.includes(b.id));
+    let gig       = (window._buddyJournalsByUser?.[ids[0]] || []).find(g => g['Journal Key'] === key);
     const modal   = document.getElementById('modal');
     const content = document.getElementById('modal-content');
-    if (!gig || !modal || !content) return;
+    if (!modal || !content || !ids.length) return;
+
+    // Cold start (e.g. opened from a push notification): the feed hasn't run,
+    // so the buddy caches are empty. Fetch just this show directly. RLS only
+    // returns it if the owner is an accepted buddy, so a stale or hand-edited
+    // link can't expose anything.
+    if (!gig) {
+        try {
+            const { data } = await supabase
+                .from('journals')
+                .select('journal_key, date, band, official_venue, photos')
+                .eq('user_id', ids[0])
+                .eq('journal_key', key)
+                .limit(1);
+            const row = data?.[0];
+            if (row) {
+                gig = {
+                    'Journal Key': row.journal_key,
+                    Date:          normaliseJournalDate(row.date),
+                    Band:          row.band,
+                    OfficialVenue: row.official_venue,
+                    Photos:        row.photos,
+                };
+            }
+        } catch (e) { /* handled below */ }
+    }
+    if (!gig) {
+        window.showToast?.('That show isn\'t available any more', 'info');
+        return;
+    }
+    if (!buddies.length) {
+        try {
+            const { data } = await supabase
+                .from('profiles')
+                .select('id, display_name, username, avatar_url')
+                .in('id', ids);
+            buddies = data || [];
+        } catch (e) { /* names fall back to "Your buddy" */ }
+    }
 
     const names = buddies.map(b => b.display_name || b.username || 'Your buddy');
     const namesJoined = names.length <= 2
@@ -1387,13 +1497,13 @@ const EXPANDABLE_TYPES = new Set([
 // Social card types — rendered with a coloured top border + buddy avatar
 const SOCIAL_TYPES = new Set([
     'buddy_recent_show', 'buddy_together', 'buddy_on_this_day', 'buddy_near_miss', 'buddy_venue_echo',
-    'buddy_collection_together', 'buddy_collection_this_month',
+    'buddy_recent_collection', 'buddy_collection_together', 'buddy_collection_this_month',
 ]);
 
 // Buddy collection cards tap through to the buddy's drill-in Collection tab
 // rather than the gig modal — they have no journalKey gig to open.
 const BUDDY_COLLECTION_TYPES = new Set([
-    'buddy_collection_together', 'buddy_collection_this_month',
+    'buddy_recent_collection', 'buddy_collection_together', 'buddy_collection_this_month',
 ]);
 
 // ─── CARD TEMPLATE ────────────────────────────────────────────────────────────
@@ -1443,6 +1553,7 @@ function renderCard(card, index) {
         card.type === 'buddy_recent_show'           ? 'bg-emerald-500' :
         card.type === 'buddy_near_miss'             ? 'bg-cyan-600'  :
         card.type === 'buddy_venue_echo'            ? 'bg-cyan-500'  :
+        card.type === 'buddy_recent_collection'     ? 'bg-orange-500' :
         card.type === 'buddy_collection_together'   ? 'bg-indigo-400' :
         card.type === 'buddy_collection_this_month' ? 'bg-amber-400'  :
                                                         'bg-rose-500';
@@ -1474,6 +1585,7 @@ function renderCard(card, index) {
         if (card.type === 'buddy_on_this_day') return `See ${card.buddyName}'s show`;
         if (card.type === 'buddy_near_miss')   return 'View your show';
         if (card.type === 'buddy_venue_echo')  return 'View your show';
+        if (card.type === 'buddy_recent_collection')     return `See ${card.buddyName}'s collection`;
         if (card.type === 'buddy_collection_together')   return `See ${card.buddyName}'s collection`;
         if (card.type === 'buddy_collection_this_month') return `See ${card.buddyName}'s collection`;
         if (card.type === 'season_flashback')  return `See all ${card.allGigs?.length} shows`;
@@ -1495,7 +1607,7 @@ function renderCard(card, index) {
             <!-- Hero image -->
             <img id="feed-img-${safeKey}"
                  src=""
-                 class="absolute inset-0 w-full h-full object-cover ${isSocial && card.type !== 'buddy_recent_show' ? 'opacity-35' : 'opacity-50'}"
+                 class="absolute inset-0 w-full h-full object-cover ${isSocial && card.type !== 'buddy_recent_show' && card.type !== 'buddy_recent_collection' ? 'opacity-35' : 'opacity-50'}"
                  alt=""
                  aria-hidden="true">
 

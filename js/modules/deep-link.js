@@ -28,6 +28,12 @@
  * Source values:
  *   'journal'    (default, no source param)  → window.openGigModal()
  *   'collection'                              → window.openWeezerWednesdayCanvasCollection()
+ *   'buddy-show'       (?buddyShow=<key>&by=<buddyId>)  → window._feedOpenBuddyShow()
+ *   'buddy-collection' (?buddyCollection=<buddyId>)     → window._feedOpenBuddyCollection()
+ *
+ * Buddy intents carry an extra `by` field (the buddy who owns the show). It
+ * rides through all three paths unchanged — the IndexedDB mailbox spreads
+ * whatever intent it is given.
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * Integration:
@@ -55,7 +61,7 @@ import { readAndClearPendingDeepLink } from './idb-mailbox.js';
 // Until then we queue the intent and flush it when the gate opens.
 
 let _appReady    = false;
-let _pendingLink = null; // { id, weezerWednesday, source }
+let _pendingLink = null; // { id, weezerWednesday, source, by }
 
 /** Called by app.js once the journal list has been rendered and modals are live. */
 export function markAppReady() {
@@ -68,15 +74,27 @@ export function markAppReady() {
 
 // ── Core resolver ─────────────────────────────────────────────────────────────
 
-/**
- * @param {string}  id               - journal key or collection item UUID
- * @param {boolean} weezerWednesday  - whether to open the WW canvas
- * @param {string}  source           - 'journal' (default) | 'collection'
- */
-function _resolveDeepLink(id, weezerWednesday = false, source = 'journal') {
-    if (!id) return;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const BUDDY_SOURCES = new Set(['buddy-show', 'buddy-collection']);
 
-    const intent = { id, weezerWednesday, source };
+function _normaliseSource(source) {
+    if (source === 'collection' || BUDDY_SOURCES.has(source)) return source;
+    return 'journal';
+}
+
+/**
+ * @param {string}  id               - journal id/key, collection item UUID, or buddy id
+ * @param {boolean} weezerWednesday  - whether to open the WW canvas
+ * @param {string}  source           - 'journal' (default) | 'collection' | 'buddy-show' | 'buddy-collection'
+ * @param {string}  [by]             - buddy id who owns the show (buddy-show only)
+ */
+function _resolveDeepLink(id, weezerWednesday = false, source = 'journal', by = null) {
+    if (!id) return;
+    // Buddy intents are only valid with a well-formed buddy id
+    if (source === 'buddy-show' && !UUID_RE.test(by || '')) return;
+    if (source === 'buddy-collection' && !UUID_RE.test(String(id))) return;
+
+    const intent = { id, weezerWednesday, source, by };
 
     if (_appReady) {
         _flush(intent);
@@ -86,7 +104,58 @@ function _resolveDeepLink(id, weezerWednesday = false, source = 'journal') {
     }
 }
 
-function _flush({ id, weezerWednesday, source }) {
+function _waitFor(test, timeoutMs) {
+    return new Promise((resolve) => {
+        const start = Date.now();
+        const tick = () => {
+            if (test()) return resolve(true);
+            if (Date.now() - start > timeoutMs) return resolve(false);
+            setTimeout(tick, 150);
+        };
+        tick();
+    });
+}
+
+// Buddy deep links open the read-only buddy views defined in feed.js. They
+// deliberately skip switchView() — the feed is where these live and the modal
+// sits over whatever the user was already looking at.
+async function _flushBuddy({ id, source, by }) {
+    // feed.js defines the openers at import time; if app.js hasn't loaded it
+    // yet, pull it in (module cache makes a second import free).
+    if (typeof window._feedOpenBuddyShow !== 'function') {
+        try { await import('./feed.js'); } catch (err) {
+            console.warn('[deep-link] could not load feed.js for buddy link', err);
+        }
+    }
+
+    if (source === 'buddy-show') {
+        if (typeof window._feedOpenBuddyShow !== 'function') {
+            console.warn('[deep-link] window._feedOpenBuddyShow not found — cannot open buddy show', id);
+            return;
+        }
+        await window._feedOpenBuddyShow(id, by);
+        return;
+    }
+
+    // buddy-collection: id is the buddy's id. The drill-in needs the buddy
+    // list, which initBuddies fills in — give it a few seconds on a cold start.
+    await _waitFor(() => (window._following || []).length > 0, 4000);
+    const buddy = (window._following || []).find(b => b.id === id);
+    if (!buddy || typeof window._feedOpenBuddyCollection !== 'function') {
+        console.warn('[deep-link] cannot open buddy collection', id);
+        window.showToast?.('That buddy isn\'t available any more', 'info');
+        return;
+    }
+    await window._feedOpenBuddyCollection(id, buddy.display_name || buddy.username || '');
+}
+
+function _flush({ id, weezerWednesday, source, by }) {
+    if (BUDDY_SOURCES.has(source)) {
+        _flushBuddy({ id, source, by }).catch((err) =>
+            console.warn('[deep-link] buddy deep link failed', err));
+        return;
+    }
+
         console.log('[deep-link] _flush called', { id, weezerWednesday, source });
         console.log('[deep-link] switchView:', typeof window.switchView);
         console.log('[deep-link] openGigModal:', typeof window.openGigModal);
@@ -126,6 +195,21 @@ function _handleUrlParams() {
     const isWW     = params.get('ww') === '1';
     const source   = params.get('source') === 'collection' ? 'collection' : 'journal';
 
+    // Buddy deep links (from the buddy activity push)
+    const buddyShowKey = params.get('buddyShow');
+    const buddyColId   = params.get('buddyCollection');
+    const buddyId      = params.get('by');
+    if (buddyShowKey && buddyId) {
+        history.replaceState(null, '', window.location.pathname);
+        _resolveDeepLink(buddyShowKey, false, 'buddy-show', buddyId);
+        return;
+    }
+    if (buddyColId) {
+        history.replaceState(null, '', window.location.pathname);
+        _resolveDeepLink(buddyColId, false, 'buddy-collection');
+        return;
+    }
+
     if (!rawId) return;
 
     // Journal IDs are numeric; collection IDs are UUIDs (contain hyphens)
@@ -145,9 +229,9 @@ function _handleServiceWorkerMessage(event) {
 
     const id     = msg.journalId ?? null;
     const isWW   = msg.weezerWednesday ?? false;
-    const source = msg.source === 'collection' ? 'collection' : 'journal';
+    const source = _normaliseSource(msg.source);
 
-    _resolveDeepLink(id, isWW, source);
+    _resolveDeepLink(id, isWW, source, msg.by ?? null);
 }
 
 // ── PATH B listener — registered immediately at module parse time ─────────────
@@ -184,7 +268,7 @@ export async function initDeepLink() {
         const pending = await readAndClearPendingDeepLink();
         if (pending && Date.now() - pending.ts < 5 * 60 * 1000) {
             console.log('[deep-link] resolved from IndexedDB mailbox', pending);
-            _resolveDeepLink(pending.id, pending.weezerWednesday, pending.source);
+            _resolveDeepLink(pending.id, pending.weezerWednesday, _normaliseSource(pending.source), pending.by ?? null);
             return;
         }
     } catch (err) {

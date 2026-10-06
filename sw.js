@@ -166,6 +166,8 @@ self.addEventListener('push', (event) => {
 //   vault.html                           → open / focus the app
 //   vault.html?open=<journalId>          → open a specific gig modal
 //   vault.html?open=<journalId>&ww=1     → open gig + Weezer Wednesday canvas
+//   vault.html?buddyShow=<journalKey>&by=<buddyId>  → a buddy's show (read-only view)
+//   vault.html?buddyCollection=<buddyId>            → a buddy's Collection tab
 //
 // Strategy:
 //   1. Always write the intent to the IndexedDB mailbox FIRST, before doing
@@ -185,15 +187,29 @@ self.addEventListener('notificationclick', (event) => {
   const params    = new URL(targetUrl).searchParams;
   const journalId = params.get('open') ?? null;
   const isWW      = params.get('ww') === '1';
-  const source    = params.get('source') === 'collection' ? 'collection' : 'journal';
+  let   source    = params.get('source') === 'collection' ? 'collection' : 'journal';
+
+  // Buddy deep links. `intentId` is what the page receives as the intent id:
+  // the journal id normally, the journal key for a buddy show, or the buddy's
+  // id for a buddy collection. `by` is the buddy who owns the show.
+  let intentId = journalId;
+  let by       = null;
+  const buddyShowKey = params.get('buddyShow');
+  const buddyColId   = params.get('buddyCollection');
+  const buddyId      = params.get('by');
+  if (buddyShowKey && buddyId) {
+    source = 'buddy-show'; intentId = buddyShowKey; by = buddyId;
+  } else if (buddyColId) {
+    source = 'buddy-collection'; intentId = buddyColId;
+  }
 
   console.log('[SW] notificationclick fired');
   console.log('[SW] data.url raw:', data.url);
   console.log('[SW] targetUrl:', targetUrl);
-  console.log('[SW] journalId:', journalId, '| isWW:', isWW, '| source:', source);
+  console.log('[SW] intentId:', intentId, '| isWW:', isWW, '| source:', source, '| by:', by);
 
   event.waitUntil(
-    writePendingDeepLink({ id: journalId, weezerWednesday: isWW, source })
+    writePendingDeepLink({ id: intentId, weezerWednesday: isWW, source, by })
       .then(() => console.log('[SW] wrote pending deep link to IndexedDB mailbox'))
       .catch((err) => console.warn('[SW] writePendingDeepLink failed', err))
       .then(() => clients.matchAll({ type: 'window', includeUncontrolled: true }))
@@ -220,9 +236,10 @@ self.addEventListener('notificationclick', (event) => {
             // the IndexedDB mailbox write above is a fallback for.
             appClient.postMessage({
               type:            'GIGLIST_DEEP_LINK',
-              journalId,
+              journalId:       intentId,
               weezerWednesday: isWW,
               source,
+              by,
             });
             console.log('[SW] postMessage sent to client');
           });
