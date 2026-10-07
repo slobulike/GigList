@@ -88,7 +88,8 @@ import { supabase } from './supabase.js';
 // v5: added buddy_recent_collection cards.
 // v6: reaction pills on buddy cards (markup changed).
 // v7: reactions collapsed into one compact footer button with a tray.
-const FEED_LOGIC_VERSION = 7;
+// v8: "Let's do this again" reaction on buddy_together cards.
+const FEED_LOGIC_VERSION = 8;
 const RECENT_SHOW_WINDOW_DAYS = 30;   // how long a buddy's show stays in the feed
 const MAX_RECENT_SHOW_CARDS   = 6;    // feed-wide cap on buddy_recent_show candidates
 const RECENT_COLLECTION_WINDOW_DAYS = 30;   // how long a buddy's new collection item stays in the feed
@@ -792,6 +793,11 @@ function buildBuddyCards(buddyJournalsByUser, myJournalData, buddyProfiles) {
         if (!attendingBuddies.length) return;
 
         togetherKeys.add(key);
+        // Reactions land on the BUDDIES' journal rows (they're the ones to
+        // be notified), one per attending buddy.
+        const togetherJids = attendingBuddies
+            .map(b => (buddyJournalsByUser[b.id] || []).find(g => g['Journal Key'] === key)?.JournalId)
+            .filter(Boolean);
         const yearsAgo = thisYear - gigYear(myGig);
         const names    = attendingBuddies.map(b => b.display_name || b.username || 'Your buddy');
         const namesJoined = names.length <= 2
@@ -812,6 +818,8 @@ function buildBuddyCards(buddyJournalsByUser, myJournalData, buddyProfiles) {
             badge:       `${yearsAgo} Year${yearsAgo !== 1 ? 's' : ''} Ago`,
             badgeColor:  'bg-rose-500',
             journalKey:  `together_${key}`,
+            reactTargets: togetherJids.map(id => ({ type: 'journal', id })),
+            reactVariant: 'shared',
         });
     });
 
@@ -1354,9 +1362,15 @@ const REACTION_KINDS = {
     like:     { label: 'Love it',             icon: 'heart'    },
     wish:     { label: 'Wish I was there',    icon: 'sparkles' },
     together: { label: 'Next time, together', icon: 'users'    },
+    again:    { label: "Let's do this again", icon: 'repeat'   },
 };
+// Keyed by target type, or `${type}_${variant}` when the card passes a
+// reactVariant. 'shared' = a show both people attended (buddy_together):
+// "Love it" / "Wish I was there" make no sense there, so it gets the single
+// "Let's do this again" button instead of the tray.
 const REACTION_KINDS_FOR = {
     journal:         ['like', 'wish', 'together'],
+    journal_shared:  ['again'],
     collection_item: ['like'],
 };
 const REACT_BTN_BASE = 'inline-flex items-center justify-center w-8 h-8 rounded-full border transition-colors';
@@ -1419,16 +1433,16 @@ async function fetchMyReactions() {
  *
  * targets: [{ type: 'journal' | 'collection_item', id }] — one per underlying row
  */
-function renderReactionRow(targets, theme = 'dark') {
+function renderReactionRow(targets, theme = 'dark', variant = '') {
     if (window._reactionsAvailable !== true || !targets?.length) return '';
     const type  = targets[0].type;
-    const kinds = REACTION_KINDS_FOR[type] || [];
+    const kinds = REACTION_KINDS_FOR[variant ? `${type}_${variant}` : type] || [];
     const ids   = targets.map(t => t.id).filter(Boolean);
     if (!ids.length || !kinds.length) return '';
     const st = REACT_STYLES[theme] || REACT_STYLES.dark;
 
-    const rowAttrs = `data-react-row data-react-type="${escapeHtml(type)}" data-react-ids="${escapeHtml(ids.join(','))}" data-react-theme="${escapeHtml(theme)}"`;
-    const icon = (k) => `<span data-react-icon="${k}" class="${k === 'like' ? '' : 'hidden'}"><i data-lucide="${REACTION_KINDS[k].icon}" class="w-4 h-4" aria-hidden="true"></i></span>`;
+    const rowAttrs = `data-react-row data-react-type="${escapeHtml(type)}" data-react-ids="${escapeHtml(ids.join(','))}" data-react-theme="${escapeHtml(theme)}" data-react-default="${escapeHtml(kinds[0])}"`;
+    const icon = (k) => `<span data-react-icon="${k}" class="${k === kinds[0] ? '' : 'hidden'}"><i data-lucide="${REACTION_KINDS[k].icon}" class="w-4 h-4" aria-hidden="true"></i></span>`;
 
     if (kinds.length === 1) {
         const k = kinds[0];
@@ -1474,8 +1488,13 @@ function applyReactionState(root = document) {
         if (main) {
             main.className = `${REACT_BTN_BASE} ${current ? st.active : st.idle}`;
             if (main.hasAttribute('data-react-kind')) main.setAttribute('aria-pressed', String(!!current));
+            // Show the chosen kind's icon; fall back to the row's default if
+            // the row has no icon for it (e.g. a 'like' saved elsewhere on a
+            // row that only offers 'again').
+            const def   = row.dataset.reactDefault || 'like';
+            const shown = current && row.querySelector(`[data-react-icon="${current}"]`) ? current : def;
             main.querySelectorAll('[data-react-icon]').forEach(el =>
-                el.classList.toggle('hidden', el.dataset.reactIcon !== (current || 'like')));
+                el.classList.toggle('hidden', el.dataset.reactIcon !== shown));
         }
 
         // Tray options: highlight the one currently chosen
@@ -1880,7 +1899,7 @@ function renderCard(card, index) {
                         <span class="${card.badgeColor} text-white text-[9px] font-black uppercase tracking-widest px-3 py-1 rounded-full">
                             ${escapeHtml(card.badge)}
                         </span>
-                        ${renderReactionRow(card.reactTargets)}
+                        ${renderReactionRow(card.reactTargets, 'dark', card.reactVariant)}
                     </div>
                     ${ctaLabel ? `
                     <button ${tapAction}

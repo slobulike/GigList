@@ -23,6 +23,7 @@ import { initTips, syncSeenState, getSeenCount, getTotalCount, TIP_GROUPS, getGr
 import { initTipsHub } from './tips-hub.js';
 import { escapeHtml, safeUrl } from './utils.js';
 import { showInstallHelp, canShowInstallHelp } from './install-prompt.js';
+import { initNotifications, renderNotificationList } from './notifications.js';
 
 // ─── MODULE STATE ─────────────────────────────────────────────────────────────
 
@@ -46,6 +47,17 @@ export async function initProfile(currentUser) {
         }
 
     _populateHeaderAvatar(currentUser);
+    if (currentUser?.isAuthUser) {
+        initNotifications({
+            openShow:           _openOwnShowFromNotification,
+            openCollectionItem: _openOwnCollectionItemFromNotification,
+            openBuddyCollection: (buddyId, buddyName) => {
+                // Defined by feed.js; opens the buddy's collection in the shared modal.
+                if (window._feedOpenBuddyCollection) window._feedOpenBuddyCollection(buddyId, buddyName);
+                else window.openBuddyDrillIn?.(buddyId, buddyName);
+            },
+        });
+    }
     _initPrivacyToggle(currentUser);
     _setHomeLocationGlobal(currentUser);
     // renderDashboardCharts may have already run once (e.g. the Stats tab
@@ -302,6 +314,9 @@ async function _renderOwnProfile() {
     // Avatar edit button — visible for own profile
     document.getElementById('profile-avatar-edit-btn')?.classList.remove('hidden');
 
+    // Notifications — own profile only; the card stays hidden until there's something to show
+    _renderNotificationsCard();
+
     // Settings section — visible for own profile
     document.getElementById('profile-settings-section')?.classList.remove('hidden');
 
@@ -392,6 +407,62 @@ async function _renderOwnProfile() {
     _checkAchievementCloseNudge(window.journalData || []);
 }
 
+// ─── NOTIFICATIONS ───────────────────────────────────────────────────────────
+
+/**
+ * Draws the inbox card on the own profile. Hidden when there's nothing to show,
+ * so an empty card never takes up space. Rendering also marks everything read
+ * (see notifications.js), which clears the avatar dot.
+ */
+async function _renderNotificationsCard() {
+    const card = document.getElementById('profile-notifications-card');
+    const list = document.getElementById('notifications-list');
+    if (!card || !list) return;
+    try {
+        const count = await renderNotificationList(list);
+        card.classList.toggle('hidden', count === 0);
+    } catch (e) {
+        console.warn('[Profile] notifications render failed:', e.message);
+    }
+}
+
+// A new notification arrived. If the own profile is on screen, refresh the card
+// (which also marks it read, since the person is looking at it). Otherwise leave
+// it alone so the avatar dot stays lit until they actually open the profile.
+window.addEventListener('giglist:notifications-changed', () => {
+    const view = document.getElementById('view-profile');
+    const visible = view && !view.classList.contains('hidden');
+    if (visible && !_profileUserId) _renderNotificationsCard();
+});
+
+// Tapping a notification opens the thing that was reacted to. Notifications
+// only ever concern the viewer's OWN rows, so the normal own-data openers apply.
+function _openOwnShowFromNotification({ key }) {
+    const exists = key && (window.journalData || []).some(g => g['Journal Key'] === key);
+    if (!exists || !window.viewGigDetails) {
+        window.showToast?.('That show isn\'t available any more', 'info');
+        return;
+    }
+    window.viewGigDetails(key);
+}
+
+async function _openOwnCollectionItemFromNotification(itemId) {
+    try {
+        // Dynamic import: collection.js is only needed on tap, and this keeps
+        // profile.js free of any import-cycle risk.
+        const { ensureLoaded } = await import('./collection.js');
+        await ensureLoaded(_currentUser.id);
+        if (!(window._collectionItems || []).some(i => i.id === itemId)) {
+            window.showToast?.('That item isn\'t available any more', 'info');
+            return;
+        }
+        window._colOpenItem(itemId);
+    } catch (e) {
+        console.warn('[Profile] open collection item failed:', e.message);
+        window.showToast?.('Couldn\'t open that item', 'error');
+    }
+}
+
 // ─── MUSIC IDENTITY PROMPT ───────────────────────────────────────────────────
 
 function _renderMusicIdentityPrompt() {
@@ -451,6 +522,9 @@ async function _renderBuddyProfile(userId) {
 
     // Avatar edit button — hidden for buddy profile
     document.getElementById('profile-avatar-edit-btn')?.classList.add('hidden');
+
+    // Notifications — hidden for buddy profile (they're yours, not theirs)
+    document.getElementById('profile-notifications-card')?.classList.add('hidden');
 
     // Settings section — hidden for buddy profile
     document.getElementById('profile-settings-section')?.classList.add('hidden');
