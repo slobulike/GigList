@@ -277,25 +277,108 @@ window._colResolveBandPhoto = async (artistId, bandName) => {
 /**
  * Pre-resolves signed URLs for all items that have photos.
  * Populates _signedUrlCache so synchronous render functions can use them.
- * Fires in parallel batches of 10 to avoid overwhelming storage API.
+ *
+ * Why this is shaped the way it is (Supabase was returning 429s when this
+ * fired one POST per photo on every load):
+ *   1. createSignedUrls() signs up to SIGN_CHUNK paths in ONE request.
+ *   2. Signed URLs persist in localStorage with their expiry, so repeat
+ *      visits make zero signing calls until they're close to expiring.
+ *   3. In-flight requests are shared per path, so overlapping callers
+ *      (collection fetch + buddy view + collage) never sign the same path twice.
  */
-async function _preloadSignedUrls(items) {
-    const paths = [];
-    items.forEach(item => {
-        (item.photos || []).forEach(p => {
-            if (p && !_signedUrlCache.has(p)) paths.push(p);
-        });
-    });
-    if (!paths.length) return;
+const SIGN_TTL_SECS   = 60 * 60 * 24 * 7;   // 7 days
+const SIGN_REFRESH_MS = 60 * 60 * 24 * 1000; // re-sign when < 1 day left
+const SIGN_CHUNK      = 100;
+const SIGN_LS_KEY     = 'giglist_col_signed_urls_v1';
 
-    // Batch in groups of 10
-    for (let i = 0; i < paths.length; i += 10) {
-        const batch = paths.slice(i, i + 10);
-        await Promise.all(batch.map(async (path) => {
-            const url = await _fetchSignedUrl(path);
-            if (url) _signedUrlCache.set(path, url);
-        }));
+const _signInFlight = new Map();   // path → Promise<void>
+let _signStoreLoaded = false;
+let _signPersistTimer = null;
+const _signExpiry = new Map();     // path → expiresAt (ms)
+
+function _loadSignedStore() {
+    if (_signStoreLoaded) return;
+    _signStoreLoaded = true;
+    try {
+        const raw = JSON.parse(localStorage.getItem(SIGN_LS_KEY) || '{}');
+        const now = Date.now();
+        for (const [path, v] of Object.entries(raw)) {
+            if (v && v.url && v.exp - now > SIGN_REFRESH_MS) {
+                _signedUrlCache.set(path, v.url);
+                _signExpiry.set(path, v.exp);
+            }
+        }
+    } catch { /* corrupt or unavailable storage — just start cold */ }
+}
+
+function _persistSignedStore() {
+    clearTimeout(_signPersistTimer);
+    _signPersistTimer = setTimeout(() => {
+        try {
+            const out = {};
+            for (const [path, exp] of _signExpiry) {
+                const url = _signedUrlCache.get(path);
+                if (url) out[path] = { url, exp };
+            }
+            localStorage.setItem(SIGN_LS_KEY, JSON.stringify(out));
+        } catch { /* quota or private mode — cache is best-effort */ }
+    }, 250);
+}
+
+async function _signChunk(chunk, attempt = 0) {
+    const { data, error } = await supabase.storage
+        .from('collection-photos')
+        .createSignedUrls(chunk, SIGN_TTL_SECS);
+
+    if (error) {
+        // 429 / transient: back off and retry a couple of times, then give up
+        // quietly (renders fall back to placeholders; next load tries again).
+        const status = error.status || error.statusCode;
+        if ((status === 429 || status >= 500) && attempt < 3) {
+            await new Promise(r => setTimeout(r, 600 * 2 ** attempt));
+            return _signChunk(chunk, attempt + 1);
+        }
+        console.warn('[Collection] signing failed:', error.message);
+        return;
     }
+    const exp = Date.now() + SIGN_TTL_SECS * 1000;
+    (data || []).forEach(row => {
+        if (row?.signedUrl && row.path) {
+            _signedUrlCache.set(row.path, row.signedUrl);
+            _signExpiry.set(row.path, exp);
+        }
+    });
+}
+
+async function _preloadSignedUrls(items) {
+    _loadSignedStore();
+
+    const wanted = new Set();
+    items.forEach(item => (item.photos || []).forEach(p => {
+        if (p && !_signedUrlCache.has(p)) wanted.add(p);
+    }));
+    if (!wanted.size) return;
+
+    const waiting = [];   // promises already running for some of these paths
+    const fresh   = [];   // paths nobody is signing yet
+    wanted.forEach(p => {
+        if (_signInFlight.has(p)) waiting.push(_signInFlight.get(p));
+        else fresh.push(p);
+    });
+
+    // Chunks run one after another (not in parallel) to stay well under limits.
+    if (fresh.length) {
+        const run = (async () => {
+            for (let i = 0; i < fresh.length; i += SIGN_CHUNK) {
+                await _signChunk(fresh.slice(i, i + SIGN_CHUNK));
+            }
+        })().finally(() => fresh.forEach(p => _signInFlight.delete(p)));
+        fresh.forEach(p => _signInFlight.set(p, run));
+        waiting.push(run);
+    }
+
+    await Promise.all(waiting);
+    _persistSignedStore();
 }
 
 // ─── FILTERING ────────────────────────────────────────────────────────────────

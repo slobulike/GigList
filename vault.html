@@ -1008,11 +1008,38 @@
             </div>
         </div>
 
-        <!-- ── Notifications — own profile only, hidden until there is something to show ── -->
+
+        <!-- ── Notifications strip — own profile only, hidden until there is something to show ── -->
         <div id="profile-notifications-card"
              class="hidden bg-white rounded-[2rem] border border-slate-100 shadow-sm p-5 space-y-2">
-            <p class="text-[10px] font-black uppercase text-indigo-500 tracking-widest px-1">Notifications</p>
+            <div class="flex items-center justify-between px-1">
+                <p class="text-[10px] font-black uppercase text-indigo-500 tracking-widest">Notifications</p>
+                <button id="profile-notifications-view-all"
+                        onclick="window.openNotifications()"
+                        class="hidden text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-indigo-600 transition-colors">
+                    View all
+                </button>
+            </div>
             <div id="notifications-list"></div>
+        </div>
+
+        <!-- ── Notifications drill-in — full list, with Clear all ── -->
+        <div id="view-profile-notifications"
+             class="hidden bg-white rounded-[2rem] border border-slate-100 shadow-sm p-5">
+            <div class="flex items-center gap-3 mb-4 pb-4 border-b border-slate-100">
+                <button onclick="window.closeNotifications()"
+                        class="w-8 h-8 flex items-center justify-center rounded-xl bg-slate-100 hover:bg-slate-200 transition-colors"
+                        aria-label="Back to profile">
+                    <i data-lucide="arrow-left" class="w-4 h-4 text-slate-600"></i>
+                </button>
+                <p class="flex-1 text-[10px] font-black uppercase text-indigo-500 tracking-widest">Notifications</p>
+                <button id="notifications-clear-btn"
+                        onclick="window.clearNotifications()"
+                        class="hidden text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-red-500 transition-colors">
+                    Clear all
+                </button>
+            </div>
+            <div id="notifications-full-list"></div>
         </div>
 
         <!-- ── Music identity ── -->

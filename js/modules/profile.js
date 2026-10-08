@@ -23,7 +23,7 @@ import { initTips, syncSeenState, getSeenCount, getTotalCount, TIP_GROUPS, getGr
 import { initTipsHub } from './tips-hub.js';
 import { escapeHtml, safeUrl } from './utils.js';
 import { showInstallHelp, canShowInstallHelp } from './install-prompt.js';
-import { initNotifications, renderNotificationList } from './notifications.js';
+import { initNotifications, renderNotificationStrip, renderNotificationList, dismissAllNotifications } from './notifications.js';
 
 // ─── MODULE STATE ─────────────────────────────────────────────────────────────
 
@@ -314,7 +314,9 @@ async function _renderOwnProfile() {
     // Avatar edit button — visible for own profile
     document.getElementById('profile-avatar-edit-btn')?.classList.remove('hidden');
 
-    // Notifications — own profile only; the card stays hidden until there's something to show
+    // Notifications — own profile only; the strip stays hidden until there's something to show
+    _notifDrillOpen = false;
+    document.getElementById('view-profile-notifications')?.classList.add('hidden');
     _renderNotificationsCard();
 
     // Settings section — visible for own profile
@@ -409,30 +411,68 @@ async function _renderOwnProfile() {
 
 // ─── NOTIFICATIONS ───────────────────────────────────────────────────────────
 
+let _notifDrillOpen = false;
+
 /**
- * Draws the inbox card on the own profile. Hidden when there's nothing to show,
- * so an empty card never takes up space. Rendering also marks everything read
- * (see notifications.js), which clears the avatar dot.
+ * Compact strip on the own profile: the 3 newest notifications, plus "View all"
+ * when there are more. Hidden entirely when there's nothing to show, so an
+ * empty card never takes up space. Only the rows shown are marked read.
  */
 async function _renderNotificationsCard() {
-    const card = document.getElementById('profile-notifications-card');
-    const list = document.getElementById('notifications-list');
+    const card    = document.getElementById('profile-notifications-card');
+    const list    = document.getElementById('notifications-list');
+    const viewAll = document.getElementById('profile-notifications-view-all');
     if (!card || !list) return;
     try {
-        const count = await renderNotificationList(list);
-        card.classList.toggle('hidden', count === 0);
+        const { shown, total } = await renderNotificationStrip(list, { count: 3 });
+        card.classList.toggle('hidden', total === 0);
+        if (viewAll) {
+            viewAll.classList.toggle('hidden', total <= shown);
+            viewAll.textContent = `View all (${total})`;
+        }
     } catch (e) {
         console.warn('[Profile] notifications render failed:', e.message);
     }
 }
 
-// A new notification arrived. If the own profile is on screen, refresh the card
-// (which also marks it read, since the person is looking at it). Otherwise leave
-// it alone so the avatar dot stays lit until they actually open the profile.
+// Full list in a drill-in panel, same pattern as Achievements and Buddies.
+async function _renderNotificationsDrillIn() {
+    const list = document.getElementById('notifications-full-list');
+    if (!list) return;
+    try {
+        const count = await renderNotificationList(list);
+        document.getElementById('notifications-clear-btn')?.classList.toggle('hidden', count === 0);
+    } catch (e) {
+        console.warn('[Profile] notifications list failed:', e.message);
+    }
+}
+
+window.openNotifications = async () => {
+    _notifDrillOpen = true;
+    document.getElementById('profile-notifications-card')?.classList.add('hidden');
+    document.getElementById('view-profile-notifications')?.classList.remove('hidden');
+    await _renderNotificationsDrillIn();
+    if (window.lucide) lucide.createIcons();
+};
+
+window.closeNotifications = async () => {
+    _notifDrillOpen = false;
+    document.getElementById('view-profile-notifications')?.classList.add('hidden');
+    await _renderNotificationsCard();   // brings the strip back if anything is left
+};
+
+// "Clear all": dismisses everything; the change event below refreshes the panel.
+window.clearNotifications = () => dismissAllNotifications();
+
+// Something changed (a new notification arrived, or one was dismissed). If the
+// own profile is on screen, refresh whichever view is open. Otherwise leave it
+// alone so the avatar dot stays lit until they actually open the profile.
 window.addEventListener('giglist:notifications-changed', () => {
     const view = document.getElementById('view-profile');
     const visible = view && !view.classList.contains('hidden');
-    if (visible && !_profileUserId) _renderNotificationsCard();
+    if (!visible || _profileUserId) return;
+    if (_notifDrillOpen) _renderNotificationsDrillIn();
+    else _renderNotificationsCard();
 });
 
 // Tapping a notification opens the thing that was reacted to. Notifications
@@ -525,6 +565,8 @@ async function _renderBuddyProfile(userId) {
 
     // Notifications — hidden for buddy profile (they're yours, not theirs)
     document.getElementById('profile-notifications-card')?.classList.add('hidden');
+    document.getElementById('view-profile-notifications')?.classList.add('hidden');
+    _notifDrillOpen = false;
 
     // Settings section — hidden for buddy profile
     document.getElementById('profile-settings-section')?.classList.add('hidden');

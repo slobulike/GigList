@@ -11,9 +11,15 @@
  * 1. Dot: injected automatically onto the header avatar (#userIdentity). Any
  *    other element with [data-notif-dot] is shown/hidden too.
  *
- * 2. Inbox: call renderNotificationList(container) each time the Profile view
- *    opens. It returns how many rows it drew (0 = nothing to show, so the
- *    caller can hide the card).
+ * 2. Inbox: two views of the same list, following the Achievements / Buddies
+ *    pattern in Profile:
+ *      renderNotificationStrip(container, { count: 3 })  — compact preview;
+ *          returns { shown, total } (hide the card when total is 0, offer
+ *          "View all" when total > shown)
+ *      renderNotificationList(container)                  — full list for the
+ *          drill-in panel
+ *    Rows can be dismissed one by one (dismissNotification) or all at once
+ *    (dismissAllNotifications).
  *
  * 3. Init once after sign-in:
  *      initNotifications({
@@ -81,7 +87,8 @@ async function refreshUnread() {
             .from('notifications')
             .select('id', { count: 'exact', head: true })
             .eq('user_id', _uid)
-            .is('read_at', null);
+            .is('read_at', null)
+            .is('dismissed_at', null);
         if (error) throw error;
         _unread = count || 0;
     } catch (e) {
@@ -157,6 +164,63 @@ async function markOneRead(id) {
     } catch (e) { /* non-fatal */ }
 }
 
+// Mark just the rows currently on screen as read. Anything not shown (e.g.
+// beyond the profile strip) stays unread, so the dot keeps pointing at it.
+async function markIdsRead(ids) {
+    if (!_uid || !ids?.length) return;
+    try {
+        const { error } = await supabase
+            .from('notifications')
+            .update({ read_at: new Date().toISOString() })
+            .in('id', ids)
+            .is('read_at', null);
+        if (error) throw error;
+    } catch (e) {
+        console.warn('[Notifications] mark-read failed:', e.message);
+    }
+    await refreshUnread();
+}
+
+// Dismiss = soft delete (dismissed_at). The row stays so its dedupe_key keeps
+// working: a dismissed memory tag can't be re-created by re-saving the memory.
+// Old dismissed/read rows are pruned server-side (see 002 migration).
+export async function dismissNotification(id) {
+    if (!_uid || !id) return;
+    const now = new Date().toISOString();
+    try {
+        const { error } = await supabase
+            .from('notifications')
+            .update({ dismissed_at: now, read_at: now })
+            .eq('id', id);
+        if (error) throw error;
+    } catch (e) {
+        console.warn('[Notifications] dismiss failed:', e.message);
+        window.showToast?.('Couldn\'t dismiss that — try again', 'error');
+        return;
+    }
+    await refreshUnread();
+    window.dispatchEvent(new CustomEvent(CHANGED_EVENT));
+}
+
+export async function dismissAllNotifications() {
+    if (!_uid) return;
+    const now = new Date().toISOString();
+    try {
+        const { error } = await supabase
+            .from('notifications')
+            .update({ dismissed_at: now, read_at: now })
+            .eq('user_id', _uid)
+            .is('dismissed_at', null);
+        if (error) throw error;
+    } catch (e) {
+        console.warn('[Notifications] clear-all failed:', e.message);
+        window.showToast?.('Couldn\'t clear notifications — try again', 'error');
+        return;
+    }
+    await refreshUnread();
+    window.dispatchEvent(new CustomEvent(CHANGED_EVENT));
+}
+
 // ─── FETCH + RESOLVE ──────────────────────────────────────────────────────────
 
 /**
@@ -169,6 +233,7 @@ export async function fetchNotifications(limit = 50) {
         .from('notifications')
         .select('id, actor_id, type, reaction_kind, journal_id, collection_item_id, created_at, read_at')
         .eq('user_id', _uid)
+        .is('dismissed_at', null)
         .order('created_at', { ascending: false })
         .limit(limit);
     if (error) { console.warn('[Notifications] fetch failed:', error.message); return []; }
@@ -257,75 +322,89 @@ function avatarHtml(actor) {
         : `<span class="w-10 h-10 rounded-full bg-slate-200 text-slate-600 text-xs font-black flex items-center justify-center flex-shrink-0">${initials}</span>`;
 }
 
+const DISMISS_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+
 function rowHtml(n) {
     const d = describe(n);
     if (!d) return '';
     const unread = !n.read_at;
     return `
-        <button type="button" data-notif-id="${escapeHtml(n.id)}"
-                data-notif-journal="${escapeHtml(String(n.journal_id ?? ''))}"
-                data-notif-key="${escapeHtml(n.journal?.journal_key ?? '')}"
-                data-notif-type="${escapeHtml(n.type)}"
-                data-notif-actor="${escapeHtml(n.actor_id ?? '')}"
-                data-notif-actor-name="${escapeHtml(actorName(n))}"
-                data-notif-item="${escapeHtml(String(n.collection_item_id ?? ''))}"
-                class="w-full flex items-center gap-3 px-4 py-3 text-left rounded-2xl transition-colors
-                       ${unread ? 'bg-indigo-50 hover:bg-indigo-100' : 'hover:bg-slate-50'}">
-            ${avatarHtml(n.actor)}
-            <span class="flex-1 min-w-0">
-                <span class="block text-sm ${unread ? 'font-bold text-slate-900' : 'font-medium text-slate-700'}">
-                    ${escapeHtml(d.text)}
+        <div class="flex items-center gap-1 rounded-2xl transition-colors ${unread ? 'bg-indigo-50' : ''}">
+            <button type="button" data-notif-id="${escapeHtml(n.id)}"
+                    data-notif-journal="${escapeHtml(String(n.journal_id ?? ''))}"
+                    data-notif-key="${escapeHtml(n.journal?.journal_key ?? '')}"
+                    data-notif-type="${escapeHtml(n.type)}"
+                    data-notif-actor="${escapeHtml(n.actor_id ?? '')}"
+                    data-notif-actor-name="${escapeHtml(actorName(n))}"
+                    data-notif-item="${escapeHtml(String(n.collection_item_id ?? ''))}"
+                    class="flex-1 min-w-0 flex items-center gap-3 pl-4 pr-2 py-3 text-left rounded-2xl hover:bg-slate-50/70 transition-colors">
+                ${avatarHtml(n.actor)}
+                <span class="flex-1 min-w-0">
+                    <span class="block text-sm ${unread ? 'font-bold text-slate-900' : 'font-medium text-slate-700'}">
+                        ${escapeHtml(d.text)}
+                    </span>
+                    <span class="block text-xs text-slate-400 mt-0.5">${escapeHtml(timeAgo(n.created_at))}</span>
                 </span>
-                <span class="block text-xs text-slate-400 mt-0.5">${escapeHtml(timeAgo(n.created_at))}</span>
-            </span>
-            ${unread ? '<span class="w-2.5 h-2.5 rounded-full bg-indigo-600 flex-shrink-0" aria-label="Unread"></span>' : ''}
-        </button>`;
+                ${unread ? '<span class="w-2.5 h-2.5 rounded-full bg-indigo-600 flex-shrink-0" aria-label="Unread"></span>' : ''}
+            </button>
+            <button type="button" data-notif-dismiss="${escapeHtml(n.id)}" aria-label="Dismiss notification"
+                    class="flex-shrink-0 w-9 h-9 mr-2 flex items-center justify-center rounded-full text-slate-300 hover:text-slate-600 hover:bg-slate-100 transition-colors">
+                ${DISMISS_ICON}
+            </button>
+        </div>`;
 }
 
-/**
- * Renders the inbox into `container` and returns how many rows were drawn.
- * Shows the newest `initialCount`, with a button to reveal the rest. Unread
- * rows are highlighted for this view, then everything is marked read, so the
- * highlight shows once and the avatar dot clears.
- */
-export async function renderNotificationList(container, { initialCount = 5 } = {}) {
-    if (!container) return 0;
+function _wire(container) {
     container.setAttribute('aria-live', 'polite');
-
-    const notes = await fetchNotifications();
-    const rows  = notes.map(n => ({ n, html: rowHtml(n) })).filter(r => r.html);
-
-    if (!rows.length) {
-        container.innerHTML = '';
-        return 0;
-    }
-
-    const head = rows.slice(0, initialCount).map(r => r.html).join('');
-    const tail = rows.slice(initialCount).map(r => r.html).join('');
-
-    container.innerHTML = `
-        <div class="space-y-1">${head}</div>
-        ${tail ? `
-        <div data-notif-tail class="hidden space-y-1 mt-1">${tail}</div>
-        <button type="button" data-notif-more
-                class="mt-2 px-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-indigo-600 transition-colors">
-            Show earlier (${rows.length - initialCount})
-        </button>` : ''}`;
-
     if (!container._notifWired) {
         container._notifWired = true;
         container.addEventListener('click', onRowClick);
     }
+}
 
-    if (rows.some(r => !r.n.read_at)) await markAllRead();
+async function _loadRows() {
+    const notes = await fetchNotifications();
+    return notes.map(n => ({ n, html: rowHtml(n) })).filter(r => r.html);
+}
+
+/**
+ * Compact preview for the Profile screen: the newest `count` notifications.
+ * Returns { shown, total } so the caller can hide the card when total is 0 and
+ * offer "View all" when total > shown. Only the rows actually shown are marked
+ * read, so anything beyond the strip keeps the avatar dot lit.
+ */
+export async function renderNotificationStrip(container, { count = 3 } = {}) {
+    if (!container) return { shown: 0, total: 0 };
+    _wire(container);
+    const rows = await _loadRows();
+    const shownRows = rows.slice(0, count);
+    container.innerHTML = shownRows.length
+        ? `<div class="space-y-1">${shownRows.map(r => r.html).join('')}</div>`
+        : '';
+    await markIdsRead(shownRows.filter(r => !r.n.read_at).map(r => r.n.id));
+    return { shown: shownRows.length, total: rows.length };
+}
+
+/**
+ * Full list for the drill-in panel (newest 50 undismissed). Marks everything
+ * shown as read. Returns how many rows were drawn.
+ */
+export async function renderNotificationList(container) {
+    if (!container) return 0;
+    _wire(container);
+    const rows = await _loadRows();
+    container.innerHTML = rows.length
+        ? `<div class="space-y-1">${rows.map(r => r.html).join('')}</div>`
+        : `<p class="text-sm text-slate-500 px-4 py-6">You're all caught up.</p>`;
+    await markIdsRead(rows.filter(r => !r.n.read_at).map(r => r.n.id));
     return rows.length;
 }
 
 async function onRowClick(e) {
-    const more = e.target.closest('[data-notif-more]');
-    if (more) {
-        more.parentElement.querySelector('[data-notif-tail]')?.classList.remove('hidden');
-        more.remove();
+    const dismiss = e.target.closest('[data-notif-dismiss]');
+    if (dismiss) {
+        e.stopPropagation();
+        dismissNotification(dismiss.dataset.notifDismiss);
         return;
     }
 

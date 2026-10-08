@@ -492,7 +492,7 @@ export const renderTopSongsChart = (filteredJournal, canvasId, isModal = false) 
         if (k) journalByKey.set(k, g);
     });
 
-    const EXCLUDED   = new Set(['nan', 'not_found', 'unknown', 'null', '']);
+    const EXCLUDED   = new Set(['nan', 'not_found', 'no_songs_listed', 'no_setlist_found', 'none', 'unknown', 'null', '']);
     const songCounts = {};
 
     (window.performanceData || []).forEach(perf => {
@@ -511,7 +511,9 @@ export const renderTopSongsChart = (filteredJournal, canvasId, isModal = false) 
         const setlistRaw = perf.Setlist || "";
         if (!setlistRaw || setlistRaw === "nan" || setlistRaw === "NOT_FOUND") return;
 
-        setlistRaw.split(/[|,\n;]/).forEach(song => {
+        // Songs are stored pipe-separated ('A | B | C'). Splitting on commas, semicolons
+        // or newlines too would break titles like "Hello, Goodbye" into several songs.
+        setlistRaw.split('|').forEach(song => {
             const clean = song.trim();
             if (clean && !EXCLUDED.has(clean.toLowerCase())) {
                 songCounts[clean] = (songCounts[clean] || 0) + 1;
