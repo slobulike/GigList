@@ -18,6 +18,7 @@ import { supabase } from './supabase.js';
 import { wireCombobox, loadArtistOptions, getArtistOptions, invalidateArtistCache } from './editor.js';
 import { enrichNewArtist } from './artist-enrichment.js';
 import { escapeHtml, safeUrl } from './utils.js';
+import { markTipUsed } from './tip-dots.js';
 
 // ─── STATE ────────────────────────────────────────────────────────────────────
 
@@ -209,6 +210,7 @@ export async function openWishlistModal() {
     if (!modal) { console.error('Wishlist: #wishlist-modal not found in DOM'); return; }
 
     loadArtistOptions(); // warm the artist cache for the combobox
+    markTipUsed('wish_list_add'); // opening the list counts as discovering it
 
     modal.classList.remove('hidden');
     modal.setAttribute('aria-hidden', 'false');

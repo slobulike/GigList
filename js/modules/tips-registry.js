@@ -14,10 +14,12 @@ import { supabase } from "./supabase.js";
 
 export const TIP_GROUPS = [
   { id: "your_shows",   label: "Your Shows",   emoji: "🎤" },
+  { id: "playlists",    label: "Playlists",    emoji: "🎧" },
   { id: "your_history", label: "Your History", emoji: "📊" },
   { id: "your_feed",    label: "Your Feed",    emoji: "✨" },
   { id: "achievements", label: "Achievements", emoji: "🏆" },
   { id: "buddies",      label: "Buddies",      emoji: "👥" },
+  { id: "wish_list",    label: "Wish List",    emoji: "⭐" },
   { id: "collection",   label: "Collection",   emoji: "📀" },
   { id: "band_pages",   label: "Band Pages",   emoji: "🔍" },
   // ↑ Insert new groups here — order controls Hub display order.
@@ -51,32 +53,6 @@ export const TIPS = [
     nudgeBody:    "Tap Share on any gig to get a public link you can send to friends.",
     nudgeTrigger: "first_gig_saved",
     featured:     true,
-    addedVersion: "1.0",
-  },
-  {
-    id:           "playlist_relive",
-    group:        "your_shows",
-    hubTitle:     "Relive any show with a playlist",
-    hubBody:      "Tap 'Relive' on a gig modal to open or generate a Spotify playlist built from that night's setlist. A permanent memento for any show in your history.",
-    hubCta:       "Open a show →",
-    hubDeepLink:  "vault.html#data",
-    modalTip:     "Tap Relive to generate a Spotify playlist built from that night's setlist — a permanent memento of the show.",
-    modalButton:  "playlist",
-    context:      "past",   // only show in modals for past gigs
-    featured:     true,
-    addedVersion: "1.0",
-  },
-  {
-    id:           "playlist_preshow",
-    group:        "your_shows",
-    hubTitle:     "Get ready for a show — pre-show playlist",
-    hubBody:      "Got an upcoming gig? Tap 'Get Ready' before the show to build a playlist of songs likely to be played. Go in knowing every word.",
-    hubCta:       "Open a show →",
-    hubDeepLink:  "vault.html#data",
-    modalTip:     "Tap Get Ready to build a playlist of songs likely to be played — go in knowing every word.",
-    modalButton:  "playlist",
-    context:      "future", // only show in modals for upcoming gigs
-    featured:     false,
     addedVersion: "1.0",
   },
   {
@@ -150,6 +126,47 @@ export const TIPS = [
     featured:     false,
     addedVersion: "1.0",
   },
+  // ── Playlists 🎧 ─────────────────────────────────────────────────────────────
+  {
+    id:           "giglist_playlist",
+    group:        "playlists",
+    hubTitle:     "Your daily GigList playlist",
+    hubBody:      "Set up a daily playlist on the Home screen and GigList will build a 25-track Spotify playlist from artists you've seen live, refreshed every day.",
+    hubCta:       "Go to Home →",
+    hubDeepLink:  "vault.html#home",
+    nudgeTitle:   "A new playlist every day",
+    nudgeBody:    "Set up your daily GigList playlist on the Home screen — 25 tracks from artists you've seen live, refreshed every day.",
+    nudgeTrigger: "fifth_gig_saved",
+    featured:     true,
+    addedVersion: "1.1",
+  },
+  {
+    id:           "playlist_relive",
+    group:        "playlists",
+    hubTitle:     "Relive any show with a playlist",
+    hubBody:      "Tap 'Relive' on a gig modal to open or generate a Spotify playlist built from that night's setlist. Available for any show you've seen where a setlist is on record — a permanent memento of the night.",
+    hubCta:       "Open a show →",
+    hubDeepLink:  "vault.html#data",
+    modalTip:     "Tap Relive to generate a Spotify playlist built from that night's setlist — a permanent memento of the show.",
+    modalButton:  "playlist",
+    context:      "past",   // only show in modals for past gigs
+    featured:     true,
+    addedVersion: "1.0",
+  },
+  {
+    id:           "playlist_preshow",
+    group:        "playlists",
+    hubTitle:     "Get ready for a show — pre-show playlist",
+    hubBody:      "Got an upcoming gig? Tap 'Get Ready' to build a Spotify playlist from the artist's most recent setlist, so you go in knowing every word.",
+    hubCta:       "Open a show →",
+    hubDeepLink:  "vault.html#data",
+    modalTip:     "Tap Get Ready to build a playlist from the artist's most recent setlist — go in knowing every word.",
+    modalButton:  "playlist",
+    context:      "future", // only show in modals for upcoming gigs
+    featured:     false,
+    addedVersion: "1.0",
+  },
+
   {
     id:           "collection_setlist_sync",
     group:        "collection",
@@ -345,6 +362,52 @@ export const TIPS = [
     hubDeepLink:  "vault.html#profile",
     featured:     false,
     addedVersion: "1.0",
+  },
+
+  {
+    id:           "likes_react",
+    group:        "buddies",
+    hubTitle:     "React to your buddies' shows",
+    hubBody:      "On a buddy's card in your Feed, tap to Love a show, Commit to going together in future, or say you Wish you were there.",
+    hubCta:       "Go to Feed →",
+    hubDeepLink:  "vault.html#feed",
+    nudgeTitle:   "React to a buddy's show",
+    nudgeBody:    "Spot a buddy's card in your Feed? Love it, commit to going together next time, or say you wish you were there.",
+    nudgeTrigger: "buddy_added",
+    featured:     true,
+    addedVersion: "1.1",
+  },
+  {
+    id:           "likes_notifications",
+    group:        "buddies",
+    hubTitle:     "See when a buddy reacts to your shows",
+    hubBody:      "When a buddy likes a card about you on their feed, you'll get a notification. Your recent notifications are on your Profile screen.",
+    hubCta:       "Go to Profile →",
+    hubDeepLink:  "vault.html#profile",
+    featured:     false,
+    addedVersion: "1.1",
+  },
+
+  // ── Wish List ⭐ ─────────────────────────────────────────────────────────────
+  {
+    id:           "wish_list_add",
+    group:        "wish_list",
+    hubTitle:     "Keep a wish list of artists to see",
+    hubBody:      "Open the switcher menu to find your Wish List and add the artists you want to see live. A simple list to keep your next gig in sight.",
+    hubCta:       "Open your Wish List →",
+    hubDeepLink:  "vault.html#wishlist",
+    featured:     true,
+    addedVersion: "1.1",
+  },
+  {
+    id:           "wish_list_alerts",
+    group:        "wish_list",
+    hubTitle:     "Get notified when a wish-list artist tours",
+    hubBody:      "Add an artist to your Wish List and you'll be notified when they have tour dates on sale — so you never miss your chance to see them.",
+    hubCta:       "Open your Wish List →",
+    hubDeepLink:  "vault.html#wishlist",
+    featured:     false,
+    addedVersion: "1.1",
   },
 
   // ── Collection 📀 ────────────────────────────────────────────────────────────

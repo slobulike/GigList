@@ -87,6 +87,9 @@ function _enqueueTips(tipIds) {
  *
  *   // After achievement progress check shows user within 5 of next badge:
  *   checkNudgeTrigger('achievement_close');
+ *
+ *   // After a buddy request is accepted (either direction):
+ *   checkNudgeTrigger('buddy_added');
  */
 export function checkNudgeTrigger(triggerEvent) {
     const tips = getNudgeTipsForEvent(triggerEvent);

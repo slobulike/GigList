@@ -1,9 +1,8 @@
 /**
  * GigList Core Engine
- * v8.9.6 — 2026-10-08
+ * v8.9.7 — 2026-10-09
  * ------------------------------------------------------------------
- * ✅ Small bug fix to charts for setlists with commas in song titles
- * ✅ Improved notifications list in profile so they can be dismissed
+ * ✅ Added tips for latest new features - likes and notifications, spotify playlist generation, and wish list.
  */
 
 import * as Data from './modules/data.js';
@@ -42,7 +41,7 @@ import { initMixPlaylistCard } from './modules/mix-playlist.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "8.9.6";
+const APP_VERSION = "8.9.7";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 

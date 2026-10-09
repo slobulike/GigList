@@ -31,7 +31,8 @@ const parseGLDate = parseDate;
 
 const VERSION_SHIP_DATES = {
   "1.0": "01/06/2026",
-  // "1.1": "DD/MM/YYYY",  ← add future versions here
+  "1.1": "09/10/2026",  // Spotify daily playlist, likes & notifications, wish list
+  // "1.2": "DD/MM/YYYY",  ← add future versions here
 };
 const NEW_BADGE_DAYS = 30;
 

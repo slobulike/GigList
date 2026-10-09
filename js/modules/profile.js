@@ -21,6 +21,7 @@ import { renderBadges, renderBadgeStrip, buildBadgeDefs, deriveFanType } from '.
 import { initPushUI } from './push.js';
 import { initTips, syncSeenState, getSeenCount, getTotalCount, TIP_GROUPS, getGroupProgress } from './tips-registry.js';
 import { initTipsHub } from './tips-hub.js';
+import { refreshTipDots, markTipUsed } from './tip-dots.js';
 import { escapeHtml, safeUrl } from './utils.js';
 import { showInstallHelp, canShowInstallHelp } from './install-prompt.js';
 import { initNotifications, renderNotificationStrip, renderNotificationList, dismissAllNotifications } from './notifications.js';
@@ -43,7 +44,8 @@ export async function initProfile(currentUser) {
         // so getSeenCount() is correct when the strip label renders.
         if (currentUser?.id) {
             initTips(currentUser.id);
-            syncSeenState(); // fire-and-forget background Supabase sync
+            refreshTipDots();
+            syncSeenState().finally(() => refreshTipDots()); // background Supabase sync, then re-check dots
         }
 
     _populateHeaderAvatar(currentUser);
@@ -426,6 +428,7 @@ async function _renderNotificationsCard() {
     try {
         const { shown, total } = await renderNotificationStrip(list, { count: 3 });
         card.classList.toggle('hidden', total === 0);
+        if (total > 0) markTipUsed('likes_notifications');
         if (viewAll) {
             viewAll.classList.toggle('hidden', total <= shown);
             viewAll.textContent = `View all (${total})`;
@@ -972,20 +975,24 @@ window.closeAchievements = () => {
 
 const TIP_GROUP_ICONS = {
     your_shows:   'mic',
+    playlists:    'headphones',
     your_history: 'bar-chart-2',
     your_feed:    'sparkles',
     achievements: 'trophy',
     buddies:      'users',
+    wish_list:    'star',
     collection:   'disc',
     band_pages:   'search',
 };
 
 const TIP_GROUP_SHORT_LABELS = {
     your_shows:   'Shows',
+    playlists:    'Playlists',
     your_history: 'History',
     your_feed:    'Feed',
     achievements: 'Badges',
     buddies:      'Buddies',
+    wish_list:    'Wish List',
     collection:   'Collection',
     band_pages:   'Band Pages',
 };
@@ -1044,6 +1051,7 @@ window.openTipsHub = () => {
             hideHeader: true,
             onCtaNavigate: (url) => {
                 window.closeTipsHub();
+                refreshTipDots();
                 setTimeout(() => _navigateTipLink(url), 80);
             },
         });
@@ -1073,12 +1081,20 @@ function _navigateTipLink(url) {
         case 'collection': window.switchView('collection'); break;
         case 'profile':    window.switchView('profile');    break;
         case 'social':     window.switchView('social');     break;
+        case 'wishlist':   window.openWishlistModal?.();    break; // modal, not a view
         default:
             // vault.html with no hash → home tab
             window.switchView('home');
             break;
     }
 }
+
+// Expose so feed tip cards / Explore card (tip-nudges.js) route in-app rather than
+// falling back to window.location.href.
+window._navigateTipLink = _navigateTipLink;
+
+// markTipUsed() elsewhere → keep the Hub strip's progress/circles in step.
+window.addEventListener('giglist:tips-changed', () => _updateTipsStripLabel());
 
 window.openBuddyList = () => {
     document.getElementById('profile-buddy-strip')?.closest('.bg-white')?.classList.add('hidden');
