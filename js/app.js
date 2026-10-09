@@ -1,8 +1,8 @@
 /**
  * GigList Core Engine
- * v8.9.7 — 2026-10-09
+ * v8.9.8 — 2026-10-09
  * ------------------------------------------------------------------
- * ✅ Added tips for latest new features - likes and notifications, spotify playlist generation, and wish list.
+ * ✅ Bug fix to Collection shelf view so that swiping back does not exit the app
  */
 
 import * as Data from './modules/data.js';
@@ -41,7 +41,7 @@ import { initMixPlaylistCard } from './modules/mix-playlist.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "8.9.7";
+const APP_VERSION = "8.9.8";
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 

@@ -1270,7 +1270,7 @@ window._colOpenLightbox = (url, _total) => {
 
     lb.innerHTML = `
         <!-- X button -->
-        <button onclick="document.getElementById('col-lightbox').remove()"
+        <button onclick="window._colCloseLightbox()"
                 aria-label="Close photo"
                 class="absolute top-5 right-5 w-10 h-10 rounded-full bg-white/20 hover:bg-white/30 text-white flex items-center justify-center transition-all active:scale-95 z-10">
             <i data-lucide="x" class="w-5 h-5" aria-hidden="true"></i>
@@ -1284,11 +1284,17 @@ window._colOpenLightbox = (url, _total) => {
 
     // Tap outside image closes
     lb.addEventListener('click', (e) => {
-        if (e.target === lb) lb.remove();
+        if (e.target === lb) window._colCloseLightbox();
     });
 
     document.body.appendChild(lb);
+    _pushLayer('lightbox');
     if (window.lucide) lucide.createIcons();
+};
+
+window._colCloseLightbox = () => {
+    _closeLayerUI('lightbox');
+    _releaseLayer('lightbox');
 };
 
 // ─── CLICK DELEGATION ────────────────────────────────────────────────────────
@@ -1333,20 +1339,81 @@ function _wireCollectionClicks(root) {
     root.addEventListener('click', _handleCollectionClick);
 }
 
+// ─── BACK-GESTURE / HISTORY LAYERS ───────────────────────────────────────────
+// The drill-down panel, item sheet and lightbox each push a history entry when
+// they open, so the system back gesture (Android edge swipe / back button, iOS
+// edge swipe) closes the top-most layer instead of leaving the app.
+//   • Back gesture  → popstate → _closeLayerUI() closes whatever is on top.
+//   • In-app close  → closes immediately, then quietly pops its own history
+//                     entry (_ignorePops swallows the resulting popstate).
+
+const _layers = [];       // open layers, bottom → top, e.g. ['drill', 'item']
+let   _ignorePops = 0;
+
+// A reload can leave a stale colDepth in history.state with no layers open.
+try {
+    if (history.state && history.state.colDepth) {
+        const { colDepth, ...rest } = history.state;
+        history.replaceState(rest, '');
+    }
+} catch (_) { /* non-fatal */ }
+
+function _pushLayer(name) {
+    if (_layers.includes(name)) return;
+    _layers.push(name);
+    try {
+        history.pushState({ ...(history.state || {}), colDepth: _layers.length }, '');
+    } catch (_) { /* non-fatal: back just falls through to default behaviour */ }
+}
+
+function _releaseLayer(name) {
+    const idx = _layers.lastIndexOf(name);
+    if (idx === -1) return;
+    // Only pop history if the current entry is the one this layer pushed —
+    // otherwise history.back() could navigate out of the app.
+    const ownsTopEntry = idx === _layers.length - 1 &&
+                         history.state?.colDepth === _layers.length;
+    _layers.splice(idx, 1);
+    if (ownsTopEntry) { _ignorePops++; history.back(); }
+}
+
+function _closeLayerUI(name) {
+    if (name === 'drill') {
+        const panel = document.getElementById('col-drill-panel');
+        if (panel) {
+            panel.classList.add('translate-x-full');
+            panel.setAttribute('aria-hidden', 'true');
+        }
+        _drillType = null;
+    } else if (name === 'item') {
+        const sheet = document.getElementById('col-item-sheet');
+        if (sheet) {
+            sheet.classList.add('translate-y-full');
+            sheet.setAttribute('aria-hidden', 'true');
+        }
+    } else if (name === 'lightbox') {
+        document.getElementById('col-lightbox')?.remove();
+    }
+}
+
+window.addEventListener('popstate', () => {
+    if (_ignorePops > 0) { _ignorePops--; return; }
+    const target = history.state?.colDepth || 0;
+    while (_layers.length > target) _closeLayerUI(_layers.pop());
+});
+
 // ─── WINDOW HELPERS ──────────────────────────────────────────────────────────
 
 window._colOpenDrillDown = (subtype) => {
     _drillType  = subtype;
     _drillFilter = 'all';
     _renderDrillDown(subtype);
+    _pushLayer('drill');
 };
 
 window._colCloseDrillDown = () => {
-    const panel = document.getElementById('col-drill-panel');
-    if (!panel) return;
-    panel.classList.add('translate-x-full');
-    panel.setAttribute('aria-hidden', 'true');
-    _drillType = null;
+    _closeLayerUI('drill');
+    _releaseLayer('drill');
 };
 
 window._colSetView = (view) => {
@@ -1400,13 +1467,12 @@ window._colOpenItem = (id) => {
             sheet.addEventListener('click', () => window._colCloseItem());
         }
     }
+    _pushLayer('item');
 };
 
 window._colCloseItem = () => {
-    const sheet = document.getElementById('col-item-sheet');
-    if (!sheet) return;
-    sheet.classList.add('translate-y-full');
-    sheet.setAttribute('aria-hidden', 'true');
+    _closeLayerUI('item');
+    _releaseLayer('item');
 };
 
 window._colSetCuration = (key) => {
