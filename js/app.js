@@ -1,8 +1,8 @@
 /**
  * GigList Core Engine
- * v8.9.9 — 2026-10-10
+ * v9.0.0 — 2026-10-10
  * ------------------------------------------------------------------
- * ✅ Claude Opus 5.5 review changes
+ * ✅ First phase of band mode overhaul - aligned UI to personal mode with Gigs tab now showing calendar and map views
  */
 
 import * as Data from './modules/data.js';
@@ -26,6 +26,8 @@ import { initModeSwitcher } from './modules/switcher.js';
 import * as Feed from './modules/feed.js';
 import { initBuddies } from './modules/buddies.js';
 import { initProfile } from './modules/profile.js';
+import { initTips, syncSeenState } from './modules/tips-registry.js';
+import { refreshTipDots } from './modules/tip-dots.js';
 import { initBandMode } from './modules/band.js';
 import { applyFilters, buildSummaryLine, hasActiveFilters } from './modules/filters.js';
 import { initDeepLink, markAppReady } from './modules/deep-link.js';
@@ -41,7 +43,7 @@ import { initMixPlaylistCard } from './modules/mix-playlist.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "8.9.9";
+const APP_VERSION = "9.0.0";
 
 // Columns of profiles that the app is allowed to read (see the column grants
 // in Supabase). home_lat / home_lng / home_label are deliberately excluded:
@@ -407,6 +409,14 @@ export async function initApp() {
             await initSocial(currentUser);
             resolveCompanionTags(currentUser); // fire-and-forget, no await needed
         }
+
+    // Tips seen-state — both modes. Must run before anything renders tip dots or
+    // modal tips, otherwise hasSeen() is false for every tip.
+    if (currentUser?.id) {
+        initTips(currentUser.id);
+        refreshTipDots();
+        syncSeenState().finally(() => refreshTipDots());
+    }
 
     initModeSwitcher(currentUser);
 

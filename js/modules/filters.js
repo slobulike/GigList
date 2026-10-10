@@ -100,18 +100,31 @@ export function applyFilters(data) {
     results = results.filter(g => !!g.review_url?.trim() === want);
   }
 
-  // Has setlist data — check window._performances for matching journal_key
+  // Has setlist data. Reads both performance sources (personal mode fills
+  // window._performances, band mode fills window.performanceData) and treats
+  // the "no setlist" sentinels as missing — NOT_FOUND etc. used to count as
+  // "has setlist". Keys are collected once per call (was a scan per row).
   if (_state.hasSetlist !== 'all') {
     const want = _state.hasSetlist === 'yes';
-    results = results.filter(g => {
-      const has = window._performances
-        ? window._performances.some(p => p.journal_key === g.journal_key && p.setlist?.trim())
-        : false;
-      return has === want;
-    });
+    const withSetlists = _journalKeysWithSetlists();
+    results = results.filter(g => withSetlists.has(g.journal_key) === want);
   }
 
   return results;
+}
+
+const _NO_SETLIST = new Set(['', 'NOT_FOUND', 'NO_SONGS_LISTED', 'NO_SETLIST_FOUND', 'NAN', 'NONE', 'NULL']);
+
+function _journalKeysWithSetlists() {
+  const keys = new Set();
+  const add = (p) => {
+    const key = p.journal_key ?? p['Journal Key'];
+    const sl  = String(p.setlist ?? p.Setlist ?? '').trim().toUpperCase();
+    if (key && !_NO_SETLIST.has(sl)) keys.add(key);
+  };
+  (window._performances || []).forEach(add);
+  (window.performanceData || []).forEach(add);
+  return keys;
 }
 
 /** Returns true if any filter is currently active. */
@@ -276,7 +289,7 @@ function _injectDrawerHTML() {
         </div>
 
         <!-- Artist -->
-        <div>
+        <div class="personal-only">
           <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Artist</p>
           <select id="filter-artist-input"
                   class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white
@@ -296,7 +309,7 @@ function _injectDrawerHTML() {
         </div>
 
         <!-- Companion -->
-        <div>
+        <div class="personal-only">
           <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Went With</p>
           <select id="filter-companion-input"
                   class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white
@@ -316,7 +329,7 @@ function _injectDrawerHTML() {
         </div>
 
         <!-- Has photos -->
-        <div>
+        <div class="personal-only">
           <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Photo Album</p>
           <div class="flex rounded-lg overflow-hidden border border-gray-600">
             ${_triToggleBtn('filter-photos', 'all', 'All', true)}
@@ -326,7 +339,7 @@ function _injectDrawerHTML() {
         </div>
 
         <!-- Has review -->
-        <div>
+        <div class="personal-only">
           <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Review URL</p>
           <div class="flex rounded-lg overflow-hidden border border-gray-600">
             ${_triToggleBtn('filter-review', 'all', 'All', true)}

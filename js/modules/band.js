@@ -2,12 +2,16 @@
  * GigList — Band Mode Module
  * band.js
  * -------------------------------------------------------------------
- * Owns all band mode tab behaviour: Shows, Summary, Fans.
+ * Owns band mode navigation: Gigs, Stats, Fans.
+ * Gigs and Stats are the SAME sections personal mode uses (#view-data and
+ * #view-stats, rendered by app.js refreshUI / ui.js / charts.js); band.js only
+ * adapts their copy, adds the band narrative + stat tiles, and owns Fans.
  * Imported and called from app.js after data load when isBandMode.
  *
  * Public API (exposed on window):
- *   window.switchBandView(tab)   — switches active band tab
- *   window.bandShowsSearch(val)  — filters the Shows list
+ *   window.switchBandView(tab)   — 'gigs' | 'stats' | 'fans'
+ *                                   ('shows' / 'summary' still accepted)
+ *   window.bandShowsSearch(val)  — sets the shared search box (back-compat)
  *
  * Data model note:
  *   journals.user_id = null  → imported via band-archive script (setlist.fm)
@@ -17,7 +21,6 @@
 
 import { supabase }             from './supabase.js';
 import { parseDate, escapeHtml, safeUrl } from './utils.js';
-import * as Charts              from './charts.js';
 import { loadPerformances }     from './data.js';
 
 // ─── Module-level state ───────────────────────────────────────────────────────
@@ -25,7 +28,6 @@ import { loadPerformances }     from './data.js';
 let _journalData     = [];   // all shows for this band (archive + user-logged)
 let _performanceData = [];
 let _currentUser     = null;
-let _filteredShows   = [];
 let _buddyStatus     = {};   // userId -> 'accepted' | 'pending' | null
 let _fanCount          = null;  // unique fans (distinct user_ids), set by _loadBandStats
 let _fanAttendance     = null;  // total attended show-instances, set by _loadBandStats
@@ -36,11 +38,13 @@ export async function initBandMode(currentUser, journalData, performanceData) {
     _currentUser     = currentUser;
     _journalData     = journalData     || [];
     _performanceData = performanceData || [];
-    _filteredShows   = [..._journalData];
 
     // Expose tab switcher globally (called by band nav onclick in vault.html)
     window.switchBandView  = switchBandView;
-    window.bandShowsSearch = bandShowsSearch;
+    window.bandShowsSearch = (val) => {
+        const el = document.getElementById('searchInput');
+        if (el) { el.value = val || ''; window.refreshUI?.(); }
+    };
     window.isReadOnly = !_currentUser?.is_admin;
 
     // Load buddy status for the authed viewer (non-blocking)
@@ -54,28 +58,60 @@ export async function initBandMode(currentUser, journalData, performanceData) {
     // Render hero image on the shows landing tab (non-blocking)
     _renderBandHero().catch(err => console.warn('band.js: hero render failed', err));
 
-    // Show default tab
-    switchBandView('shows');
+    // Band-specific copy on the shared Gigs / Stats views
+    _applyBandCopy();
+
+    // Show default tab (first paint happens before setlists load)
+    switchBandView('gigs');
+
+    // Setlists feed the Songs tile, song search and Top Songs chart, so load
+    // them in the background and re-render when they arrive.
+    setTimeout(() => {
+        _loadPerformancesIfNeeded().then(() => {
+            window.refreshUI?.();
+            _renderBandStory();
+        });
+    }, 0);
+}
+
+function _applyBandCopy() {
+    const band = window.currentArtist || 'this band';
+    const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+    set('data-centre-title', 'Shows');
+    set('data-centre-subtitle', `Every ${band} show on record`);
+    set('stats-subtitle', `${band}, charted`);
+    ['searchInput', 'statsSearchInput'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.placeholder = 'Search venues, songs, dates…';
+            el.setAttribute('aria-label', 'Search venues, songs or dates');
+        }
+    });
 }
 
 // ─── TAB SWITCHER ─────────────────────────────────────────────────────────────
 
+const _BAND_TAB_ALIASES = { shows: 'gigs', summary: 'stats' };
+const _BAND_TAB_SECTION = { gigs: 'view-data', stats: 'view-stats', fans: 'view-band-fans' };
+
 function switchBandView(tab) {
-    // Hide all band sections
-    document.querySelectorAll('.band-view-section').forEach(s => {
+    tab = _BAND_TAB_ALIASES[tab] || tab;
+    const targetId = _BAND_TAB_SECTION[tab];
+    if (!targetId) return;
+
+    // Hide every section (shared personal views + band-only ones), show target
+    document.querySelectorAll('.view-section, .band-view-section').forEach(s => {
         s.classList.add('hidden');
         s.setAttribute('aria-hidden', 'true');
     });
-
-    // Show target section
-    const target = document.getElementById(`view-band-${tab}`);
+    const target = document.getElementById(targetId);
     if (target) {
         target.classList.remove('hidden');
         target.setAttribute('aria-hidden', 'false');
     }
 
     // Update band nav active state
-    ['shows', 'summary', 'fans'].forEach(t => {
+    ['gigs', 'stats', 'fans'].forEach(t => {
         const btn = document.getElementById(`band-nav-${t}`);
         if (!btn) return;
         if (t === tab) {
@@ -89,11 +125,14 @@ function switchBandView(tab) {
         }
     });
 
-    // Render the tab content
-    if (tab === 'shows')   _renderBandShows();
-    if (tab === 'summary') _loadPerformancesIfNeeded().then(() => _renderBandStory());
-    if (tab === 'fans')    _renderBandFans();
+    if (tab === 'gigs' || tab === 'stats') {
+        // Shared views render from refreshUI; make sure they reflect current data
+        window.refreshUI?.();
+        if (tab === 'stats') _renderBandStory();
+    }
+    if (tab === 'fans') _renderBandFans();
 
+    if (window.lucide) lucide.createIcons();
     window.scrollTo(0, 0);
 }
 
@@ -153,119 +192,10 @@ async function _renderBandHero() {
 
 // ─── SHOWS TAB ────────────────────────────────────────────────────────────────
 
-function bandShowsSearch(val) {
-    const q = (val || '').toLowerCase().trim();
-    _filteredShows = q
-        ? _journalData.filter(g =>
-            (g.Date         || '').toLowerCase().includes(q) ||
-            (g.OfficialVenue|| '').toLowerCase().includes(q) ||
-            (g.Venue        || '').toLowerCase().includes(q) ||
-            (g.Type         || '').toLowerCase().includes(q)
-          )
-        : [..._journalData];
-    _renderBandShows();
-}
-
-function _renderBandShows() {
-    const container = document.getElementById('band-shows-table');
-    if (!container) return;
-
-    const data = _filteredShows;
-
-    if (!data.length) {
-        container.innerHTML = `
-            <div class="text-center py-16 text-slate-400">
-                <p class="text-4xl mb-3">🎸</p>
-                <p class="font-black text-sm">No shows found</p>
-            </div>`;
-        return;
-    }
-
-    // Sort by date descending (default)
-    const sorted = [...data].sort((a, b) => {
-        const da = parseDate(a.Date);
-        const db = parseDate(b.Date);
-        if (!da && !db) return 0;
-        if (!da) return 1;
-        if (!db) return -1;
-        return db - da;
-    });
-
-    const typeColors = {
-        'Headline': 'text-indigo-600 bg-indigo-50 border-indigo-100',
-        'Festival': 'text-amber-600  bg-amber-50  border-amber-100',
-        'Support':  'text-slate-600  bg-slate-50  border-slate-100',
-        'TV':       'text-emerald-600 bg-emerald-50 border-emerald-100',
-    };
-
-    const rows = sorted.map(g => {
-        const typeClass = typeColors[g.Type] || typeColors['Headline'];
-        // Journal Key is built from date + venue text, so it is escaped into
-        // data-key and opened via the delegated listener (_wireBandShowsClicks)
-        // rather than interpolated into an inline onclick.
-        const keyAttr   = g['Journal Key'] ? `data-key="${escapeHtml(g['Journal Key'])}"` : '';
-        // Shows with a real user_id were logged by a GigList user — show a subtle indicator
-        const hasUser   = g.user_id && g.user_id !== 'null';
-        return `
-            <tr class="border-t border-slate-100 hover:bg-indigo-50/30 cursor-pointer transition-colors"
-                ${keyAttr}>
-                <td class="p-3 text-[11px] font-bold text-slate-500 whitespace-nowrap">${escapeHtml(g.Date || '--')}</td>
-                <td class="p-3 text-sm font-bold text-slate-800 truncate max-w-0">
-                    <span class="block truncate">${escapeHtml(g.OfficialVenue || g.Venue || '--')}</span>
-                </td>
-                <td class="p-3">
-                    <span class="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border ${typeClass}">
-                        ${escapeHtml(g.Type || 'Headline')}
-                    </span>
-                </td>
-                <td class="p-3 w-6 text-center">
-                    ${hasUser ? `<span title="Attended by a GigList user" class="text-[#189BCC] text-xs">♪</span>` : ''}
-                </td>
-            </tr>`;
-    }).join('');
-
-    // Footer note distinguishing archive vs user-logged
-    const userLoggedCount = sorted.filter(g => g.user_id && g.user_id !== 'null').length;
-    const footerNote = userLoggedCount > 0
-        ? `${sorted.length} show${sorted.length !== 1 ? 's' : ''} · ${userLoggedCount} attended by GigList fans`
-        : `${sorted.length} show${sorted.length !== 1 ? 's' : ''}`;
-
-    container.innerHTML = `
-        <div class="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
-            <table class="w-full text-left table-fixed">
-                <thead>
-                    <tr class="bg-slate-50/50">
-                        <th class="w-24 p-3 text-[10px] font-black uppercase tracking-widest text-slate-400">Date</th>
-                        <th class="p-3 text-[10px] font-black uppercase tracking-widest text-slate-400">Venue</th>
-                        <th class="w-24 p-3 text-[10px] font-black uppercase tracking-widest text-slate-400">Type</th>
-                        <th class="w-6 p-3"></th>
-                    </tr>
-                </thead>
-                <tbody>${rows}</tbody>
-            </table>
-        </div>
-        <p class="text-center text-[10px] text-slate-400 font-bold mt-3">${footerNote}</p>`;
-
-    _wireBandShowsClicks(container);
-
-    if (window.lucide) lucide.createIcons();
-}
-
-// Delegated row-open click for the shows table (replaces the per-row inline
-// onclick). Attached once per container element via a guard flag.
-function _wireBandShowsClicks(container) {
-    if (!container || container._bandShowsClickWired) return;
-    container._bandShowsClickWired = true;
-    container.addEventListener('click', (e) => {
-        const row = e.target.closest('tr[data-key]');
-        if (row && container.contains(row)) window.viewGigDetails(row.dataset.key);
-    });
-}
-
 // ─── LAZY PERFORMANCE LOADER ──────────────────────────────────────────────────
-// Performances are NOT fetched on band page load — only when the user opens
-// the Summary tab (which is the sole consumer via the Songs chart).
-// One single IN query replaces the N+1 pattern that was firing previously.
+// Performances are not needed for first paint, so initBandMode loads them in
+// the background after the Gigs tab renders. They power the Songs tile, song
+// search and the Top Songs chart. Chunked IN queries (see data.js).
 
 async function _loadPerformancesIfNeeded() {
     if (_performancesLoaded) return;
@@ -280,7 +210,7 @@ async function _loadPerformancesIfNeeded() {
         window.performanceData = _performanceData;
     } catch (err) {
         console.warn('band.js: performances load failed', err);
-        _performancesLoaded = false; // allow retry if user opens Summary again
+        _performancesLoaded = false; // allow a retry on the next call
     }
 }
 
@@ -289,8 +219,6 @@ async function _loadPerformancesIfNeeded() {
 function _renderBandStory() {
     _renderSummaryNarrative();
     _renderStoryStats();
-    _renderStoryYearChart();
-    _renderStorySongsChart();
 }
 
 function _renderSummaryNarrative() {
@@ -375,23 +303,8 @@ function _renderStoryStats() {
     });
     const topVenue = Object.entries(venueCounts).sort((a, b) => b[1] - a[1])[0];
 
-    // Longest gap between shows
-    const dates = data
-        .map(g => parseDate(g.Date))
-        .filter(Boolean)
-        .sort((a, b) => a - b);
-
-    let longestGapDays  = 0;
-    let longestGapLabel = '--';
-    for (let i = 1; i < dates.length; i++) {
-        const diff = Math.round((dates[i] - dates[i - 1]) / (1000 * 60 * 60 * 24));
-        if (diff > longestGapDays) {
-            longestGapDays  = diff;
-            const y1 = dates[i - 1].getFullYear();
-            const y2 = dates[i].getFullYear();
-            longestGapLabel = y1 === y2 ? `${y1}` : `${y1}–${y2}`;
-        }
-    }
+    // Countries played (from venue lookups; blank until venues resolve)
+    const countries = new Set(data.map(g => (g.Country || '').trim()).filter(Boolean));
 
     const cards = [
         {
@@ -407,7 +320,7 @@ function _renderStoryStats() {
         {
             label: 'GigList Reach',
             value: (_fanAttendance != null && data.length > 0)
-                       ? `${Math.round((_fanAttendance / data.length) * 100)}%`
+                       ? _formatReach(_fanAttendance / data.length)
                        : '--',
             sub:   (_fanAttendance != null && data.length > 0)
                        ? 'of archived shows attended'
@@ -434,9 +347,9 @@ function _renderStoryStats() {
             sub:   topVenue ? _truncate(topVenue[0], 22) : '',
         },
         {
-            label: 'Longest Gap',
-            value: longestGapDays > 0 ? `${longestGapDays}d` : '--',
-            sub:   longestGapDays > 0 ? longestGapLabel : '',
+            label: 'Countries',
+            value: countries.size || '--',
+            sub:   countries.size ? 'played in' : '',
         },
     ];
 
@@ -446,33 +359,6 @@ function _renderStoryStats() {
             <p class="text-xl font-black text-indigo-700 leading-none">${escapeHtml(c.value)}</p>
             ${c.sub ? `<p class="text-[9px] text-slate-400 font-bold mt-1 leading-snug">${escapeHtml(c.sub)}</p>` : ''}
         </div>`).join('');
-}
-
-function _renderStoryYearChart() {
-    const data = _journalData;
-    if (!data.length) return;
-    try {
-        Charts.renderYearChart(data, 'band-story-year-chart');
-    } catch (e) {
-        console.warn('band.js: year chart render failed', e);
-    }
-}
-
-function _renderStorySongsChart() {
-    const wrap = document.getElementById('band-story-songs-wrap');
-    if (!wrap) return;
-
-    if (_performanceData && _performanceData.length) {
-        wrap.classList.remove('hidden');
-        try {
-            Charts.renderTopSongsChart(_journalData, 'band-story-songs-chart');
-        } catch (e) {
-            console.warn('band.js: songs chart render failed', e);
-            wrap.classList.add('hidden');
-        }
-    } else {
-        wrap.classList.add('hidden');
-    }
 }
 
 // ─── RLS NOTE — band mode queries ────────────────────────────────────────────
@@ -744,6 +630,8 @@ async function _loadBandStats() {
             animateStatTo(rankEl, _fanCount);
         }
         if (labelEl) labelEl.textContent = 'Fans';
+
+    _renderBandStory();
 }
 
 async function _loadBuddyStatus() {
@@ -760,6 +648,14 @@ async function _loadBuddyStatus() {
         const otherId = b.requester_id === id ? b.addressee_id : b.requester_id;
         _buddyStatus[otherId] = b.status;
     });
+}
+
+// 0.3% not "0%": tiny shares round to one decimal, larger ones to whole numbers.
+function _formatReach(ratio) {
+    const pct = ratio * 100;
+    if (pct <= 0) return '0%';
+    if (pct < 1)  return `${pct.toFixed(1)}%`;
+    return `${Math.round(pct)}%`;
 }
 
 function _truncate(str, maxLen) {

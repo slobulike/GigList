@@ -30,6 +30,11 @@
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         .nav-item.active { color: #4f46e5; }
         .band-nav-item.active { color: #189BCC; }
+        /* Band mode reuses the personal Gigs/Stats views. .personal-only hides
+           personal features there; .band-only shows band extras only there. */
+        .band-only { display: none; }
+        body.band-mode .band-only { display: block; }
+        body.band-mode .personal-only { display: none !important; }
     </style>
     <link rel="stylesheet" href="css/style.css">
     <link rel="icon" type="image/png" href="assets/icon-512.png">
@@ -205,15 +210,18 @@
     </section>
 
     <section id="view-data" class="view-section hidden space-y-6" role="region" aria-labelledby="data-centre-title" aria-hidden="true">
+        <!-- Band mode only: hero image, populated by band.js -->
+        <div id="band-hero" class="band-only"></div>
+
         <div class="flex items-center justify-between">
             <div>
                 <h2 id="data-centre-title" class="font-display text-5xl italic tracking-tight text-slate-900">Live Music</h2>
-                <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-0.5">Your personal live music journal</p>
+                <p id="data-centre-subtitle" class="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-0.5">Your personal live music journal</p>
             </div>
             <button id="btn-add-show"
                     onclick="window.openAddShowFork()"
                     aria-label="Add a new show"
-                    class="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black uppercase tracking-widest px-4 py-2.5 rounded-full transition-all active:scale-95">
+                    class="personal-only flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black uppercase tracking-widest px-4 py-2.5 rounded-full transition-all active:scale-95">
                 <i data-lucide="plus" class="w-3.5 h-3.5" aria-hidden="true"></i>
                 Add Show
             </button>
@@ -278,7 +286,7 @@
                     </button>
                 </div>
 
-                <div class="flex items-center gap-3 self-end sm:self-auto">
+                <div class="personal-only flex items-center gap-3 self-end sm:self-auto">
                     <span class="text-[10px] font-black uppercase tracking-tighter text-slate-400 italic">Include Upcoming</span>
                     <label class="relative inline-flex items-center cursor-pointer">
                         <input type="checkbox" id="upcoming-toggle" class="hidden peer" onchange="window.handleUpcomingToggle()" checked>
@@ -308,11 +316,11 @@
         <div class="flex items-start justify-between gap-3">
             <div>
                 <h2 class="font-display text-5xl italic tracking-tight text-slate-900">Stats</h2>
-                <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-0.5">Your live music history, charted</p>
+                <p id="stats-subtitle" class="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-0.5">Your live music history, charted</p>
             </div>
             <button onclick="window._statsOpenShare(window.journalData)"
                     aria-label="Share your stats"
-                    class="flex-shrink-0 mt-1 w-11 h-11 flex items-center justify-center bg-white border border-slate-200 rounded-2xl text-slate-500 hover:border-indigo-400 hover:text-indigo-600 transition-all shadow-sm">
+                    class="personal-only flex-shrink-0 mt-1 w-11 h-11 flex items-center justify-center bg-white border border-slate-200 rounded-2xl text-slate-500 hover:border-indigo-400 hover:text-indigo-600 transition-all shadow-sm">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/>
                 </svg>
@@ -320,7 +328,7 @@
         </div>
 
         <!-- Gigs / Collection mode switcher — same pill pattern as the Gigs tab's list/calendar/map switcher -->
-        <div class="flex bg-slate-100 p-1 rounded-2xl shadow-inner w-fit">
+        <div class="personal-only flex bg-slate-100 p-1 rounded-2xl shadow-inner w-fit">
             <button id="stats-btn-gigs" onclick="window.toggleStatsView('gigs')"
                     class="px-5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all bg-white shadow-sm text-indigo-600">
                 Gigs
@@ -369,6 +377,12 @@
              reflect whatever that state currently is. -->
 
         <!-- ── GIGS CHARTS (unchanged — just wrapped so the switcher can hide/show it) ── -->
+        <!-- Band mode only: narrative + stat tiles, populated by band.js -->
+        <div id="band-stats-intro" class="band-only space-y-4">
+            <div id="band-summary-narrative" class="px-1"></div>
+            <div id="band-story-stats" class="grid grid-cols-2 gap-3"></div>
+        </div>
+
         <div id="view-gigs-stats" class="grid grid-cols-1 gap-4">
 
             <div id="yearChartContainer" class="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm relative group h-64">
@@ -383,7 +397,7 @@
                 </div>
             </div>
 
-            <div id="topBandsChartContainer" class="group bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 hidden relative transition-all hover:shadow-md">
+            <div id="topBandsChartContainer" class="personal-only group bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 hidden relative transition-all hover:shadow-md">
                 <div class="flex justify-between items-start mb-4">
                     <div>
                         <p class="text-[10px] font-black uppercase text-slate-400 tracking-widest">Top Bands</p>
@@ -413,7 +427,7 @@
                     </div>
                 </div>
 
-                <div id="companionChartContainer" class="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm relative group h-64">
+                <div id="companionChartContainer" class="personal-only bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm relative group h-64">
                     <div class="flex justify-between items-start mb-2">
                         <p class="text-[10px] font-black uppercase text-slate-400">Companions</p>
                         <button onclick="openChartModal('companion')" class="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-slate-100 rounded-lg text-slate-400">
@@ -428,7 +442,7 @@
             </div>
 
             <!-- band frequency over time scatter plot -->
-            <div id="bandFrequencyChartContainer" class="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm relative group h-72">
+            <div id="bandFrequencyChartContainer" class="personal-only bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm relative group h-72">
                 <div class="flex justify-between items-start mb-2">
                     <p class="text-[10px] font-black uppercase text-slate-400">Band Frequency Over Time</p>
                     <button onclick="window.openChartModal('bandfrequency')" class="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-slate-100 rounded-lg text-slate-400">
@@ -441,7 +455,7 @@
             </div>
 
             <!-- 5-year hot list -->
-            <div id="hotListContainer" class="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm relative group">
+            <div id="hotListContainer" class="personal-only bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm relative group">
                 <div class="flex justify-between items-start mb-4">
                     <p class="text-[10px] font-black uppercase text-slate-400">Hot List — Last 5 Years</p>
                     <button onclick="window.openChartModal('hotlist')" class="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-slate-100 rounded-lg text-slate-400">
@@ -452,7 +466,7 @@
             </div>
 
             <!-- average ticket price / miles / buddies per show, by year -->
-            <div id="averageMetricsChartContainer" class="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm relative group h-72">
+            <div id="averageMetricsChartContainer" class="personal-only bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm relative group h-72">
                 <div class="flex justify-between items-start mb-2">
                     <p class="text-[10px] font-black uppercase text-slate-400">Averages Over Time</p>
                     <button onclick="window.openChartModal('averagemetrics')" class="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-slate-100 rounded-lg text-slate-400">
@@ -1436,67 +1450,6 @@
         </div>
     </section>
 
-    <!-- ── BAND MODE: SHOWS VIEW ──────────────────────────────────────────────── -->
-    <section id="view-band-shows"
-             class="band-view-section hidden space-y-6"
-             role="region"
-             aria-label="Band Shows"
-             aria-hidden="true">
-
-        <!-- Hero image — populated by band.js _renderBandHero() -->
-        <div id="band-hero"></div>
-
-        <div class="flex items-center justify-between">
-            <h2 class="font-display text-5xl italic tracking-tight text-slate-900">Shows</h2>
-        </div>
-
-        <div class="space-y-4 pt-4">
-            <div class="relative w-full">
-                <i data-lucide="search" class="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"></i>
-                <input type="text"
-                       id="band-shows-search"
-                       aria-label="Search shows"
-                       placeholder="Search shows, venues…"
-                       oninput="window.bandShowsSearch(this.value)"
-                       class="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm focus:ring-2 focus:ring-[#189BCC] outline-none transition-all shadow-sm">
-            </div>
-        </div>
-
-        <div id="band-shows-table"></div>
-    </section>
-
-    <!-- ── BAND MODE: STORY VIEW ─────────────────────────────────────────────── -->
-    <section id="view-band-summary"
-             class="band-view-section hidden space-y-6"
-             role="region"
-             aria-label="Band Story"
-             aria-hidden="true">
-
-        <div class="flex items-center justify-between">
-            <h2 class="font-display text-5xl italic tracking-tight text-slate-900">Summary</h2>
-        </div>
-        <div id="band-summary-narrative" class="mb-4 px-1"></div>
-
-        <!-- Stat cards grid — populated by band.js -->
-        <div id="band-story-stats" class="grid grid-cols-2 gap-3"></div>
-
-        <!-- Year chart -->
-        <div class="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm h-64">
-            <p class="text-[10px] font-black uppercase text-slate-400 mb-2">Yearly History</p>
-            <div class="h-44">
-                <canvas id="band-story-year-chart"></canvas>
-            </div>
-        </div>
-
-        <!-- Top Songs chart — populated when performanceData available -->
-        <div id="band-story-songs-wrap" class="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm hidden h-72">
-            <p class="text-[10px] font-black uppercase text-slate-400 mb-2">Top Songs</p>
-            <div class="h-56">
-                <canvas id="band-story-songs-chart"></canvas>
-            </div>
-        </div>
-    </section>
-
     <!-- ── BAND MODE: FANS VIEW ──────────────────────────────────────────────── -->
     <section id="view-band-fans"
              class="band-view-section hidden space-y-6"
@@ -1547,17 +1500,17 @@
 
 <!-- Band mode nav — hidden by default, shown in band mode via JS -->
 <nav id="band-nav" class="hidden fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-2xl border-t border-slate-100 px-6 pt-3 pb-8 flex justify-between items-center z-50" aria-label="Band navigation">
-    <button onclick="window.switchBandView('shows')" id="band-nav-shows"
+    <button onclick="window.switchBandView('gigs')" id="band-nav-gigs"
             class="band-nav-item active text-[#189BCC] bg-white shadow-sm flex flex-col items-center gap-1 flex-1 rounded-xl py-1 transition-all"
-            aria-current="page" aria-label="Shows">
-        <i data-lucide="list-music" class="w-6" aria-hidden="true"></i>
-        <span class="text-[9px] font-black uppercase">Shows</span>
+            aria-current="page" aria-label="Gigs">
+        <i data-lucide="database" class="w-6" aria-hidden="true"></i>
+        <span class="text-[9px] font-black uppercase">Gigs</span>
     </button>
-    <button onclick="window.switchBandView('summary')" id="band-nav-summary"
+    <button onclick="window.switchBandView('stats')" id="band-nav-stats"
             class="band-nav-item text-slate-400 flex flex-col items-center gap-1 flex-1 rounded-xl py-1 transition-all"
-            aria-current="false" aria-label="Summary">
+            aria-current="false" aria-label="Stats">
         <i data-lucide="bar-chart-2" class="w-6" aria-hidden="true"></i>
-        <span class="text-[9px] font-black uppercase">Summary</span>
+        <span class="text-[9px] font-black uppercase">Stats</span>
     </button>
     <button onclick="window.switchBandView('fans')" id="band-nav-fans"
             class="band-nav-item text-slate-400 flex flex-col items-center gap-1 flex-1 rounded-xl py-1 transition-all"
