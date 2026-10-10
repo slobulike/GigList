@@ -30,6 +30,7 @@ import { escapeHtml, safeUrl } from './utils.js';
 // ─── STATE ────────────────────────────────────────────────────────────────────
 
 let _user          = null;
+let _loadedUserId  = null;   // set by ensureLoaded() when Stats loads items before the tab exists
 let _items         = [];          // All loaded collection_items
 let _curations     = [];          // Saved user curations
 let _bandNames     = [];          // Distinct band names for filter chips (from journals)
@@ -51,7 +52,7 @@ function _dispatchViewChanged() {
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
-const SUBTYPE_LABELS = {
+export const SUBTYPE_LABELS = {
     cd:          'CDs',
     vinyl:       'Vinyl',
     tape:        'Tapes',
@@ -286,8 +287,10 @@ window._colResolveBandPhoto = async (artistId, bandName) => {
  *   3. In-flight requests are shared per path, so overlapping callers
  *      (collection fetch + buddy view + collage) never sign the same path twice.
  */
-const SIGN_TTL_SECS   = 60 * 60 * 24 * 7;   // 7 days
-const SIGN_REFRESH_MS = 60 * 60 * 24 * 1000; // re-sign when < 1 day left
+// Kept short: these are bearer links to private photos (yours and buddies'),
+// persisted on the device. Cleared on sign-out (see window.signOut in app.js).
+const SIGN_TTL_SECS   = 60 * 60 * 24;        // 24 hours
+const SIGN_REFRESH_MS = 60 * 60 * 2 * 1000;  // re-sign when < 2 hours left
 const SIGN_CHUNK      = 100;
 const SIGN_LS_KEY     = 'giglist_col_signed_urls_v1';
 
@@ -1786,6 +1789,7 @@ export function hasActiveFilters() {
  * init() already relies on via the _items.length check.
  */
 export async function ensureLoaded(userId) {
+    _loadedUserId = userId;
     if (_items.length > 0) return _items;
 
     [_items, _curations] = await Promise.all([
@@ -1862,16 +1866,20 @@ export async function init(currentUser) {
  * Re-fetch and re-render — called after an item is saved or deleted.
  */
 export async function refresh() {
-    if (!_user) return;
+    // Items may have been loaded by Stats (ensureLoaded) before the Collection
+    // tab ever initialised — refresh those too, or the tab shows a stale list.
+    const uid = _user?.id || _loadedUserId;
+    if (!uid) return;
     [_items, _curations] = await Promise.all([
-        _fetchItems(_user.id),
-        _fetchCurations(_user.id),
+        _fetchItems(uid),
+        _fetchCurations(uid),
     ]);
-    _bandNames = await _fetchBandNames(_user.id);
+    _bandNames = await _fetchBandNames(uid);
     // Keep window._collectionItems in sync so feed.js can read it
     window._collectionItems = _items;
     window._collectionCount = _items.length;
     updateRank();
     _renderCollectionTab();
     if (_drillType) _renderDrillDown(_drillType);
+    _dispatchViewChanged();   // so Stats → Collection charts pick up the save/delete
 }

@@ -2,9 +2,13 @@
 // Gig List — Service Worker
 // ─────────────────────────────────────────────────────────────────────────────
 
-const CACHE_NAME = 'gig-list-v6';
+const CACHE_NAME = 'gig-list-v7';
 const APP_BASE   = '/GigList/';
 const APP_ROOT   = APP_BASE + 'vault.html';
+
+// Notification clicks may only open the app itself or these hosts (on-sale
+// pushes link out to the ticket seller). Anything else falls back to the app.
+const ALLOWED_EXTERNAL_HOSTS = ['www.ticketmaster.co.uk', 'www.ticketmaster.com', 'ticketmaster.co.uk', 'ticketmaster.com'];
 
 const ASSETS = [
   './',
@@ -183,7 +187,20 @@ self.addEventListener('notificationclick', (event) => {
   event.notification.close();
 
   const data      = event.notification.data ?? {};
-  const targetUrl = new URL(data.url ?? APP_ROOT, self.location.origin).href;
+  let   parsed;
+  try { parsed = new URL(data.url ?? APP_ROOT, self.location.origin); }
+  catch { parsed = new URL(APP_ROOT, self.location.origin); }
+  const isSameOrigin = parsed.origin === self.location.origin;
+  const isAllowedExt = parsed.protocol === 'https:' && ALLOWED_EXTERNAL_HOSTS.includes(parsed.hostname);
+
+  // External link (e.g. tickets on sale): open it directly, even when the app
+  // is already open — the warm path below only understands in-app intents.
+  if (!isSameOrigin && isAllowedExt) {
+    event.waitUntil(clients.openWindow(parsed.href));
+    return;
+  }
+
+  const targetUrl = isSameOrigin ? parsed.href : new URL(APP_ROOT, self.location.origin).href;
   const params    = new URL(targetUrl).searchParams;
   const journalId = params.get('open') ?? null;
   const isWW      = params.get('ww') === '1';

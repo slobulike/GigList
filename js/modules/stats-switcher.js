@@ -50,7 +50,7 @@ window.toggleStatsView = function(mode) {
     window._statsMode = mode;
 
     if (!isGigs && window.currentUser) {
-        window._collectionChartsModule?.renderCollectionCharts(window.currentUser);
+        window._collectionChartsModule?.renderCollectionCharts(window.currentUser)?.catch(e => console.warn('[Stats] collection charts failed:', e));
     }
 };
 
@@ -77,7 +77,7 @@ document.getElementById('statsSearchInput')?.addEventListener('input', (e) => {
 // next toggleStatsView('collection') call picks up the latest state anyway.
 document.addEventListener('collectionViewChanged', () => {
     if (window._statsMode === 'collection' && window.currentUser) {
-        window._collectionChartsModule?.renderCollectionCharts(window.currentUser);
+        window._collectionChartsModule?.renderCollectionCharts(window.currentUser)?.catch(e => console.warn('[Stats] collection charts failed:', e));
     }
 });
 

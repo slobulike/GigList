@@ -1396,9 +1396,16 @@ const REACT_STYLES = {
 
 const _reactKey = (type, id) => `${type === 'journal' ? 'j' : 'c'}:${id}`;
 
-async function fetchMyReactions() {
-    if (window._myReactions) return window._myReactions;
-    window._myReactions = new Map();
+// Single-flight: concurrent callers (feed init + a cold-start deep link) share
+// one request. A failed load is not cached, so the next caller retries.
+let _reactionsPromise = null;
+function fetchMyReactions() {
+    if (window._reactionsAvailable) return Promise.resolve(window._myReactions);
+    return (_reactionsPromise ??= _loadMyReactions().finally(() => { _reactionsPromise = null; }));
+}
+
+async function _loadMyReactions() {
+    window._myReactions ??= new Map();
     try {
         const { data: { session } } = await supabase.auth.getSession();
         const uid = session?.user?.id;
@@ -1506,8 +1513,20 @@ function applyReactionState(root = document) {
     });
 }
 
+// One save in flight per card, so a double-tap can't race an upsert against
+// a delete and leave the server disagreeing with the UI.
+const _reactInflight = new Set();
+
 async function toggleReaction(row, kind) {
     if (!window._reactionsAvailable || !window._myReactionsUid) return;
+    const lock = `${row.dataset.reactType}:${row.dataset.reactIds}`;
+    if (_reactInflight.has(lock)) return;
+    _reactInflight.add(lock);
+    try { await _saveReaction(row, kind); }
+    finally { _reactInflight.delete(lock); }
+}
+
+async function _saveReaction(row, kind) {
     const type = row.dataset.reactType;
     const col  = type === 'journal' ? 'journal_id' : 'collection_item_id';
     const ids  = (row.dataset.reactIds || '').split(',').filter(Boolean);
@@ -2240,7 +2259,7 @@ export async function init(journalData, performanceData, _ignored = []) {
     // 3. Cache check
     const buddyCollectionCount = Object.values(buddyCollectionItemsByUser).reduce((n, items) => n + items.length, 0);
     const buddyJournalCount    = Object.values(buddyJournalsByUser).reduce((n, rows) => n + rows.length, 0);
-    const cacheKey   = `giglist_feed_v${FEED_LOGIC_VERSION}_${new Date().toDateString()}_j${journalData.length}_c${collectionItems.length}_b${buddyProfiles.length}_bc${buddyCollectionCount}_bj${buddyJournalCount}`;
+    const cacheKey   = `giglist_feed_v${FEED_LOGIC_VERSION}_${new Date().toDateString()}_j${journalData.length}_c${collectionItems.length}_b${buddyProfiles.length}_bc${buddyCollectionCount}_bj${buddyJournalCount}_r${window._reactionsAvailable ? 1 : 0}`;
     // TEMP DEBUG — skip the cache entirely so every load rebuilds from scratch
     // and actually reaches the window._feedCards / console.table logging below.
     // Otherwise a same-day reload just replays the cached HTML and skips it.

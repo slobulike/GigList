@@ -555,6 +555,7 @@ window.acceptFollowRequest = async (userId, username, rowEl) => {
 
     rowEl?.remove();
     window.showToast(`You're now gig buddies with ${username}!`, 'success');
+    window.checkNudgeTrigger?.('buddy_added');
     _renderBuddyList();
     rebuildSwitcherPanel();
 
@@ -862,3 +863,4 @@ window._openProfileFromModal = (userId) => {
     window.closeModal();
     window.openProfile(userId);
 };
+

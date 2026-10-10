@@ -98,10 +98,17 @@ function showBanner(mode) {
   const installBtn = banner.querySelector('.ib-install');
   if (installBtn) {
     installBtn.onclick = async () => {
-      if (!deferredPrompt) return;
-      deferredPrompt.prompt();
-      await deferredPrompt.userChoice;
+      // The event can only be prompted once — take it before awaiting so a
+      // second tap can't call prompt() on a spent event.
+      const p = deferredPrompt;
+      if (!p) return;
       deferredPrompt = null;
+      installBtn.disabled = true;
+      try {
+        p.prompt();
+        const { outcome } = await p.userChoice;
+        if (outcome === 'dismissed') dismiss();
+      } catch { /* already used */ }
       banner.remove();
     };
   }
@@ -110,27 +117,29 @@ function showBanner(mode) {
 
 export function initInstallPrompt() {
   if (isStandalone) return;
+
+  // Always capture the install event, even when the automatic banner is
+  // suppressed (first visit / recently dismissed), so the Profile "Install
+  // app" row can still offer it.
+  let bannerAllowed = false;
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+    window.dispatchEvent(new Event('giglist:installable'));
+    if (bannerAllowed) showBanner('android');
+  });
+  window.addEventListener('appinstalled', () => {
+    deferredPrompt = null;
+    document.getElementById('install-banner')?.remove();
+  });
+
   if (!isIOS && !isAndroid) return;
 
   const visits = Number(safeGet(KEY_VISITS) || 0) + 1;
   safeSet(KEY_VISITS, String(visits));
-  if (visits < MIN_VISITS || recentlyDismissed()) return;
+  bannerAllowed = visits >= MIN_VISITS && !recentlyDismissed();
 
-  window.addEventListener('appinstalled', () => {
-    document.getElementById('install-banner')?.remove();
-  });
-
-  if (isIOS) {
-    showBanner(isInAppBrowser ? 'ios-inapp' : 'ios');
-    return;
-  }
-
-  // Android: only show once the browser says the app is installable
-  window.addEventListener('beforeinstallprompt', (e) => {
-    e.preventDefault();
-    deferredPrompt = e;
-    showBanner('android');
-  });
+  if (bannerAllowed && isIOS) showBanner(isInAppBrowser ? 'ios-inapp' : 'ios');
 }
 
 // Optional: call from a "How to install" link in settings to bypass dismissal.

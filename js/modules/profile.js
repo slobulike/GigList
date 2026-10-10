@@ -329,6 +329,14 @@ async function _renderOwnProfile() {
     if (installBtn) {
         installBtn.classList.toggle('hidden', !canShowInstallHelp());
         installBtn.onclick = () => showInstallHelp();
+        // Android: the browser may confirm installability after this renders
+        if (!window._installRowWired) {
+            window._installRowWired = true;
+            window.addEventListener('giglist:installable', () => {
+                document.getElementById('profile-install-btn')
+                    ?.classList.toggle('hidden', !canShowInstallHelp());
+            });
+        }
     }
 
     // Buddies section — visible for own profile

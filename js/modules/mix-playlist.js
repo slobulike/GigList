@@ -26,6 +26,7 @@ import { escapeHtml, safeUrl } from './utils.js';
 const SPOTIFY_WORKER = 'https://giglist-spotify.richard-lipscombe.workers.dev';
 const REFRESH_DAYS   = 1;
 const MIN_ARTISTS    = 5;   // don't offer the feature until there's something to mix
+const MIX_TIMEOUT_MS = 45000;   // give up on a stalled /mix rather than spin forever
 const DISMISS_KEY    = 'giglist_mix_autoprompt_dismissed';
 const EMBED_ID       = 'mix-embed';
 const STAGES = [
@@ -42,6 +43,7 @@ const ROUND = 'w-11 h-11 rounded-full flex items-center justify-center flex-shri
 let expanded    = false;
 let artistCache = { key: '', list: [] };
 let stageTimer  = null;
+let building    = false;   // one /mix call at a time, across re-renders
 
 // ─── small helpers ────────────────────────────────────────────────────────────
 
@@ -81,11 +83,12 @@ const injectStyles = () => {
 // ─── data ─────────────────────────────────────────────────────────────────────
 
 const fetchMix = async () => {
-    const { data } = await supabase
+    const { data, error } = await supabase
         .from('user_mix_playlists')
         .select('*')
         .eq('user_id', window.currentUser.id)
         .maybeSingle();
+    if (error) throw error;   // don't mistake a failed load for "no playlist yet"
     return data;
 };
 
@@ -263,6 +266,7 @@ const showConnect = (root) => {
 };
 
 const setAuto = async (root, days) => {
+    if (building) return;
     const { error } = await supabase.rpc('set_mix_auto_refresh', { p_days: days });
     if (error) {
         toast('Could not update that setting. Please try again.', 'error');
@@ -274,17 +278,24 @@ const setAuto = async (root, days) => {
 };
 
 const build = async (root) => {
+    if (building) return;
+    building = true;
     const wasEmpty = !!root.querySelector('#mix-make');
-
-    if (!(await checkSpotifyConnection(window.currentUser.id))) {
-        showConnect(root);
-        return;
-    }
-
-    setBusy(root, true);
     let ok = false;
     try {
-        const response = await authedFetch(`${SPOTIFY_WORKER}/mix`, { method: 'POST', body: JSON.stringify({}) });
+        // Busy before the connection check, so a double-tap can't start two builds
+        setBusy(root, true);
+        if (!(await checkSpotifyConnection(window.currentUser.id))) {
+            setBusy(root, false);
+            showConnect(root);
+            return;
+        }
+
+        const response = await authedFetch(`${SPOTIFY_WORKER}/mix`, {
+            method: 'POST',
+            body: JSON.stringify({}),
+            signal: AbortSignal.timeout(MIX_TIMEOUT_MS),
+        });
         const result = await response.json().catch(() => ({}));
 
         // 409 = the Spotify connection is missing or was revoked.
@@ -299,7 +310,11 @@ const build = async (root) => {
         toast(result.partial ? 'Playlist ready. A shorter mix this time.' : 'Your GigList playlist is ready 🎶', 'success');
     } catch (err) {
         console.error('[GigList] mix playlist failed:', err);
-        toast(err.message || 'Could not make your playlist. Please try again.', 'error');
+        toast(err.name === 'TimeoutError'
+            ? 'That took too long. Please try again.'
+            : (err.message || 'Could not make your playlist. Please try again.'), 'error');
+    } finally {
+        building = false;
     }
 
     setBusy(root, false);
@@ -330,7 +345,9 @@ const wire = (root, mix) => {
 };
 
 const render = async (root, { animate = false } = {}) => {
-    const mix = await fetchMix();
+    let mix;
+    try { mix = await fetchMix(); }
+    catch (e) { console.warn('[GigList] mix load failed:', e.message); return; }   // keep what's shown
     if (!mix) {
         root.innerHTML = emptyHtml();
     } else {
@@ -339,6 +356,7 @@ const render = async (root, { animate = false } = {}) => {
     }
     wire(root, mix);
     icons();
+    if (building) setBusy(root, true);
 };
 
 // ─── public ───────────────────────────────────────────────────────────────────
@@ -352,7 +370,9 @@ export const initMixPlaylistCard = async (rootId) => {
     injectStyles();
     expanded = false;
 
-    const mix = await fetchMix();
+    let mix;
+    try { mix = await fetchMix(); }
+    catch (e) { console.warn('[GigList] mix load failed:', e.message); return; }
     if (!mix && distinctArtists() < MIN_ARTISTS) return;   // too early to offer
     await render(root);
 };

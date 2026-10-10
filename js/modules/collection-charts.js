@@ -8,7 +8,7 @@
  * so Stats just asks it what's currently visible.
  */
 import { getChartColors, setChartEmptyState } from './charts.js';
-import { getFilteredItems, hasActiveFilters, ensureLoaded } from './collection.js';
+import { getFilteredItems, hasActiveFilters, ensureLoaded, SUBTYPE_LABELS } from './collection.js';
 
 let dashboardItemTypeChart    = null;
 let dashboardTopArtistsChart  = null;
@@ -26,7 +26,7 @@ export const renderItemTypeChart = (items, canvasId, isModal = false) => {
 
     const typeCounts = {};
     items.forEach(item => {
-        const label = item.subtype || 'Other';
+        const label = SUBTYPE_LABELS[item.subtype] || item.subtype || 'Other';
         typeCounts[label] = (typeCounts[label] || 0) + 1;
     });
 
@@ -85,12 +85,15 @@ export const renderTopCollectionArtistsChart = (items, canvasId, isModal = false
     const existingChart = Chart.getChart(ctx);
     if (existingChart) existingChart.destroy();
 
-    const counts = {}; // band_id (or lowercased name if no id) -> { display, bandId, count }
+    // Keyed on name, not band_id: some items have an id and some don't, and
+    // keying on the id split one band into two bars.
+    const counts = {}; // lowercased name -> { display, bandId, count }
     items.forEach(item => {
         const name = (item.band_name || '').trim();
         if (!name) return;
-        const key = item.band_id ?? name.toLowerCase();
-        counts[key] = counts[key] || { display: name, bandId: item.band_id ?? null, count: 0 };
+        const key = name.toLowerCase();
+        counts[key] = counts[key] || { display: name, bandId: null, count: 0 };
+        counts[key].bandId ??= item.band_id ?? null;
         counts[key].count++;
     });
 
@@ -275,6 +278,12 @@ window.openCollectionChartModal = async function(chartType) {
     const existingChart = Chart.getChart(canvas);
     if (existingChart) existingChart.destroy();
 
+    // #chartModal is shared with the Gigs charts; the Hot List view hides the
+    // canvas and fills a list body instead — undo that or this opens blank.
+    canvas.classList.remove('hidden');
+    const listBody = document.getElementById('modalChartListBody');
+    if (listBody) { listBody.classList.add('hidden'); listBody.innerHTML = ''; }
+
     const subtitle = modal.querySelector('p.text-slate-400');
     if (subtitle) { subtitle.innerHTML = 'Interactive Data View'; subtitle.onclick = null; }
 
@@ -316,6 +325,7 @@ window.closeCollectionChartModal = function() {
  * Stats is opened before the Collection tab ever has been.
  */
 export const renderCollectionCharts = async (currentUser) => {
+    await window.ensureChartJs();
     await ensureLoaded(currentUser.id);
     const items = getFilteredItems();
 

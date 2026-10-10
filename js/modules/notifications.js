@@ -47,6 +47,7 @@ let _uid      = null;
 let _channel  = null;
 let _handlers = {};
 let _unread   = 0;
+let _refreshTimer = null;
 
 const CHANGED_EVENT = 'giglist:notifications-changed';
 
@@ -119,8 +120,11 @@ export async function initNotifications(handlers = {}) {
         .channel(`notifications:${uid}`)
         .on('postgres_changes',
             { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${uid}` },
-            async (payload) => {
-                await refreshUnread();
+            (payload) => {
+                // A mark-all-read fires one UPDATE event per row; collapse the
+                // burst into a single count query.
+                clearTimeout(_refreshTimer);
+                _refreshTimer = setTimeout(refreshUnread, 300);
                 // Only new rows re-render an open inbox; our own mark-as-read
                 // UPDATEs would otherwise trigger a pointless second render.
                 if (payload.eventType === 'INSERT') window.dispatchEvent(new CustomEvent(CHANGED_EVENT));
@@ -129,6 +133,7 @@ export async function initNotifications(handlers = {}) {
 }
 
 export function teardownNotifications() {
+    clearTimeout(_refreshTimer);
     if (_channel) { supabase.removeChannel(_channel); _channel = null; }
     _uid = null;
     _unread = 0;
@@ -160,6 +165,7 @@ async function markOneRead(id) {
             .from('notifications')
             .update({ read_at: new Date().toISOString() })
             .eq('id', id)
+            .eq('user_id', _uid)
             .is('read_at', null);
     } catch (e) { /* non-fatal */ }
 }
@@ -173,6 +179,7 @@ async function markIdsRead(ids) {
             .from('notifications')
             .update({ read_at: new Date().toISOString() })
             .in('id', ids)
+            .eq('user_id', _uid)
             .is('read_at', null);
         if (error) throw error;
     } catch (e) {
@@ -191,7 +198,8 @@ export async function dismissNotification(id) {
         const { error } = await supabase
             .from('notifications')
             .update({ dismissed_at: now, read_at: now })
-            .eq('id', id);
+            .eq('id', id)
+            .eq('user_id', _uid);
         if (error) throw error;
     } catch (e) {
         console.warn('[Notifications] dismiss failed:', e.message);
@@ -279,12 +287,13 @@ function describe(n) {
     const who = actorName(n);
 
     if (n.type === 'reaction' && n.journal) {
-        const band = n.journal.band || 'your show';
+        const band = n.journal.band;
+        const show = band ? `your ${band} show` : 'your show';
         switch (n.reaction_kind) {
-            case 'like':     return { icon: 'heart',    text: `${who} loved your ${band} show` };
-            case 'wish':     return { icon: 'sparkles', text: `${who} wishes they'd been at your ${band} show` };
-            case 'together': return { icon: 'users',    text: `${who} wants to go to a show with you next time, after seeing your ${band} show` };
-            case 'again':    return { icon: 'repeat',   text: `${who} wants to do ${band} again with you` };
+            case 'like':     return { icon: 'heart',    text: `${who} loved ${show}` };
+            case 'wish':     return { icon: 'sparkles', text: `${who} wishes they'd been at ${show}` };
+            case 'together': return { icon: 'users',    text: `${who} wants to go to a show with you next time, after seeing ${show}` };
+            case 'again':    return { icon: 'repeat',   text: band ? `${who} wants to do ${band} again with you` : `${who} wants to do that show again with you` };
         }
     }
     if (n.type === 'reaction' && n.item) {
@@ -364,7 +373,12 @@ function _wire(container) {
 
 async function _loadRows() {
     const notes = await fetchNotifications();
-    return notes.map(n => ({ n, html: rowHtml(n) })).filter(r => r.html);
+    const rows = notes.map(n => ({ n, html: rowHtml(n) }));
+    // Rows we can't draw (deleted target, unknown type/kind) would otherwise
+    // stay unread forever and keep the avatar dot lit with nothing to clear.
+    const hidden = rows.filter(r => !r.html && !r.n.read_at).map(r => r.n.id);
+    if (hidden.length) await markIdsRead(hidden);
+    return rows.filter(r => r.html);
 }
 
 /**

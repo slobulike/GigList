@@ -1,8 +1,8 @@
 /**
  * GigList Core Engine
- * v8.9.8 — 2026-10-09
+ * v8.9.9 — 2026-10-10
  * ------------------------------------------------------------------
- * ✅ Bug fix to Collection shelf view so that swiping back does not exit the app
+ * ✅ Claude Opus 5.5 review changes
  */
 
 import * as Data from './modules/data.js';
@@ -41,7 +41,15 @@ import { initMixPlaylistCard } from './modules/mix-playlist.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "8.9.8";
+const APP_VERSION = "8.9.9";
+
+// Columns of profiles that the app is allowed to read (see the column grants
+// in Supabase). home_lat / home_lng / home_label are deliberately excluded:
+// they're private and only come back via the get_my_home() function.
+// A NEW profiles column must be added here AND granted in Supabase.
+const PROFILE_PUBLIC_COLUMNS =
+    'id, username, rank, is_admin, is_public, companion_acknowledged_keys, display_name, ' +
+    'avatar_url, favourite_band, favourite_venue, favourite_show_key, favourite_song, tips_seen';
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 
@@ -196,11 +204,17 @@ export async function initApp() {
         window.location.href = 'index.html';
         return;
     } else {
-        const { data: profile } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', session.user.id)
-            .single();
+        // Home location is private (not readable via the profiles table), so
+        // it comes from get_my_home(), which only ever returns your own. If
+        // that call fails the app still loads, just without the saved home.
+        const [{ data: profile }, { data: home }] = await Promise.all([
+            supabase
+                .from('profiles')
+                .select(PROFILE_PUBLIC_COLUMNS)
+                .eq('id', session.user.id)
+                .single(),
+            supabase.rpc('get_my_home').maybeSingle(),
+        ]);
 
         if (!profile) {
             window.location.href = 'index.html';
@@ -208,6 +222,7 @@ export async function initApp() {
         }
         currentUser = {
             ...profile,
+            ...(home || {}),
             UserName:   profile.username,
             Type:       'Personal',
             id:         session.user.id,
@@ -364,6 +379,9 @@ export async function initApp() {
         const count   = journal.length;
         if (count === 1) checkNudgeTrigger('first_gig_saved');
         if (count === 5) checkNudgeTrigger('fifth_gig_saved');
+        // The playlist card only appears once there are enough artists; it was
+        // set up at boot, so offer it now if this save crossed the threshold.
+        if (!document.getElementById('home-mix-slot')?.children.length) initMixPlaylistCard('home-mix-slot');
 
         // same_artist_3x — check if the most-recently-saved gig tips the artist to 3
         const latest = journal[journal.length - 1];
@@ -1238,6 +1256,8 @@ async function compressImage(file, maxDimension, quality) {
 window.signOut = async function() {
     window.track('sign_out');
     await supabase.auth.signOut();
+    // Signed photo links outlive the session — don't leave them on a shared device
+    try { localStorage.removeItem('giglist_col_signed_urls_v1'); } catch { /* storage unavailable */ }
     window.location.href = 'index.html';
 };
 
@@ -1325,3 +1345,4 @@ window.handleSort = (column) => {
 window.openTopBandsModal = () => {
     window.openChartModal('topbands');
 };
+

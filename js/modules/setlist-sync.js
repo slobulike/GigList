@@ -473,13 +473,14 @@ export async function runSetlistSync(setlistUsername, { onProgress, onComplete, 
                 }
             }
 
-            // Write to Supabase — venues and performances first (shared tables),
-            // then journals (user-scoped)
-            const [venueResult, , journalResult] = await Promise.all([
+            // Write to Supabase — journals first: performances may only be
+            // written by someone who has a journal for that show (RLS), so the
+            // journal rows must exist before the performances upsert runs.
+            const [venueResult, journalResult] = await Promise.all([
                 upsertVenues(venueRows),
-                upsertPerformances(perfRows),
                 upsertJournals(journalRows),
             ]);
+            await upsertPerformances(perfRows);
 
             totalInserted  += journalResult.inserted;
             totalSkipped   += journalResult.skipped;
@@ -590,3 +591,4 @@ export function handleZeroSyncResult({ userNotFound = false } = {}) {
 
     showNoSetlistTip();
 }
+
