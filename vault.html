@@ -227,6 +227,13 @@
                 <i data-lucide="plus" class="w-3.5 h-3.5" aria-hidden="true"></i>
                 Add Show
             </button>
+            <!-- Band mode only: shown for signed-in viewers by band.js (it sets display) -->
+            <button id="band-bulk-entry" type="button" onclick="window.bandBulkStart?.()" style="display:none"
+                    aria-label="Select shows I was at"
+                    class="items-center gap-2 border border-indigo-200 text-indigo-600 hover:bg-indigo-50 text-[10px] font-black uppercase tracking-widest px-4 py-2.5 rounded-full transition-all active:scale-95">
+                <i data-lucide="check-square" class="w-3.5 h-3.5" aria-hidden="true"></i>
+                Add to your GigList
+            </button>
         </div>
 
         <div class="space-y-4 pt-4">
@@ -295,6 +302,7 @@
                         <span class="w-10 h-5 bg-slate-200 rounded-full peer peer-checked:bg-indigo-600 transition-colors after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-5"></span>
                     </label>
                 </div>
+
             </div>
         </div>
 

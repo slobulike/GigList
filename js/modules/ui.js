@@ -577,6 +577,7 @@ function _wireViewGigClicks() {
 }
 
 export const renderTable = (data) => {
+    window._lastRenderedGigs = data;   // band mode: "select all shown" reads this
     const tableContainer = document.getElementById('tableContainer');
     if (!tableContainer) return;
 
@@ -716,16 +717,24 @@ export const renderTable = (data) => {
 
                             const [gd, gm, gy] = (gig.Date || '').split('/');
                             const isPast = gy ? new Date(`${gy}-${gm}-${gd}`) <= new Date() : false;
+                            const key  = gig['Journal Key'];
+                            const bulk = window._bandBulk;
                             if (mine) {
-                                parts.push(`<span class="inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-wider text-indigo-600"><i data-lucide="check" class="w-3 h-3"></i>You were there</span>`);
-                                // Tagged this session: keep Undo on the row so it can't be missed
-                                if (att?.justCreated?.has(gig['Journal Key'])) {
-                                    parts.push(`<button type="button" data-band-untag="${escapeHtml(gig['Journal Key'])}" class="text-[9px] font-black uppercase tracking-wider text-slate-500 underline underline-offset-2 hover:text-slate-700">Undo</button>`);
+                                parts.push(`<button type="button" data-band-mine="${escapeHtml(key)}" class="inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-wider text-indigo-600"><i data-lucide="check" class="w-3 h-3"></i>You were there</button>`);
+                                // Tagged this session: keep a one-tap Undo on the row
+                                if (!bulk?.active && att?.justCreated?.has(key)) {
+                                    parts.push(`<button type="button" data-band-untag="${escapeHtml(key)}" class="text-[9px] font-black uppercase tracking-wider text-slate-500 underline underline-offset-2 hover:text-slate-700">Undo</button>`);
                                 }
                                 rowClass = 'bg-indigo-50/70';
                                 rowStyle = 'box-shadow: inset 3px 0 0 #6366f1;';
                             } else if (att?.canTag && isPast) {
-                                parts.push(`<button type="button" data-band-tag="${escapeHtml(gig['Journal Key'])}" class="inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-wider text-indigo-600 border border-indigo-200 rounded-full px-2 py-0.5 hover:bg-indigo-50 active:bg-indigo-100">+ I was there</button>`);
+                                if (bulk?.active) {
+                                    const sel = bulk.selected.has(key);
+                                    parts.push(`<span data-band-check class="inline-flex items-center gap-1.5 text-[9px] font-black uppercase tracking-wider ${sel ? 'text-indigo-700' : 'text-slate-500'}"><span class="inline-flex items-center justify-center w-5 h-5 rounded-md border-2 text-[11px] leading-none ${sel ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-slate-300 text-transparent'}">✓</span>Select</span>`);
+                                    if (sel) rowClass = 'bg-indigo-100/70';
+                                } else {
+                                    parts.push(`<button type="button" data-band-tag="${escapeHtml(key)}" class="inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-wider text-indigo-600 border border-indigo-200 rounded-full px-2 py-0.5 hover:bg-indigo-50 active:bg-indigo-100">+ I was there</button>`);
+                                }
                             }
                             if (parts.length) {
                                 bandAttendanceHtml = `<div class="flex items-center gap-2 mt-1 flex-wrap">${parts.join('')}</div>`;
@@ -896,6 +905,148 @@ async function ensureLeaflet() {
     });
 }
 
+// ─── BAND MODE MAP ────────────────────────────────────────────────────────────
+// Band pins are per PLACE (coordinates rounded to ~100 m), not per venue name:
+// archive venues carry setlist.fm *city* coordinates, so every venue in a city
+// shares one point and per-venue pins would sit exactly on top of each other.
+// Colour = who was there:  mine (green) > buddy avatar > other GigList fans
+// (indigo) > no logged attendance (pale indigo).
+
+const _BAND_PIN = { none: '#a5b4fc', fans: '#4f46e5', mine: '#059669' };
+
+function _bandPlaces(data, venuesLookup) {
+    const att = window._bandAttendance;
+    const places = new Map();
+    data.forEach(g => {
+        const v = venuesLookup[g.OfficialVenue];
+        if (!v || v.lat == null || v.lng == null || isNaN(v.lat) || isNaN(v.lng)) return;
+        const key = `${v.lat.toFixed(3)},${v.lng.toFixed(3)}`;
+        let p = places.get(key);
+        if (!p) {
+            p = { lat: v.lat, lng: v.lng, city: v.city, country: v.country,
+                  gigs: [], venues: new Set(), attendees: 0, mine: 0, buddyIds: new Set() };
+            places.set(key, p);
+        }
+        p.gigs.push(g);
+        p.venues.add(g.OfficialVenue);
+        const info = att?.byKey?.get(g['Journal Key']);
+        if (info) {
+            p.attendees += info.count;
+            if (info.mine) p.mine += 1;
+            (info.buddyIds || []).forEach(id => p.buddyIds.add(id));
+        }
+    });
+    return places;
+}
+
+function _ddmmyyyyToTime(s) {
+    const [d, m, y] = String(s || '').split('/');
+    return y ? new Date(`${y}-${m}-${d}`).getTime() : 0;
+}
+
+function _bandPlacePopup(place) {
+    const att = window._bandAttendance;
+    const MAX = 40;
+    const sorted = [...place.gigs].sort((a, b) => _ddmmyyyyToTime(b.Date) - _ddmmyyyyToTime(a.Date));
+    const shown = sorted.slice(0, MAX);
+
+    const rows = shown.map(g => {
+        const key  = g['Journal Key'];
+        const info = att?.byKey?.get(key);
+        const chips = [];
+        if (info?.count > 0) chips.push(`<span class="text-[9px] font-black uppercase tracking-wider text-slate-500">${info.count} there</span>`);
+        if (info?.mine) {
+            chips.push(`<span class="text-[9px] font-black uppercase tracking-wider text-emerald-600">✓ You were there</span>`);
+        } else if (att?.canTag && _ddmmyyyyToTime(g.Date) <= Date.now()) {
+            chips.push(`<button type="button" data-band-tag="${escapeHtml(key)}" class="text-[9px] font-black uppercase tracking-wider text-indigo-600 border border-indigo-200 rounded-full px-2 py-0.5">+ I was there</button>`);
+        }
+        return `
+            <div data-view-gig-key="${escapeHtml(key)}"
+                 class="cursor-pointer hover:bg-slate-50 p-2 rounded transition-colors border-b border-slate-100 last:border-0 mb-1">
+                <p class="text-[10px] font-black text-indigo-500 uppercase leading-none">${escapeHtml(g.Date)}</p>
+                <p class="text-[12px] font-bold text-slate-800 leading-tight">${escapeHtml(g.OfficialVenue)}</p>
+                ${chips.length ? `<div class="flex items-center gap-2 mt-1 flex-wrap">${chips.join('')}</div>` : ''}
+            </div>`;
+    }).join('');
+
+    const place_label = [place.city, place.country].filter(Boolean).join(', ') || 'Unknown place';
+    const count = place.gigs.length;
+    const venueNote = place.venues.size > 1 ? ` · ${place.venues.size} venues` : '';
+    const more = count > MAX ? `<p class="text-[10px] text-slate-400 text-center pt-1">Latest ${MAX} shown — use search or filters for the rest</p>` : '';
+
+    return `
+        <div class="p-1 max-h-56 overflow-y-auto custom-scrollbar min-w-[200px]">
+            <h4 class="text-[10px] font-black uppercase text-slate-400 mb-2 tracking-widest border-b pb-1">${escapeHtml(place_label)}${escapeHtml(venueNote)}</h4>
+            ${rows}
+            ${more}
+            <div class="pt-2 text-center">
+                <span class="bg-indigo-50 text-indigo-600 text-[10px] font-black px-2 py-0.5 rounded-full uppercase">${count} ${count > 1 ? 'Shows' : 'Show'}</span>
+            </div>
+        </div>`;
+}
+
+function _bandPlaceMarker(place) {
+    const att = window._bandAttendance;
+    const count = place.gigs.length;
+    const radius = Math.min(6 + Math.sqrt(count) * 2.2, 22);   // sqrt: a 300-show city shouldn't dwarf the rest
+    const latlng = [place.lat, place.lng];
+    let marker;
+
+    if (place.buddyIds.size > 0) {
+        const firstId = place.buddyIds.values().next().value;
+        const person  = att?.people?.[firstId];
+        const name    = person?.display_name || person?.username || '';
+        const src     = safeUrl(person?.avatar_url);
+        const ring    = place.mine > 0 ? _BAND_PIN.mine : _BAND_PIN.fans;
+        const extra   = place.buddyIds.size > 1
+            ? `<span style="position:absolute;right:-6px;bottom:-4px;background:${ring};color:#fff;font-size:9px;font-weight:900;border-radius:9999px;padding:1px 5px;border:2px solid #fff;">+${place.buddyIds.size - 1}</span>`
+            : '';
+        const inner = src
+            ? `<img src="${escapeHtml(src)}" alt="" style="width:100%;height:100%;object-fit:cover;">`
+            : escapeHtml((name || '?').slice(0, 2).toUpperCase());
+        const html = `<div style="position:relative;width:34px;height:34px;">
+            <div style="width:34px;height:34px;border-radius:9999px;border:3px solid ${ring};background:#e0e7ff;overflow:hidden;box-shadow:0 2px 6px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;font-weight:900;font-size:11px;color:#4338ca;">${inner}</div>${extra}</div>`;
+        marker = L.marker(latlng, { icon: L.divIcon({ html, className: '', iconSize: [34, 34], iconAnchor: [17, 17] }) });
+    } else {
+        const kind = place.mine > 0 ? 'mine' : place.attendees > 0 ? 'fans' : 'none';
+        marker = L.circleMarker(latlng, {
+            radius,
+            fillColor: _BAND_PIN[kind],
+            color: '#fff',
+            weight: 2,
+            fillOpacity: kind === 'none' ? 0.75 : 0.95,
+        });
+    }
+    // Popup HTML is built on open, not up front (a big band has hundreds of places)
+    marker.bindPopup(() => _bandPlacePopup(place), { maxWidth: 280, className: 'gig-map-popup' });
+    return marker;
+}
+
+function _renderBandPins(layer, data, venuesLookup, bounds) {
+    const places = [..._bandPlaces(data, venuesLookup).values()];
+    // Attended places last so they draw on top of plain ones
+    const rank = p => (p.mine > 0 ? 3 : p.buddyIds.size > 0 ? 2 : p.attendees > 0 ? 1 : 0);
+    places.sort((a, b) => rank(a) - rank(b));
+    places.forEach(p => {
+        _bandPlaceMarker(p).addTo(layer);
+        bounds.push([p.lat, p.lng]);
+    });
+}
+
+function _ensureBandLegend(map) {
+    if (map._bandLegend) return;
+    const legend = L.control({ position: 'bottomleft' });
+    legend.onAdd = () => {
+        const el = L.DomUtil.create('div', 'gig-map-legend');
+        el.style.cssText = 'background:rgba(255,255,255,.92);border-radius:12px;padding:6px 10px;font:700 10px/1.6 system-ui,sans-serif;color:#475569;box-shadow:0 1px 4px rgba(0,0,0,.2);';
+        const dot = c => `<span style="display:inline-block;width:9px;height:9px;border-radius:9999px;background:${c};margin-right:6px;vertical-align:middle;"></span>`;
+        el.innerHTML = `${dot(_BAND_PIN.mine)}You were there<br>${dot(_BAND_PIN.fans)}GigList fans were there<br>${dot(_BAND_PIN.none)}No logged attendance`;
+        return el;
+    };
+    legend.addTo(map);
+    map._bandLegend = legend;
+}
+
 export const renderMap = async (data) => {
     await ensureLeaflet();
 
@@ -920,6 +1071,16 @@ export const renderMap = async (data) => {
     const bounds = [];
     const venuesLookup = window.venueLookup || {};
     const venueStats = {};
+
+    // Band mode: per-place pins coloured by attendance, always fit to the data
+    if (window.isBandMode) {
+        _renderBandPins(markerLayer, data, venuesLookup, bounds);
+        _ensureBandLegend(gigMap);
+        if (bounds.length) gigMap.fitBounds(bounds, { padding: [40, 40], maxZoom: 6 });
+        else gigMap.setView([20, 0], 2);
+        setTimeout(() => gigMap.invalidateSize(), 100);
+        return;
+    }
 
     // 1. Aggregate Gigs
     data.forEach(gig => {
@@ -1025,6 +1186,15 @@ window.openMapModal = () => {
         fullMarkerLayer.clearLayers();
 
         const bounds = [];
+
+        if (window.isBandMode) {
+            _renderBandPins(fullMarkerLayer, data, venuesLookup, bounds);
+            _ensureBandLegend(fullMapInstance);
+            if (bounds.length) fullMapInstance.fitBounds(bounds, { padding: [80, 80], maxZoom: 6 });
+            else fullMapInstance.setView([20, 0], 2);
+            return;
+        }
+
         const venueStats = {};
 
         data.forEach(gig => {
@@ -1114,6 +1284,43 @@ const getTicketStyle = (key) => {
 /**
  * GIG MODAL & MOSH-PIT TICKETS
  */
+// ─── BAND MODE: attendance strip inside the gig modal ────────────────────────
+// Count, buddy avatars and the "I was there" action for the open show. band.js
+// re-renders it via window._bandModalAttendanceHtml after a tag/untag.
+function _bandModalAttendanceHtml(entry) {
+    const att  = window._bandAttendance;
+    const key  = entry['Journal Key'];
+    const info = att?.byKey?.get(key);
+    const parts = [];
+
+    if (info?.count > 0) {
+        parts.push(`<span class="inline-flex items-center gap-1.5 text-[10px] font-black text-slate-500"><i data-lucide="users" class="w-3.5 h-3.5" aria-hidden="true"></i>${info.count} GigList ${info.count === 1 ? 'user was' : 'users were'} there</span>`);
+    }
+    const buddies = (info?.buddyIds || []).slice(0, 5).map(id => {
+        const p = att?.people?.[id];
+        if (!p) return '';
+        const name = p.display_name || p.username || '';
+        const src  = safeUrl(p.avatar_url);
+        return src
+            ? `<img src="${escapeHtml(src)}" alt="" title="${escapeHtml(name)}" class="w-6 h-6 rounded-full object-cover ring-2 ring-white">`
+            : `<span class="inline-flex items-center justify-center w-6 h-6 rounded-full text-[9px] font-black bg-indigo-100 text-indigo-700 ring-2 ring-white" title="${escapeHtml(name)}">${escapeHtml((name || '?').slice(0, 2).toUpperCase())}</span>`;
+    }).join('');
+    if (buddies) parts.push(`<span class="inline-flex items-center -space-x-1.5">${buddies}</span>`);
+
+    const [dd, mm, yy] = (entry.Date || '').split('/');
+    const isPast = yy ? new Date(`${yy}-${mm}-${dd}`) <= new Date() : false;
+    if (info?.mine) {
+        parts.push(`<button type="button" data-band-mine="${escapeHtml(key)}" class="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 text-[9px] font-black uppercase tracking-wider px-4 py-2 rounded-full"><i data-lucide="check" class="w-3.5 h-3.5" aria-hidden="true"></i>You were there</button>`);
+        if (att?.justCreated?.has(key)) {
+            parts.push(`<button type="button" data-band-untag="${escapeHtml(key)}" class="text-[9px] font-black uppercase tracking-wider text-slate-500 underline underline-offset-2 hover:text-slate-700">Undo</button>`);
+        }
+    } else if (att?.canTag && isPast) {
+        parts.push(`<button type="button" data-band-tag="${escapeHtml(key)}" class="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[9px] font-black uppercase tracking-wider px-4 py-2 rounded-full transition-transform active:scale-95"><i data-lucide="plus" class="w-3.5 h-3.5" aria-hidden="true"></i>I was there</button>`);
+    }
+    return parts.length ? `<div class="flex items-center gap-3 flex-wrap">${parts.join('')}</div>` : '';
+}
+window._bandModalAttendanceHtml = _bandModalAttendanceHtml;
+
 export const openGigModal = (key, journalData, performanceData) => {
     // Fallback to window globals if the arguments weren't passed
     const jData = journalData || window.journalData;
@@ -1342,6 +1549,7 @@ const gigIsPast = (() => {
                             </button>
                             <span id="modal-archive-btn-wrap-${entry['Journal Key']?.replace(/[^a-z0-9]/gi,'_')}"></span>
                         </div>
+                        ${window.isBandMode ? `<div id="band-modal-attendance" data-key="${escapeHtml(entry['Journal Key'])}" class="mb-3">${_bandModalAttendanceHtml(entry)}</div>` : ''}
                         <!-- Populated by Spotify.initModalAudioAction: existing playlist embed,
                              a generate CTA, or (past show with no setlist) a generic artist embed -->
                         <div id="modal-spotify-slot-${entry['Journal Key']?.replace(/[^a-z0-9]/gi,'_')}"></div>

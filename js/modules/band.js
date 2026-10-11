@@ -30,6 +30,8 @@ let _performanceData = [];
 let _tagging         = new Set();   // journal keys with a tag request in flight
 let _justCreated     = new Set();   // keys whose row we created this session (undo-able)
 let _tagListenerBound = false;
+const _bulk = { active: false, selected: new Set() };   // bulk "mark shows I was at" mode
+window._bandBulk = _bulk;
 let _currentUser     = null;
 let _buddyStatus     = {};   // userId -> 'accepted' | 'pending' | null
 let _fanCount          = null;  // unique fans (distinct user_ids), set by _loadBandStats
@@ -67,6 +69,7 @@ export async function initBandMode(currentUser, journalData, performanceData) {
     // Attendance counts, buddy avatars and "I was there" (non-blocking)
     window.bandTagShow  = bandTagShow;
     window.bandUndoTag  = bandUndoTag;
+    window.bandBulkStart = bandBulkStart;
     _bindTagClicks();
     _loadBandAttendance().catch(err => console.warn('band.js: attendance load failed', err));
 
@@ -107,6 +110,7 @@ function switchBandView(tab) {
     tab = _BAND_TAB_ALIASES[tab] || tab;
     const targetId = _BAND_TAB_SECTION[tab];
     if (!targetId) return;
+    if (_bulk.active && tab !== 'gigs') bandBulkCancel();
 
     // Hide every section (shared personal views + band-only ones), show target
     document.querySelectorAll('.view-section, .band-view-section').forEach(s => {
@@ -146,14 +150,21 @@ function switchBandView(tab) {
 }
 
 // ─── HERO ─────────────────────────────────────────────────────────────────────
-// Compact banner above every band tab. Image priority:
+// Compact band card shown above every tab: image on top, name + stats on a
+// coloured strip below. Image priority:
 //   1. an uploaded band-photos/<slug>/hero.{jpg,png,webp}
 //   2. the artist's Spotify image (artists.spotify_image_url)
 //   3. a gradient with the band's initial
-// The header colour is sampled from the image (falls back to the per-band
-// colours in ui.js, then GigList blue) and exposed as window.bandBrandColor.
+// Spotify's design guidelines: content from Spotify must carry the Spotify
+// icon + a link back to the artist, and nothing (text or logo) may be laid over
+// the artwork — so the name and the Spotify link live on the strip, not the image.
+// The strip colour is sampled from the image (fallback: ui.js band colours, then
+// GigList blue) and exposed as window.bandBrandColor.
 
 const _DEFAULT_BRAND = '#189BCC';
+
+// Spotify glyph (green on a light pill, per the guidelines' light-background use)
+const _SPOTIFY_ICON = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><path fill="#1DB954" d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/></svg>';
 
 async function _renderBandHero() {
     const container = document.getElementById('band-hero');
@@ -161,11 +172,20 @@ async function _renderBandHero() {
     if (!container || !bandName) return;
 
     // Paint the placeholder straight away so there's no empty gap while images load
-    _paintHero(container, bandName, null);
+    _paintHero(container, bandName, null, null);
 
     const slug = bandName.toLowerCase().replace(/[^a-z0-9]/g, '-');
     let imageUrl = await _findUploadedHero(slug);
-    if (!imageUrl) imageUrl = await _findSpotifyImage(bandName);
+    let spotify  = null;
+    if (!imageUrl) {
+        const found = await _findSpotifyImage(bandName);
+        if (found?.imageUrl) {
+            imageUrl = found.imageUrl;
+            spotify  = { url: found.artistId
+                ? `https://open.spotify.com/artist/${encodeURIComponent(found.artistId)}`
+                : `https://open.spotify.com/search/${encodeURIComponent(bandName)}` };
+        }
+    }
     if (!imageUrl) return;
 
     // Try with CORS so we can sample a colour; fall back to a plain display load
@@ -178,16 +198,16 @@ async function _renderBandHero() {
     }
     if (!img) return;
 
-    _paintHero(container, bandName, imageUrl);
     if (color) {
         window.bandBrandColor = color;
         const header = document.querySelector('header');
         if (header) header.style.backgroundColor = color;
         document.documentElement.style.setProperty('--band-accent', color);
     }
+    _paintHero(container, bandName, imageUrl, spotify);
 }
 
-function _paintHero(container, bandName, imageUrl) {
+function _paintHero(container, bandName, imageUrl, spotify) {
     const initial = bandName.charAt(0).toUpperCase();
     const brand   = window.bandBrandColor || _DEFAULT_BRAND;
     const years   = _journalData.map(g => parseDate(g.Date)).filter(Boolean).map(d => d.getFullYear());
@@ -195,18 +215,28 @@ function _paintHero(container, bandName, imageUrl) {
         ? `${_journalData.length.toLocaleString('en-GB')} shows · ${Math.min(...years)}–${Math.max(...years)}`
         : '';
 
-    const background = imageUrl
-        ? `<img src="${escapeHtml(safeUrl(imageUrl))}" alt="" class="absolute inset-0 w-full h-full object-cover" style="object-position:center 25%">
-           <div class="absolute inset-0 bg-gradient-to-t from-black/75 via-black/20 to-transparent"></div>`
+    const picture = imageUrl
+        ? `<img src="${escapeHtml(safeUrl(imageUrl))}" alt="${escapeHtml(bandName)}" class="absolute inset-0 w-full h-full object-cover" style="object-position:center 25%">`
         : `<div class="absolute inset-0" style="background:linear-gradient(135deg, ${escapeHtml(brand)}, #4f46e5)"></div>
            <span class="absolute right-4 -bottom-4 text-white/10 font-black text-[8rem] leading-none select-none pointer-events-none">${escapeHtml(initial)}</span>`;
 
+    const spotifyLink = spotify
+        ? `<a href="${escapeHtml(spotify.url)}" target="_blank" rel="noopener noreferrer"
+              class="flex-shrink-0 inline-flex items-center gap-1.5 bg-white text-slate-800 text-[10px] font-black uppercase tracking-wider pl-2 pr-3 py-1.5 rounded-full shadow-sm hover:bg-slate-50 active:scale-95 transition"
+              aria-label="Open ${escapeHtml(bandName)} on Spotify">
+              ${_SPOTIFY_ICON}<span>Open in Spotify</span>
+           </a>`
+        : '';
+
     container.innerHTML = `
-        <div class="relative w-full h-36 overflow-hidden rounded-3xl shadow-sm">
-            ${background}
-            <div class="absolute bottom-0 left-0 right-0 px-5 pb-4">
-                <p class="text-white font-black text-2xl leading-tight drop-shadow">${escapeHtml(bandName)}</p>
-                ${subline ? `<p class="text-white/80 text-[10px] font-black uppercase tracking-widest mt-0.5 drop-shadow">${escapeHtml(subline)}</p>` : ''}
+        <div class="w-full overflow-hidden rounded-3xl shadow-sm">
+            <div class="relative w-full h-32 bg-slate-200">${picture}</div>
+            <div class="flex items-center justify-between gap-3 px-5 py-3 text-white" style="background:${escapeHtml(brand)}">
+                <div class="min-w-0">
+                    <p class="font-black text-xl leading-tight truncate">${escapeHtml(bandName)}</p>
+                    ${subline ? `<p class="text-white/80 text-[10px] font-black uppercase tracking-widest mt-0.5">${escapeHtml(subline)}</p>` : ''}
+                </div>
+                ${spotifyLink}
             </div>
         </div>`;
 }
@@ -225,10 +255,12 @@ async function _findSpotifyImage(bandName) {
     try {
         const { data } = await supabase
             .from('artists')
-            .select('spotify_image_url')
+            .select('spotify_image_url, spotify_artist_id')
             .eq('name', bandName)
             .maybeSingle();
-        return data?.spotify_image_url || null;
+        return data?.spotify_image_url
+            ? { imageUrl: data.spotify_image_url, artistId: data.spotify_artist_id || null }
+            : null;
     } catch (err) {
         console.warn('band.js: spotify image lookup failed', err);
         return null;
@@ -302,6 +334,9 @@ async function _loadBandAttendance() {
     };
     window._bandAttendance = att;
 
+    const bulkEntry = document.getElementById('band-bulk-entry');
+    if (bulkEntry) bulkEntry.style.display = att.canTag ? 'flex' : 'none';
+
     const { data, error } = await supabase.rpc('get_band_attendance', { p_band: bandName });
     if (error) {
         // e.g. the SQL function hasn't been created yet — the table still shows
@@ -323,6 +358,19 @@ async function _loadBandAttendance() {
         (profiles || []).forEach(p => { att.people[p.id] = p; });
     }
     window.refreshUI?.();
+    _refreshBandModal();
+}
+
+// Keep the open gig modal's attendance strip in step with tag / untag / reload
+function _refreshBandModal(journalKey) {
+    const slot = document.getElementById('band-modal-attendance');
+    if (!slot || !window._bandModalAttendanceHtml) return;
+    const key = journalKey || slot.dataset.key;
+    if (slot.dataset.key !== key) return;
+    const entry = _journalData.find(g => g['Journal Key'] === key);
+    if (!entry) return;
+    slot.innerHTML = window._bandModalAttendanceHtml(entry);
+    if (window.lucide) lucide.createIcons();
 }
 
 function _bindTagClicks() {
@@ -330,14 +378,50 @@ function _bindTagClicks() {
     _tagListenerBound = true;
     // Capture phase so the row's "open gig" handler never sees these clicks.
     document.addEventListener('click', (e) => {
-        const tagBtn   = e.target.closest?.('[data-band-tag]');
-        const untagBtn = e.target.closest?.('[data-band-untag]');
-        if (!tagBtn && !untagBtn) return;
+        const t = e.target;
+
+        // Bulk mode: a tap on any row selects/deselects it instead of opening it
+        if (_bulk.active) {
+            const row = t.closest?.('tr[data-view-gig-key]');
+            if (row) {
+                e.stopPropagation();
+                e.preventDefault();
+                _bulkToggleRow(row);
+                return;
+            }
+        }
+
+        const tagBtn   = t.closest?.('[data-band-tag]');
+        const untagBtn = t.closest?.('[data-band-untag]');
+        const mineBtn  = t.closest?.('[data-band-mine]');
+        if (!tagBtn && !untagBtn && !mineBtn) return;
         e.stopPropagation();
         e.preventDefault();
         if (tagBtn)   bandTagShow(tagBtn.dataset.bandTag);
         if (untagBtn) bandUndoTag(untagBtn.dataset.bandUntag);
+        if (mineBtn)  bandRemoveMine(mineBtn.dataset.bandMine);
     }, true);
+}
+
+// One journal row, same shape the editor writes, everything personal blank.
+function _buildJournalRow(src, me) {
+    return {
+        user_id:          me,
+        journal_key:      src['Journal Key'] || src.journal_key,
+        date:             src.date || src.Date,
+        band:             src.band || src.Band,
+        official_venue:   src.official_venue || src.OfficialVenue,
+        venue:            src.venue || src.official_venue || src.OfficialVenue,
+        festival:         !!src.festival,
+        festival_lineups: '',
+        notable_support:  '',
+        went_with:        '',
+        comments:         '',
+        photos:           '',
+        price:            '',
+        review_url:       '',
+        artist_id:        src.artist_id ?? null,
+    };
 }
 
 async function bandTagShow(journalKey) {
@@ -357,23 +441,7 @@ async function bandTagShow(journalKey) {
         // ignoreDuplicates = ON CONFLICT DO NOTHING: if the viewer already has a
         // row for this event (e.g. a festival day logged under another band) it
         // is left untouched instead of being overwritten.
-        const row = {
-            user_id:          me,
-            journal_key:      journalKey,
-            date:             src.date || src.Date,
-            band:             src.band || src.Band,
-            official_venue:   src.official_venue || src.OfficialVenue,
-            venue:            src.venue || src.official_venue || src.OfficialVenue,
-            festival:         !!src.festival,
-            festival_lineups: '',
-            notable_support:  '',
-            went_with:        '',
-            comments:         '',
-            photos:           '',
-            price:            '',
-            review_url:       '',
-            artist_id:        src.artist_id ?? null,
-        };
+        const row = _buildJournalRow(src, me);
 
         const { data, error } = await supabase
             .from('journals')
@@ -385,10 +453,11 @@ async function bandTagShow(journalKey) {
         info.mine = true;
         if (created) info.count += 1;      // an existing row was already counted
         att.byKey.set(journalKey, info);
+        if (created) _justCreated.add(journalKey);
         window.refreshUI?.();
+        _refreshBandModal(journalKey);
 
         if (created) {
-            _justCreated.add(journalKey);
             _showUndoSnackbar(journalKey);
             _loadBandStats().catch(() => {});   // refresh fan / reach numbers
         } else {
@@ -402,37 +471,265 @@ async function bandTagShow(journalKey) {
     }
 }
 
-// Undo only removes a row this session just created, so a later, enriched
-// journal entry can never be deleted from here.
-async function bandUndoTag(journalKey) {
-    const att = window._bandAttendance;
-    const me  = _currentUser?.id;
-    if (!me || !_justCreated.has(journalKey)) return;
-
-    document.getElementById('band-undo-snackbar')?.remove();
-
+// Deletes the viewer's own row for an event. Verifies a row was really removed
+// (RLS can make a delete "succeed" with zero rows) and shows the real error.
+async function _deleteOwnRow(journalKey) {
+    const me = _currentUser?.id;
+    if (!me) return false;
     const { data, error } = await supabase
         .from('journals').delete()
         .eq('user_id', me).eq('journal_key', journalKey)
         .select('id');
-
     if (error) {
-        console.error('band.js: undo failed', error);
-        window.showToast?.(`Couldn’t undo: ${error.message}`, 'error', 6000);
-        return;
+        console.error('band.js: remove failed', error);
+        window.showToast?.(`Couldn’t remove it: ${error.message}`, 'error', 6000);
+        return false;
     }
     if (!(data || []).length) {
-        // RLS can make a delete succeed while removing nothing — don't pretend it worked
-        console.error('band.js: undo removed no rows', { me, journalKey });
-        window.showToast?.('Couldn’t undo — nothing was removed', 'error', 6000);
+        console.error('band.js: remove deleted no rows', { me, journalKey });
+        window.showToast?.('Couldn’t remove it — nothing was deleted', 'error', 6000);
+        return false;
+    }
+    return true;
+}
+
+function _markNotMine(journalKey) {
+    _justCreated.delete(journalKey);
+    const info = window._bandAttendance?.byKey.get(journalKey);
+    if (info) { info.mine = false; info.count = Math.max(0, info.count - 1); }
+    window.refreshUI?.();
+    _refreshBandModal(journalKey);
+    _loadBandStats().catch(() => {});
+}
+
+// Undo only removes a row this session just created, so it can never delete an
+// entry the viewer has since filled in.
+async function bandUndoTag(journalKey) {
+    if (!_justCreated.has(journalKey)) return;
+    document.getElementById('band-undo-snackbar')?.remove();
+    if (await _deleteOwnRow(journalKey)) _markNotMine(journalKey);
+}
+
+// Tapping "You were there" later on: safe to remove only while the entry is
+// still blank. Anything the viewer added (notes, photos, companions…) is theirs.
+const _DETAIL_FIELDS = ['comments', 'photos', 'went_with', 'price', 'review_url', 'festival_lineups', 'notable_support'];
+
+async function bandRemoveMine(journalKey) {
+    const me = _currentUser?.id;
+    if (!me) return;
+
+    const { data: row, error } = await supabase
+        .from('journals')
+        .select(['id', ..._DETAIL_FIELDS].join(', '))
+        .eq('user_id', me).eq('journal_key', journalKey)
+        .maybeSingle();
+    if (error || !row) {
+        window.showToast?.('Couldn’t find that entry in your journal', 'error');
         return;
     }
 
-    _justCreated.delete(journalKey);
-    const info = att?.byKey.get(journalKey);
-    if (info) { info.mine = false; info.count = Math.max(0, info.count - 1); }
+    const hasDetails = _DETAIL_FIELDS.some(f => String(row[f] ?? '').trim() !== '');
+    if (hasDetails) {
+        await _dialog({
+            title: 'This show has your own details',
+            body: 'It includes notes, photos, companions or other details you added, so it can only be removed from your personal journal.',
+            confirmLabel: 'OK',
+            cancelLabel: null,
+        });
+        return;
+    }
+
+    const ok = await _dialog({
+        title: 'Remove from your journal?',
+        body: 'You’ll no longer be counted as having been at this show.',
+        confirmLabel: 'Remove',
+        danger: true,
+    });
+    if (!ok) return;
+    if (await _deleteOwnRow(journalKey)) _markNotMine(journalKey);
+}
+
+function _dialog({ title, body, confirmLabel = 'OK', cancelLabel = 'Cancel', danger = false }) {
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.className = 'fixed inset-0 z-[600] bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4';
+        overlay.setAttribute('role', 'dialog');
+        overlay.setAttribute('aria-modal', 'true');
+        overlay.innerHTML = `
+            <div class="w-full max-w-sm bg-white rounded-3xl p-6 shadow-2xl space-y-4">
+                <h3 class="text-lg font-black text-slate-900">${escapeHtml(title)}</h3>
+                <p class="text-sm text-slate-600">${escapeHtml(body)}</p>
+                <div class="flex gap-2 justify-end">
+                    ${cancelLabel ? `<button type="button" data-r="0" class="px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider text-slate-500 hover:bg-slate-100">${escapeHtml(cancelLabel)}</button>` : ''}
+                    <button type="button" data-r="1" class="px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider text-white ${danger ? 'bg-red-500 hover:bg-red-600' : 'bg-indigo-600 hover:bg-indigo-700'}">${escapeHtml(confirmLabel)}</button>
+                </div>
+            </div>`;
+        const done = (v) => { overlay.remove(); resolve(v); };
+        overlay.addEventListener('click', (e) => {
+            const btn = e.target.closest('button[data-r]');
+            if (btn) done(btn.dataset.r === '1');
+            else if (e.target === overlay) done(false);
+        });
+        document.body.appendChild(overlay);
+        overlay.querySelector('button[data-r="1"]').focus();
+    });
+}
+
+// ─── BULK "MARK SHOWS I WAS AT" ───────────────────────────────────────────────
+// Select past shows in the Gigs list (combine with search/filters), then add
+// them all to the viewer's journal in one go. Entries are created blank.
+
+function _isEligible(journalKey) {
+    const att = window._bandAttendance;
+    if (!att?.canTag || att.byKey.get(journalKey)?.mine) return false;
+    const src = _journalData.find(g => g['Journal Key'] === journalKey);
+    return !!src && _isPastDate(src.Date || src.date);
+}
+
+function _isPastDate(dateStr) {
+    const [d, m, y] = String(dateStr || '').split('/');
+    return y ? new Date(`${y}-${m}-${d}`) <= new Date() : false;
+}
+
+function bandBulkStart() {
+    if (!window._bandAttendance?.canTag) return;
+    window.toggleListView?.('list');     // selection happens in the list
+    _bulk.active = true;
+    _bulk.selected.clear();
+    document.getElementById('band-undo-snackbar')?.remove();
+    const entry = document.getElementById('band-bulk-entry');
+    if (entry) entry.style.display = 'none';
+    _renderBulkBar();
     window.refreshUI?.();
+}
+
+function bandBulkCancel() {
+    _bulk.active = false;
+    _bulk.selected.clear();
+    document.getElementById('band-bulk-bar')?.remove();
+    const entry = document.getElementById('band-bulk-entry');
+    if (entry && window._bandAttendance?.canTag) entry.style.display = 'flex';
+    window.refreshUI?.();
+}
+
+function _renderBulkBar() {
+    document.getElementById('band-bulk-bar')?.remove();
+    const bar = document.createElement('div');
+    bar.id = 'band-bulk-bar';
+    bar.className = 'fixed left-3 right-3 bottom-24 z-[70] max-w-md mx-auto bg-slate-800 text-white rounded-2xl shadow-xl px-4 py-3 space-y-2';
+    bar.innerHTML = `
+        <div class="flex items-center justify-between gap-3">
+            <span id="band-bulk-count" class="text-sm font-black">0 selected</span>
+            <button type="button" data-act="all" class="text-[10px] font-black uppercase tracking-wider text-[#7dd3fc]">Select all shown</button>
+        </div>
+        <div class="flex gap-2">
+            <button type="button" data-act="cancel" class="flex-1 py-2 rounded-xl text-xs font-black uppercase tracking-wider bg-white/10 hover:bg-white/20">Cancel</button>
+            <button type="button" data-act="add" id="band-bulk-add" class="flex-1 py-2 rounded-xl text-xs font-black uppercase tracking-wider bg-indigo-500 hover:bg-indigo-400 disabled:opacity-40" disabled>Add to my journal</button>
+        </div>`;
+    bar.addEventListener('click', (e) => {
+        const act = e.target.closest('button[data-act]')?.dataset.act;
+        if (act === 'cancel') bandBulkCancel();
+        if (act === 'all')    _bulkSelectAllShown();
+        if (act === 'add')    bandBulkCommit();
+    });
+    document.body.appendChild(bar);
+    _updateBulkBar();
+}
+
+function _updateBulkBar() {
+    const n = _bulk.selected.size;
+    const count = document.getElementById('band-bulk-count');
+    const add   = document.getElementById('band-bulk-add');
+    if (count) count.textContent = `${n} selected`;
+    if (add)   add.disabled = n === 0;
+}
+
+function _paintRowSelected(row, selected) {
+    row.classList.toggle('bg-indigo-100/70', selected);
+    const check = row.querySelector('[data-band-check]');
+    if (!check) return;
+    check.classList.toggle('text-indigo-700', selected);
+    check.classList.toggle('text-slate-500', !selected);
+    const box = check.firstElementChild;
+    if (!box) return;
+    box.classList.toggle('bg-indigo-600', selected);
+    box.classList.toggle('border-indigo-600', selected);
+    box.classList.toggle('text-white', selected);
+    box.classList.toggle('border-slate-300', !selected);
+    box.classList.toggle('text-transparent', !selected);
+}
+
+function _bulkToggleRow(row) {
+    const key = row.dataset.viewGigKey;
+    if (!_isEligible(key)) return;
+    const selected = !_bulk.selected.has(key);
+    if (selected) _bulk.selected.add(key); else _bulk.selected.delete(key);
+    _paintRowSelected(row, selected);
+    _updateBulkBar();
+}
+
+function _bulkSelectAllShown() {
+    const shown = window._lastRenderedGigs || [];
+    shown.forEach(g => { if (_isEligible(g['Journal Key'])) _bulk.selected.add(g['Journal Key']); });
+    _updateBulkBar();
+    window.refreshUI?.();      // repaint the checkboxes
+}
+
+async function bandBulkCommit() {
+    const me  = _currentUser?.id;
+    const att = window._bandAttendance;
+    const keys = [..._bulk.selected];
+    if (!me || !att || !keys.length) return;
+
+    if (keys.length > 25) {
+        const ok = await _dialog({
+            title: `Add ${keys.length} shows?`,
+            body: 'They’ll be added to your personal journal with no details, and you can fill them in later.',
+            confirmLabel: 'Add them',
+        });
+        if (!ok) return;
+    }
+
+    const addBtn = document.getElementById('band-bulk-add');
+    if (addBtn) { addBtn.disabled = true; addBtn.textContent = 'Adding…'; }
+
+    const created = new Set();
+    try {
+        for (let i = 0; i < keys.length; i += 100) {
+            const rows = keys.slice(i, i + 100)
+                .map(k => _journalData.find(g => g['Journal Key'] === k))
+                .filter(Boolean)
+                .map(src => _buildJournalRow(src, me));
+            const { data, error } = await supabase
+                .from('journals')
+                .upsert(rows, { onConflict: 'user_id,journal_key', ignoreDuplicates: true })
+                .select('journal_key');
+            if (error) throw error;
+            (data || []).forEach(r => created.add(r.journal_key));
+        }
+    } catch (err) {
+        console.error('band.js: bulk add failed', err);
+        window.showToast?.(`Stopped part-way: ${err.message}`, 'error', 6000);
+    }
+
+    keys.forEach(k => {
+        if (!created.has(k)) return;
+        const info = att.byKey.get(k) || { count: 0, buddyIds: [], mine: false };
+        info.mine = true;
+        info.count += 1;
+        att.byKey.set(k, info);
+    });
+
+    const skipped = keys.length - created.size;
+    if (created.size) {
+        window.showToast?.(
+            `Added ${created.size} show${created.size === 1 ? '' : 's'} to your journal` +
+            (skipped > 0 ? ` (${skipped} already there or skipped)` : ''),
+            'success', 5000);
+    }
+    bandBulkCancel();
     _loadBandStats().catch(() => {});
+    _loadBandAttendance().catch(() => {});   // re-sync with the server (also picks up pre-existing rows)
 }
 
 function _showUndoSnackbar(journalKey) {

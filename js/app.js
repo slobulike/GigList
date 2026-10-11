@@ -1,10 +1,10 @@
 /**
  * GigList Core Engine
- * v9.0.1 — 2026-10-11
+ * v9.0.2 — 2026-10-11
  * ------------------------------------------------------------------
- * ✅ Added artist images from uploads or spotify to be used throughout band mode tabs
- * ✅ "I was there" added to band mode to allow users to add a show with a single click
- * ✅ Avatars of buddies now shown in band mode for shows they attended
+ * ✅ Buddy avatars now appear on Band mode map view
+ * ✅ Link to artist on spotify from Band mode header image (when Spotify image is used)
+ * ✅ Bulk add of shows from Band mode
  */
 
 import * as Data from './modules/data.js';
@@ -45,7 +45,7 @@ import { initMixPlaylistCard } from './modules/mix-playlist.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "9.0.1";
+const APP_VERSION = "9.0.2";
 
 // Columns of profiles that the app is allowed to read (see the column grants
 // in Supabase). home_lat / home_lng / home_label are deliberately excluded:
