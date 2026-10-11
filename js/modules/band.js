@@ -27,6 +27,9 @@ import { loadPerformances }     from './data.js';
 
 let _journalData     = [];   // all shows for this band (archive + user-logged)
 let _performanceData = [];
+let _tagging         = new Set();   // journal keys with a tag request in flight
+let _justCreated     = new Set();   // keys whose row we created this session (undo-able)
+let _tagListenerBound = false;
 let _currentUser     = null;
 let _buddyStatus     = {};   // userId -> 'accepted' | 'pending' | null
 let _fanCount          = null;  // unique fans (distinct user_ids), set by _loadBandStats
@@ -55,11 +58,17 @@ export async function initBandMode(currentUser, journalData, performanceData) {
     // Load band stats for the stat strip (non-blocking)
     _loadBandStats().catch(err => console.warn('band.js: band stats load failed', err));
 
-    // Render hero image on the shows landing tab (non-blocking)
+    // Render the band hero shown above every tab (non-blocking)
     _renderBandHero().catch(err => console.warn('band.js: hero render failed', err));
 
     // Band-specific copy on the shared Gigs / Stats views
     _applyBandCopy();
+
+    // Attendance counts, buddy avatars and "I was there" (non-blocking)
+    window.bandTagShow  = bandTagShow;
+    window.bandUndoTag  = bandUndoTag;
+    _bindTagClicks();
+    _loadBandAttendance().catch(err => console.warn('band.js: attendance load failed', err));
 
     // Show default tab (first paint happens before setlists load)
     switchBandView('gigs');
@@ -136,58 +145,310 @@ function switchBandView(tab) {
     window.scrollTo(0, 0);
 }
 
-// ─── HERO IMAGE ───────────────────────────────────────────────────────────────
+// ─── HERO ─────────────────────────────────────────────────────────────────────
+// Compact banner above every band tab. Image priority:
+//   1. an uploaded band-photos/<slug>/hero.{jpg,png,webp}
+//   2. the artist's Spotify image (artists.spotify_image_url)
+//   3. a gradient with the band's initial
+// The header colour is sampled from the image (falls back to the per-band
+// colours in ui.js, then GigList blue) and exposed as window.bandBrandColor.
+
+const _DEFAULT_BRAND = '#189BCC';
 
 async function _renderBandHero() {
     const container = document.getElementById('band-hero');
-    if (!container) return;
+    const bandName  = window.currentArtist;
+    if (!container || !bandName) return;
 
-    const bandName = window.currentArtist;
-    if (!bandName) return;
+    // Paint the placeholder straight away so there's no empty gap while images load
+    _paintHero(container, bandName, null);
 
-    const slug    = bandName.toLowerCase().replace(/[^a-z0-9]/g, '-');
+    const slug = bandName.toLowerCase().replace(/[^a-z0-9]/g, '-');
+    let imageUrl = await _findUploadedHero(slug);
+    if (!imageUrl) imageUrl = await _findSpotifyImage(bandName);
+    if (!imageUrl) return;
+
+    // Try with CORS so we can sample a colour; fall back to a plain display load
+    let img = await _loadImg(imageUrl, true);
+    let color = null;
+    if (img) {
+        try { color = _dominantColor(img); } catch (_) { /* canvas tainted */ }
+    } else {
+        img = await _loadImg(imageUrl, false);
+    }
+    if (!img) return;
+
+    _paintHero(container, bandName, imageUrl);
+    if (color) {
+        window.bandBrandColor = color;
+        const header = document.querySelector('header');
+        if (header) header.style.backgroundColor = color;
+        document.documentElement.style.setProperty('--band-accent', color);
+    }
+}
+
+function _paintHero(container, bandName, imageUrl) {
     const initial = bandName.charAt(0).toUpperCase();
+    const brand   = window.bandBrandColor || _DEFAULT_BRAND;
+    const years   = _journalData.map(g => parseDate(g.Date)).filter(Boolean).map(d => d.getFullYear());
+    const subline = years.length
+        ? `${_journalData.length.toLocaleString('en-GB')} shows · ${Math.min(...years)}–${Math.max(...years)}`
+        : '';
 
-    // Supabase public bucket URLs don't reliably 404 on missing objects —
-    // use Image() load/error events to test whether a URL resolves as a real image.
-    const tryLoad = (url) => new Promise(resolve => {
+    const background = imageUrl
+        ? `<img src="${escapeHtml(safeUrl(imageUrl))}" alt="" class="absolute inset-0 w-full h-full object-cover" style="object-position:center 25%">
+           <div class="absolute inset-0 bg-gradient-to-t from-black/75 via-black/20 to-transparent"></div>`
+        : `<div class="absolute inset-0" style="background:linear-gradient(135deg, ${escapeHtml(brand)}, #4f46e5)"></div>
+           <span class="absolute right-4 -bottom-4 text-white/10 font-black text-[8rem] leading-none select-none pointer-events-none">${escapeHtml(initial)}</span>`;
+
+    container.innerHTML = `
+        <div class="relative w-full h-36 overflow-hidden rounded-3xl shadow-sm">
+            ${background}
+            <div class="absolute bottom-0 left-0 right-0 px-5 pb-4">
+                <p class="text-white font-black text-2xl leading-tight drop-shadow">${escapeHtml(bandName)}</p>
+                ${subline ? `<p class="text-white/80 text-[10px] font-black uppercase tracking-widest mt-0.5 drop-shadow">${escapeHtml(subline)}</p>` : ''}
+            </div>
+        </div>`;
+}
+
+async function _findUploadedHero(slug) {
+    // Supabase public bucket URLs don't reliably 404 on missing objects, so test
+    // each candidate by actually loading it as an image.
+    for (const ext of ['jpg', 'png', 'webp']) {
+        const { data } = supabase.storage.from('band-photos').getPublicUrl(`${slug}/hero.${ext}`);
+        if (data?.publicUrl && await _loadImg(data.publicUrl, false)) return data.publicUrl;
+    }
+    return null;
+}
+
+async function _findSpotifyImage(bandName) {
+    try {
+        const { data } = await supabase
+            .from('artists')
+            .select('spotify_image_url')
+            .eq('name', bandName)
+            .maybeSingle();
+        return data?.spotify_image_url || null;
+    } catch (err) {
+        console.warn('band.js: spotify image lookup failed', err);
+        return null;
+    }
+}
+
+function _loadImg(url, cors) {
+    return new Promise(resolve => {
         const img = new Image();
-        img.onload  = () => resolve(url);
+        if (cors) img.crossOrigin = 'anonymous';
+        img.onload  = () => resolve(img);
         img.onerror = () => resolve(null);
         img.src = url;
     });
+}
 
-    let photoUrl = null;
-    for (const ext of ['jpg', 'png', 'webp']) {
-        const { data: urlData } = supabase.storage
-            .from('band-photos')
-            .getPublicUrl(`${slug}/hero.${ext}`);
-        if (urlData?.publicUrl) {
-            const result = await tryLoad(urlData.publicUrl);
-            if (result) { photoUrl = result; break; }
+// Most common saturated colour in a 40×40 downsample, darkened until white text
+// stays readable on it. Throws if the canvas is tainted (no CORS) — caller catches.
+function _dominantColor(img) {
+    const size = 40;
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = size;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0, size, size);
+    const px = ctx.getImageData(0, 0, size, size).data;
+
+    const buckets = new Map();
+    for (let i = 0; i < px.length; i += 4) {
+        if (px[i + 3] < 200) continue;
+        const [r, g, bl] = [px[i], px[i + 1], px[i + 2]];
+        const max = Math.max(r, g, bl), min = Math.min(r, g, bl);
+        const sat = max === 0 ? 0 : (max - min) / max;
+        if (max < 40 || min > 225 || sat < 0.25) continue;   // too dark / light / grey
+        const key = `${r >> 5},${g >> 5},${bl >> 5}`;
+        const e = buckets.get(key) || { n: 0, r: 0, g: 0, b: 0 };
+        e.n++; e.r += r; e.g += g; e.b += bl;
+        buckets.set(key, e);
+    }
+    if (!buckets.size) return null;
+
+    const top = [...buckets.values()].sort((a, b) => b.n - a.n)[0];
+    let rgb = [top.r / top.n, top.g / top.n, top.b / top.n];
+
+    // Relative luminance ≤ 0.2 keeps white text above ~4.5:1 contrast
+    const lum = ([r, g, b]) => {
+        const f = c => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+        return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+    };
+    for (let i = 0; i < 12 && lum(rgb) > 0.2; i++) rgb = rgb.map(c => c * 0.88);
+    return `rgb(${rgb.map(Math.round).join(',')})`;
+}
+
+// ─── ATTENDANCE + "I WAS THERE" ───────────────────────────────────────────────
+// window._bandAttendance feeds the shared Gigs table (ui.js renderTable):
+//   byKey   Map<journal_key, { count, buddyIds[], mine }>
+//   people  { [userId]: profile }   — accepted buddies only
+//   canTag  boolean                 — viewer is signed in
+// get_band_attendance (security definer) gives everyone the counts but returns
+// only the viewer and their accepted buddies by id, so strangers' identities
+// never reach the client from this feature.
+
+async function _loadBandAttendance() {
+    const bandName = window.currentArtist;
+    if (!bandName) return;
+
+    const att = {
+        byKey:  new Map(),
+        people: {},
+        canTag: !!(_currentUser?.isAuthUser && _currentUser?.id),
+        justCreated: _justCreated,   // keys tagged this session (inline Undo in the list)
+    };
+    window._bandAttendance = att;
+
+    const { data, error } = await supabase.rpc('get_band_attendance', { p_band: bandName });
+    if (error) {
+        // e.g. the SQL function hasn't been created yet — the table still shows
+        // the tag button, just without counts.
+        console.warn('band.js: get_band_attendance failed', error.message);
+        window.refreshUI?.();
+        return;
+    }
+
+    (data || []).forEach(r => att.byKey.set(r.journal_key, {
+        count:    r.attendee_count || 0,
+        buddyIds: r.buddy_ids || [],
+        mine:     !!r.i_was_there,
+    }));
+
+    const ids = [...new Set((data || []).flatMap(r => r.buddy_ids || []))];
+    if (ids.length) {
+        const { data: profiles } = await supabase.rpc('get_profiles_by_ids', { user_ids: ids });
+        (profiles || []).forEach(p => { att.people[p.id] = p; });
+    }
+    window.refreshUI?.();
+}
+
+function _bindTagClicks() {
+    if (_tagListenerBound) return;
+    _tagListenerBound = true;
+    // Capture phase so the row's "open gig" handler never sees these clicks.
+    document.addEventListener('click', (e) => {
+        const tagBtn   = e.target.closest?.('[data-band-tag]');
+        const untagBtn = e.target.closest?.('[data-band-untag]');
+        if (!tagBtn && !untagBtn) return;
+        e.stopPropagation();
+        e.preventDefault();
+        if (tagBtn)   bandTagShow(tagBtn.dataset.bandTag);
+        if (untagBtn) bandUndoTag(untagBtn.dataset.bandUntag);
+    }, true);
+}
+
+async function bandTagShow(journalKey) {
+    const att = window._bandAttendance;
+    const me  = _currentUser?.id;
+    if (!att?.canTag || !me || !journalKey || _tagging.has(journalKey)) return;
+
+    const src = _journalData.find(g => g['Journal Key'] === journalKey);
+    if (!src) return;
+
+    const info = att.byKey.get(journalKey) || { count: 0, buddyIds: [], mine: false };
+    if (info.mine) return;
+
+    _tagging.add(journalKey);
+    try {
+        // Same shape the editor writes, with everything personal left blank.
+        // ignoreDuplicates = ON CONFLICT DO NOTHING: if the viewer already has a
+        // row for this event (e.g. a festival day logged under another band) it
+        // is left untouched instead of being overwritten.
+        const row = {
+            user_id:          me,
+            journal_key:      journalKey,
+            date:             src.date || src.Date,
+            band:             src.band || src.Band,
+            official_venue:   src.official_venue || src.OfficialVenue,
+            venue:            src.venue || src.official_venue || src.OfficialVenue,
+            festival:         !!src.festival,
+            festival_lineups: '',
+            notable_support:  '',
+            went_with:        '',
+            comments:         '',
+            photos:           '',
+            price:            '',
+            review_url:       '',
+            artist_id:        src.artist_id ?? null,
+        };
+
+        const { data, error } = await supabase
+            .from('journals')
+            .upsert(row, { onConflict: 'user_id,journal_key', ignoreDuplicates: true })
+            .select('id');
+        if (error) throw error;
+
+        const created = (data || []).length > 0;
+        info.mine = true;
+        if (created) info.count += 1;      // an existing row was already counted
+        att.byKey.set(journalKey, info);
+        window.refreshUI?.();
+
+        if (created) {
+            _justCreated.add(journalKey);
+            _showUndoSnackbar(journalKey);
+            _loadBandStats().catch(() => {});   // refresh fan / reach numbers
+        } else {
+            window.showToast?.('That show is already in your journal', 'info');
         }
+    } catch (err) {
+        console.error('band.js: tag failed', err);
+        window.showToast?.('Couldn’t add that show — try again', 'error');
+    } finally {
+        _tagging.delete(journalKey);
+    }
+}
+
+// Undo only removes a row this session just created, so a later, enriched
+// journal entry can never be deleted from here.
+async function bandUndoTag(journalKey) {
+    const att = window._bandAttendance;
+    const me  = _currentUser?.id;
+    if (!me || !_justCreated.has(journalKey)) return;
+
+    document.getElementById('band-undo-snackbar')?.remove();
+
+    const { data, error } = await supabase
+        .from('journals').delete()
+        .eq('user_id', me).eq('journal_key', journalKey)
+        .select('id');
+
+    if (error) {
+        console.error('band.js: undo failed', error);
+        window.showToast?.(`Couldn’t undo: ${error.message}`, 'error', 6000);
+        return;
+    }
+    if (!(data || []).length) {
+        // RLS can make a delete succeed while removing nothing — don't pretend it worked
+        console.error('band.js: undo removed no rows', { me, journalKey });
+        window.showToast?.('Couldn’t undo — nothing was removed', 'error', 6000);
+        return;
     }
 
-    if (photoUrl) {
-        container.innerHTML = `
-            <div class="relative w-full h-52 overflow-hidden rounded-3xl shadow-sm">
-                <img src="${escapeHtml(safeUrl(photoUrl))}" alt="${escapeHtml(bandName)}"
-                     class="absolute inset-0 w-full h-full object-cover">
-                <div class="absolute inset-0 bg-gradient-to-t from-black/65 via-black/15 to-transparent"></div>
-                <div class="absolute bottom-0 left-0 right-0 p-5">
-                    <p class="text-white font-black text-2xl leading-tight drop-shadow">${escapeHtml(bandName)}</p>
-                </div>
-            </div>`;
-    } else {
-        // Styled gradient placeholder with large translucent initial
-        container.innerHTML = `
-            <div class="relative w-full h-36 overflow-hidden rounded-3xl shadow-sm bg-gradient-to-br from-indigo-600 to-[#189BCC]">
-                <span class="absolute inset-0 flex items-center justify-center text-white/10 font-black text-[9rem] leading-none select-none pointer-events-none">${escapeHtml(initial)}</span>
-                <div class="absolute bottom-0 left-0 right-0 p-5">
-                    <p class="text-white font-black text-2xl leading-tight drop-shadow">${escapeHtml(bandName)}</p>
-                </div>
-            </div>`;
-    }
+    _justCreated.delete(journalKey);
+    const info = att?.byKey.get(journalKey);
+    if (info) { info.mine = false; info.count = Math.max(0, info.count - 1); }
+    window.refreshUI?.();
+    _loadBandStats().catch(() => {});
+}
+
+function _showUndoSnackbar(journalKey) {
+    document.getElementById('band-undo-snackbar')?.remove();
+    const el = document.createElement('div');
+    el.id = 'band-undo-snackbar';
+    el.setAttribute('role', 'status');
+    el.className = 'fixed left-1/2 -translate-x-1/2 bottom-28 z-[60] flex items-center gap-4 bg-slate-800 text-white text-sm font-bold rounded-2xl px-5 py-3 shadow-xl';
+    el.innerHTML = `<span>Added to your journal</span>
+        <button type="button" class="text-[#7dd3fc] font-black uppercase text-xs tracking-wider">Undo</button>`;
+    el.querySelector('button').addEventListener('click', () => {
+        el.remove();
+        bandUndoTag(journalKey);
+    });
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 10000);
 }
 
 // ─── SHOWS TAB ────────────────────────────────────────────────────────────────

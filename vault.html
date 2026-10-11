@@ -35,6 +35,8 @@
         .band-only { display: none; }
         body.band-mode .band-only { display: block; }
         body.band-mode .personal-only { display: none !important; }
+        /* Band headers land on dark colours: keep the title white whatever else sets its colour */
+        body.band-mode #header-page-title { color: #fff !important; }
     </style>
     <link rel="stylesheet" href="css/style.css">
     <link rel="icon" type="image/png" href="assets/icon-512.png">
@@ -71,6 +73,9 @@
 </header>
 
 <main class="pt-20 pb-32 px-4 max-w-md mx-auto">
+    <!-- Band mode only: compact hero shown above every band tab (band.js) -->
+    <div id="band-hero" class="band-only mb-4"></div>
+
 
     <section id="view-home" class="view-section space-y-4" aria-hidden="false">
 
@@ -210,9 +215,6 @@
     </section>
 
     <section id="view-data" class="view-section hidden space-y-6" role="region" aria-labelledby="data-centre-title" aria-hidden="true">
-        <!-- Band mode only: hero image, populated by band.js -->
-        <div id="band-hero" class="band-only"></div>
-
         <div class="flex items-center justify-between">
             <div>
                 <h2 id="data-centre-title" class="font-display text-5xl italic tracking-tight text-slate-900">Live Music</h2>

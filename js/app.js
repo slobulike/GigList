@@ -1,8 +1,10 @@
 /**
  * GigList Core Engine
- * v9.0.0 — 2026-10-10
+ * v9.0.1 — 2026-10-11
  * ------------------------------------------------------------------
- * ✅ First phase of band mode overhaul - aligned UI to personal mode with Gigs tab now showing calendar and map views
+ * ✅ Added artist images from uploads or spotify to be used throughout band mode tabs
+ * ✅ "I was there" added to band mode to allow users to add a show with a single click
+ * ✅ Avatars of buddies now shown in band mode for shows they attended
  */
 
 import * as Data from './modules/data.js';
@@ -43,7 +45,7 @@ import { initMixPlaylistCard } from './modules/mix-playlist.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "9.0.0";
+const APP_VERSION = "9.0.1";
 
 // Columns of profiles that the app is allowed to read (see the column grants
 // in Supabase). home_lat / home_lng / home_label are deliberately excluded:

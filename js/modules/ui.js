@@ -128,7 +128,7 @@ export const updateStats = (data) => {
 
     // In band mode, apply the per-band header colour on every stats refresh
     if (window.isBandMode) {
-        const brandColor = bandColors[window.currentArtist] || '#189BCC';
+        const brandColor = window.bandBrandColor || bandColors[window.currentArtist] || '#189BCC';
         const topHeader = document.querySelector('header');
         if (topHeader) topHeader.style.backgroundColor = brandColor;
     }
@@ -689,6 +689,49 @@ export const renderTable = (data) => {
                             }
                         }
 
+                        // --- BAND MODE: attendance, buddies, "I was there" ---
+                        // Data comes from band.js (window._bandAttendance). Everyone sees a
+                        // count; avatars are only the viewer's accepted buddies.
+                        let bandAttendanceHtml = '';
+                        let rowClass = '';
+                        let rowStyle = '';
+                        if (window.isBandMode) {
+                            const att  = window._bandAttendance;
+                            const info = att?.byKey?.get(gig['Journal Key']);
+                            const mine = !!info?.mine;
+                            const parts = [];
+
+                            if (info?.count > 0) {
+                                parts.push(`<span class="inline-flex items-center gap-1 text-[10px] font-black text-slate-500" title="GigList users who were there"><i data-lucide="users" class="w-3 h-3"></i>${info.count}</span>`);
+                            }
+                            (info?.buddyIds || []).slice(0, 3).forEach(id => {
+                                const p = att.people?.[id];
+                                if (!p) return;
+                                const name = p.display_name || p.username || '';
+                                const src  = safeUrl(p.avatar_url);
+                                parts.push(src
+                                    ? `<img src="${escapeHtml(src)}" alt="" title="${escapeHtml(name)}" class="w-5 h-5 rounded-full object-cover ring-1 ring-white">`
+                                    : `<span class="inline-flex items-center justify-center w-5 h-5 rounded-full text-[8px] font-black bg-indigo-100 text-indigo-700" title="${escapeHtml(name)}">${escapeHtml((name || '?').slice(0, 2).toUpperCase())}</span>`);
+                            });
+
+                            const [gd, gm, gy] = (gig.Date || '').split('/');
+                            const isPast = gy ? new Date(`${gy}-${gm}-${gd}`) <= new Date() : false;
+                            if (mine) {
+                                parts.push(`<span class="inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-wider text-indigo-600"><i data-lucide="check" class="w-3 h-3"></i>You were there</span>`);
+                                // Tagged this session: keep Undo on the row so it can't be missed
+                                if (att?.justCreated?.has(gig['Journal Key'])) {
+                                    parts.push(`<button type="button" data-band-untag="${escapeHtml(gig['Journal Key'])}" class="text-[9px] font-black uppercase tracking-wider text-slate-500 underline underline-offset-2 hover:text-slate-700">Undo</button>`);
+                                }
+                                rowClass = 'bg-indigo-50/70';
+                                rowStyle = 'box-shadow: inset 3px 0 0 #6366f1;';
+                            } else if (att?.canTag && isPast) {
+                                parts.push(`<button type="button" data-band-tag="${escapeHtml(gig['Journal Key'])}" class="inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-wider text-indigo-600 border border-indigo-200 rounded-full px-2 py-0.5 hover:bg-indigo-50 active:bg-indigo-100">+ I was there</button>`);
+                            }
+                            if (parts.length) {
+                                bandAttendanceHtml = `<div class="flex items-center gap-2 mt-1 flex-wrap">${parts.join('')}</div>`;
+                            }
+                        }
+
                         const displayValue = window.isBandMode ? deriveType(gig) : gig.Band;
                         const badgeClass = typeColors[displayValue] || 'text-slate-600 bg-slate-50 border-slate-100';
 
@@ -697,7 +740,7 @@ export const renderTable = (data) => {
                             : `<span class="text-sm font-bold text-slate-900">${escapeHtml(displayValue)}</span>`;
 
                         return `
-                        <tr data-view-gig-key="${escapeHtml(gig['Journal Key'])}" class="group hover:bg-indigo-50/30 transition-all cursor-pointer">
+                        <tr data-view-gig-key="${escapeHtml(gig['Journal Key'])}" class="group ${rowClass} hover:bg-indigo-50/30 transition-all cursor-pointer" ${rowStyle ? `style="${rowStyle}"` : ''}>
                             <td class="p-4 text-xs font-medium text-slate-500 font-mono tracking-tighter">${escapeHtml(gig.Date)}</td>
                             <td class="p-4 leading-tight">
                                 <div class="flex flex-col gap-1">
@@ -707,6 +750,7 @@ export const renderTable = (data) => {
                                     </div>
                                     ${matchLabels}
                                     ${buddyPills}
+                                    ${bandAttendanceHtml}
                                 </div>
                             </td>
                             <td class="p-4 text-xs text-slate-600 font-medium">
