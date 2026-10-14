@@ -106,6 +106,41 @@ export const sortGigs = (data, column, ascending = true) => {
  * A user with no shows gets 0 bytes for both. A heavy user gets only their
  * relevant slice rather than the entire global dataset.
  */
+// ── Venue identity ────────────────────────────────────────────────────────────
+// Venue NAMES aren't unique ('The Garage', 'House of Blues'…). Rows linked to a
+// venue (journals.venue_id / performances.venue_id, filled by the setlist.fm
+// backfill) resolve by id; unlinked rows fall back to the name as before.
+const _venueInfo = (v) => ({
+    id:       v.id,
+    name:     v.official_name,
+    lat:      parseFloat(v.latitude)  || null,
+    lng:      parseFloat(v.longitude) || null,
+    city:     v.city     || 'Unknown City',
+    country:  v.country  || 'Unknown Country',
+    capacity: v.capacity || 'Unknown',
+});
+
+/** The venue record for a row: by venue_id when linked, else by name. */
+export const resolveVenue = (row) =>
+    (row.venue_id != null && window.venuesById?.[row.venue_id])
+    || (window.allVenues || {})[row.OfficialVenue || row.official_venue]
+    || null;
+
+/**
+ * Stable identity of the venue a row is at (for grouping/counting). Uses the id of the
+ * venue the row RESOLVES to, so a row linked by venue_id and an unlinked row that falls
+ * back to the same venue by name share one key (otherwise they'd draw two pins).
+ */
+export const venueKey = (row) => {
+    const v = resolveVenue(row);
+    if (v?.id != null) return `id:${v.id}`;
+    if (row.venue_id)  return `id:${row.venue_id}`;
+    return `name:${row.OfficialVenue || row.official_venue || row.Venue || ''}`;
+};
+
+window.venueKey     = venueKey;
+window.resolveVenue = resolveVenue;
+
 export const loadAppData = async (user, { skipPerformances = false } = {}) => {
     const now = new Date();
     now.setHours(0, 0, 0, 0);
@@ -146,7 +181,9 @@ export const loadAppData = async (user, { skipPerformances = false } = {}) => {
     // journal_key is used to scope performances so that festival shows return all acts
     // on the lineup, not just acts that happen to appear elsewhere in the user's journal.
     const journalKeys   = [...new Set(journalData.map(r => r.journal_key).filter(Boolean))];
-    const journalVenues = [...new Set(journalData.map(r => r.official_venue).filter(Boolean))];
+    // Rows already linked to a venue are fetched by id; only unlinked rows need a name lookup.
+    const journalVenues   = [...new Set(journalData.filter(r => !r.venue_id).map(r => r.official_venue).filter(Boolean))];
+    const journalVenueIds = [...new Set(journalData.map(r => r.venue_id).filter(Boolean))];
 
 // ── Step 1b: Artist lookup (spotify IDs for deep links) ──────────────────────
 const journalBands = [...new Set(journalData.map(r => r.band).filter(Boolean))];
@@ -240,29 +277,47 @@ if (journalIds.length && companionOwnerId) {
         return results.flatMap(r => r.data || []);
     }
 
+    async function fetchVenuesByIds(ids) {
+        if (!ids.length) return [];
+        const chunks = [];
+        for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+            chunks.push(ids.slice(i, i + CHUNK_SIZE));
+        }
+        const results = await Promise.all(
+            chunks.map(chunk => supabase.from('venues').select('*').in('id', chunk))
+        );
+        const errors = results.filter(r => r.error);
+        if (errors.length) throw new Error(`Failed to load venues: ${errors[0].error.message}`);
+        return results.flatMap(r => r.data || []);
+    }
+
+    async function fetchAllVenues() {
+        const [byName, byId] = await Promise.all([
+            fetchVenuesInBatches(journalVenues),
+            fetchVenuesByIds(journalVenueIds),
+        ]);
+        return [...byName, ...byId];
+    }
+
     const [perfRows, venueRows] = skipPerformances
-        ? [[], await fetchVenuesInBatches(journalVenues)]
+        ? [[], await fetchAllVenues()]
         : await Promise.all([
             fetchPerformancesInBatches(journalKeys),
-            fetchVenuesInBatches(journalVenues),
+            fetchAllVenues(),
           ]);
 
     const venueRes = { data: venueRows };
 
     // Build venue lookup from scoped results and stash on window for map/editor use
     const venueLookup = {};
+    const venuesById  = {};
     (venueRes.data || []).forEach(v => {
-        if (v.official_name) {
-            venueLookup[v.official_name] = {
-                lat:      parseFloat(v.latitude)  || null,
-                lng:      parseFloat(v.longitude) || null,
-                city:     v.city     || 'Unknown City',
-                country:  v.country  || 'Unknown Country',
-                capacity: v.capacity || 'Unknown',
-            };
-        }
+        const info = _venueInfo(v);
+        if (v.id != null) venuesById[v.id] = info;
+        if (v.official_name) venueLookup[v.official_name] = info;
     });
-    window.allVenues = venueLookup;
+    window.allVenues  = venueLookup;
+    window.venuesById = venuesById;
 
     let performanceData = perfRows;
 
@@ -313,16 +368,18 @@ if (journalIds.length && companionOwnerId) {
         const gigDate = parseDate(row.Date);
         row.type    = (gigDate && gigDate >= now) ? 'future' : 'past';
 
-        const venueInfo = venueLookup[row.OfficialVenue];
+        const venueInfo = resolveVenue(row);
         if (venueInfo) {
             row.City    = venueInfo.city    || '';
             row.Country = venueInfo.country || '';
+            // A show with no venue name in the journal can still show its linked venue
+            if (!row.OfficialVenue && row.venue_id && venueInfo.name) row.OfficialVenue = venueInfo.name;
         }
     });
 
     // Enrich performance rows
     performanceData.forEach(perf => {
-        const venueInfo = venueLookup[perf.OfficialVenue];
+        const venueInfo = resolveVenue(perf);
         if (venueInfo) {
             perf.City    = venueInfo.city    || '';
             perf.Country = venueInfo.country || '';
@@ -373,7 +430,7 @@ export const loadPerformances = async (journalKeys, venueLookup = {}) => {
 
     // Enrich with venue City/Country (mirrors loadAppData)
     rows.forEach(perf => {
-        const venueInfo = venueLookup[perf.OfficialVenue];
+        const venueInfo = resolveVenue(perf) || venueLookup[perf.OfficialVenue];
         if (venueInfo) {
             perf.City    = venueInfo.city    || '';
             perf.Country = venueInfo.country || '';
@@ -402,18 +459,14 @@ export const loadVenues = async (officialVenues = null) => {
 
     if (!error && data && data.length > 0) {
         const lookup = {};
+        const byId   = {};
         data.forEach(v => {
-            if (v.official_name) {
-                lookup[v.official_name] = {
-                    lat:      parseFloat(v.latitude)  || null,
-                    lng:      parseFloat(v.longitude) || null,
-                    city:     v.city     || 'Unknown City',
-                    country:  v.country  || 'Unknown Country',
-                    capacity: v.capacity || 'Unknown'
-                };
-            }
+            const info = _venueInfo(v);
+            if (v.id != null) byId[v.id] = info;
+            if (v.official_name) lookup[v.official_name] = info;
         });
-        window.allVenues = lookup;
+        window.allVenues  = lookup;
+        window.venuesById = { ...(window.venuesById || {}), ...byId };
         return lookup;
     }
 

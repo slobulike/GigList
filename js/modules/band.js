@@ -791,24 +791,19 @@ function _renderSummaryNarrative() {
         return;
     }
 
-    // Split archive vs user-logged
     const userLoggedShows = data.filter(g => g.user_id && g.user_id !== 'null');
     const totalShows      = data.length;
 
-    // Unique venues
-    const venues     = new Set(data.map(g => g.OfficialVenue || g.Venue).filter(Boolean));
+    const venues     = new Set(data.filter(g => g.venue_id || g.OfficialVenue || g.Venue).map(_vkey));
     const venueCount = venues.size;
 
-    // First and most recent show dates
     const dates     = data.map(g => parseDate(g.Date)).filter(Boolean).sort((a, b) => a - b);
     const fmtDate   = d => d ? d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : null;
     const firstDate = fmtDate(dates[0]);
     const lastDate  = fmtDate(dates[dates.length - 1]);
 
-    // Fan count from stat strip if already resolved
-    const fanEl    = document.getElementById('stat-rank');
-    const fanCount = (fanEl && fanEl.textContent && !isNaN(fanEl.textContent))
-        ? parseInt(fanEl.textContent, 10) : null;
+    // Use module-level _fanCount directly
+    const fanCount = _fanCount;
 
     const plural      = totalShows !== 1;
     const venuePhrase = venueCount > 1 ? `, across ${venueCount} venues` : '';
@@ -832,12 +827,9 @@ function _renderStoryStats() {
         return;
     }
 
-    // Fan count from stat strip
-    const fanEl    = document.getElementById('stat-rank');
-    const fanCount = (fanEl && fanEl.textContent && !isNaN(fanEl.textContent))
-        ? parseInt(fanEl.textContent, 10) : null;
+    // Use module-level _fanCount directly
+    const fanCount = _fanCount;
 
-    // Years active
     const years = data.map(g => {
         const parts = (g.Date || '').split('/');
         return parts.length === 3 ? parseInt(parts[2], 10) : null;
@@ -848,20 +840,22 @@ function _renderStoryStats() {
     const yearsSpan  = maxYear - minYear;
     const yearsLabel = minYear === maxYear ? `${minYear}` : `${minYear} – ${maxYear}`;
 
-    // Peak year
     const yearCounts = {};
     years.forEach(y => { yearCounts[y] = (yearCounts[y] || 0) + 1; });
     const peakYear = Object.entries(yearCounts).sort((a, b) => b[1] - a[1])[0];
 
-    // Most-played venue
     const venueCounts = {};
     data.forEach(g => {
-        const v = g.OfficialVenue || g.Venue;
-        if (v) venueCounts[v] = (venueCounts[v] || 0) + 1;
+        if (!(g.venue_id || g.OfficialVenue || g.Venue)) return;
+        const k = _vkey(g);
+        (venueCounts[k] = venueCounts[k] || { n: 0, gig: g }).n++;
     });
-    const topVenue = Object.entries(venueCounts).sort((a, b) => b[1] - a[1])[0];
+    const topEntry = Object.values(venueCounts).sort((a, b) => b.n - a.n)[0];
+    const topVenue = topEntry
+        ? [[topEntry.gig.OfficialVenue || topEntry.gig.Venue,
+            window.resolveVenue?.(topEntry.gig)?.city].filter(c => c && c !== 'Unknown City').join(', '), topEntry.n]
+        : null;
 
-    // Countries played (from venue lookups; blank until venues resolve)
     const countries = new Set(data.map(g => (g.Country || '').trim()).filter(Boolean));
 
     const cards = [
@@ -902,7 +896,7 @@ function _renderStoryStats() {
         {
             label: 'Top Venue',
             value: topVenue ? topVenue[1] : '--',
-            sub:   topVenue ? _truncate(topVenue[0], 22) : '',
+            sub:   topVenue ? _truncate(topVenue[0], 26) : '',
         },
         {
             label: 'Countries',
@@ -1207,6 +1201,9 @@ async function _loadBuddyStatus() {
         _buddyStatus[otherId] = b.status;
     });
 }
+
+// Venue identity for grouping/counting: venue_id when linked, name otherwise (data.js)
+const _vkey = (g) => (window.venueKey ? window.venueKey(g) : (g.OfficialVenue || g.Venue || ''));
 
 // 0.3% not "0%": tiny shares round to one decimal, larger ones to whole numbers.
 function _formatReach(ratio) {

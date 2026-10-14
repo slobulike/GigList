@@ -141,7 +141,7 @@ export const updateStats = (data) => {
     // 3. Calculate Core Stats
     const counts = {
         total: data.length,
-        venues: new Set(data.map(g => g.OfficialVenue)).size,
+        venues: new Set(data.map(_venueKey)).size,
         artists: 0
     };
 
@@ -870,6 +870,11 @@ export const toggleListView = (view) => {
  * Leaflet Map Engine
  */
 
+// Venue identity helpers (defined in data.js, exposed on window): group and look up
+// by venue_id when a row is linked, by name otherwise.
+const _venueKey     = (g) => (window.venueKey ? window.venueKey(g) : (g.OfficialVenue || ''));
+const _resolveVenue = (g) => (window.resolveVenue ? window.resolveVenue(g) : (window.venueLookup || {})[g.OfficialVenue]);
+
 const getHomeBase = (venueStats, venuesLookup) => {
     let topVenue = null;
     let topVenueName = "None";
@@ -877,7 +882,7 @@ const getHomeBase = (venueStats, venuesLookup) => {
 
     Object.keys(venueStats).forEach(vName => {
         const visits = venueStats[vName].length;
-        const coords = venuesLookup[vName];
+        const coords = _resolveVenue(venueStats[vName][0]);
         if (visits > maxVisits && coords && !isNaN(coords.lat)) {
             maxVisits = visits;
             topVenue = coords;
@@ -918,7 +923,7 @@ function _bandPlaces(data, venuesLookup) {
     const att = window._bandAttendance;
     const places = new Map();
     data.forEach(g => {
-        const v = venuesLookup[g.OfficialVenue];
+        const v = _resolveVenue(g);
         if (!v || v.lat == null || v.lng == null || isNaN(v.lat) || isNaN(v.lng)) return;
         const key = `${v.lat.toFixed(3)},${v.lng.toFixed(3)}`;
         let p = places.get(key);
@@ -1084,15 +1089,16 @@ export const renderMap = async (data) => {
 
     // 1. Aggregate Gigs
     data.forEach(gig => {
-        const vName = gig.OfficialVenue;
-        if (!venueStats[vName]) venueStats[vName] = [];
-        venueStats[vName].push(gig);
+        const vKey = _venueKey(gig);
+        if (!venueStats[vKey]) venueStats[vKey] = [];
+        venueStats[vKey].push(gig);
     });
 
     // 2. Re-build Markers with Popups
-    Object.keys(venueStats).forEach(vName => {
-        const gigsAtVenue = venueStats[vName];
-        const venueData = venuesLookup[vName];
+    Object.keys(venueStats).forEach(vKey => {
+        const gigsAtVenue = venueStats[vKey];
+        const vName = gigsAtVenue[0].OfficialVenue || '';
+        const venueData = _resolveVenue(gigsAtVenue[0]);
 
         if (venueData && !isNaN(venueData.lat)) {
             const visitCount = gigsAtVenue.length;
@@ -1198,14 +1204,15 @@ window.openMapModal = () => {
         const venueStats = {};
 
         data.forEach(gig => {
-            const vName = gig.OfficialVenue;
-            if (!venueStats[vName]) venueStats[vName] = [];
-            venueStats[vName].push(gig);
+            const vKey = _venueKey(gig);
+            if (!venueStats[vKey]) venueStats[vKey] = [];
+            venueStats[vKey].push(gig);
         });
 
-        Object.keys(venueStats).forEach(vName => {
-            const gigsAtVenue = venueStats[vName];
-            const venueInfo   = venuesLookup[vName];
+        Object.keys(venueStats).forEach(vKey => {
+            const gigsAtVenue = venueStats[vKey];
+            const vName       = gigsAtVenue[0].OfficialVenue || '';
+            const venueInfo   = _resolveVenue(gigsAtVenue[0]);
 
             if (venueInfo && !isNaN(venueInfo.lat)) {
                 const visitCount = gigsAtVenue.length;
