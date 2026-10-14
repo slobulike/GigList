@@ -1,8 +1,8 @@
 /**
  * GigList Core Engine
- * v9.0.3 — 2026-10-11
+ * v9.0.4 — 2026-10-14
  * ------------------------------------------------------------------
- * ✅ Fixed venue logic to use unique id (with name as fall back) so that The Garage etc get matched correctly
+ * ✅ Added additional artist images from spotify to allow archive to be built and then used for variety
  */
 
 import * as Data from './modules/data.js';
@@ -43,7 +43,7 @@ import { initMixPlaylistCard } from './modules/mix-playlist.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "9.0.3";
+const APP_VERSION = "9.0.4";
 
 // Columns of profiles that the app is allowed to read (see the column grants
 // in Supabase). home_lat / home_lng / home_label are deliberately excluded:

@@ -553,7 +553,7 @@ export const renderCarouselItem = (index, carouselData, fullData) => {
         tryInOrder([
                     storageUrl,
                     scrapbookPath,
-                    item.SpotifyImageUrl || null,
+                    ...(item.ArtistImages?.length ? item.ArtistImages : [item.SpotifyImageUrl || null]),
                     artistPath,
                     fallback,
                 ]);
@@ -1679,15 +1679,13 @@ const gigIsPast = (() => {
     const imgArtist    = document.getElementById('h-artist');
     const divTicket    = document.getElementById('h-ticket');
 
-    const trySpotify = () => {
-                const spotifyUrl = entry.SpotifyImageUrl || null;
-                if (spotifyUrl) {
-                    imgArtist.onload  = () => imgArtist.classList.remove('hidden');
-                    imgArtist.onerror = () => tryArtist();
-                    imgArtist.src     = spotifyUrl;
-                } else {
-                    tryArtist();
-                }
+    // Tries each artist image in turn (per-gig pick first); a dead URL falls through to the next.
+    const trySpotify = (candidates = (entry.ArtistImages?.length ? entry.ArtistImages : [entry.SpotifyImageUrl]).filter(Boolean)) => {
+                const [next, ...rest] = candidates;
+                if (!next) { tryArtist(); return; }
+                imgArtist.onload  = () => imgArtist.classList.remove('hidden');
+                imgArtist.onerror = () => trySpotify(rest);
+                imgArtist.src     = next;
             };
 
         const tryLocalScrapbook = () => {

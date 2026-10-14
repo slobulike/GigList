@@ -3,6 +3,7 @@
  */
 import { parseDate, isFestivalRow, getOwnFestivalLineup, normalizeArtist, scopeFestivalPerformances } from './utils.js';
 import { supabase } from './supabase.js';
+import { loadArtistImages, artistImageCandidates } from './artist-images.js';
 
 /**
  * Helper to determine show type based on keywords
@@ -197,15 +198,18 @@ if (journalBands.length) {
     }
     const artistResults = await Promise.all(
         artistChunks.map(chunk =>
-            supabase.from('artists').select('name, spotify_artist_id, spotify_image_url').in('name', chunk)
+            supabase.from('artists').select('id, name, spotify_artist_id, spotify_image_url').in('name', chunk)
         )
     );
     artistResults.flatMap(r => r.data || []).forEach(a => {
         artistLookup[a.name] = {
+            id: a.id,
             spotify_artist_id: a.spotify_artist_id,
             spotify_image_url: a.spotify_image_url,
         };
     });
+    // All known images for these artists (non-fatal if it fails — everything falls back to the current image).
+    await loadArtistImages(Object.values(artistLookup).map(a => a.id));
 }
 
 // ── Step 1c: Companion tags (gig_companions) ──────────────────────────────
@@ -343,6 +347,11 @@ if (journalIds.length && companionOwnerId) {
          // Artist enrichment from canonical artists table
         SpotifyArtistId:    artistLookup[row.band]?.spotify_artist_id || null,
         SpotifyImageUrl:    artistLookup[row.band]?.spotify_image_url || null,
+        // Ordered images to try for this gig: a per-gig pick first (stable, so a gig always
+        // shows the same one), then the rest. SpotifyImageUrl stays the artist's current image.
+        ArtistImages:       artistLookup[row.band]
+            ? artistImageCandidates(artistLookup[row.band], { strategy: 'stable', seed: row.journal_key || row['Journal Key'] })
+            : [],
         // Structured companion tags for this row, if any — see
         // getCompanionsForGig below for how this merges with the legacy
         // free-text 'Went With' field. null (not []) when there's no

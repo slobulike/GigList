@@ -707,6 +707,9 @@ window.showSpinner?.('Saving show…');
     const isBandWrite = window.isBandMode && window.currentUser?.is_admin;
     const writeUserId = isBandWrite ? null : session.user.id;
 
+    // The venue the user picked, as a venues.id (null if it's a new / unmatched name)
+    const venueId = await _lookupVenueId(venue);
+
     const supabaseRow = {
         user_id: writeUserId,
         journal_key: journalKey,
@@ -744,6 +747,16 @@ window.showSpinner?.('Saving show…');
                 .update({ artist_id: artistId })
                 .eq('journal_key', journalKey)
                 .eq('user_id', writeUserId ?? session.user.id);
+        }
+
+        // Link the show to its venue row. Only fills an EMPTY venue_id, so a precise
+        // setlist.fm link (set by the backfill / cron) is never overwritten by this
+        // name-based one.
+        if (venueId) {
+            let q = supabase.from('journals').update({ venue_id: venueId }).eq('journal_key', journalKey).is('venue_id', null);
+            q = writeUserId ? q.eq('user_id', writeUserId) : q.is('user_id', null);
+            const { error: linkErr } = await q;
+            if (linkErr) console.warn('journal venue link failed:', linkErr.message);
         }
 
         // 4a. Save companions to gig_companions
@@ -849,6 +862,7 @@ window.showSpinner?.('Saving show…');
                                 venueRows.push(buildVenueRow(show.venueRaw));
                             }
                             await Promise.all([upsertVenues(venueRows), upsertPerformances(perfRows)]);
+                            await _linkPerformancesToVenue(journalKey, venueId);
                         }
                     }
                 } else {
@@ -872,12 +886,7 @@ window.showSpinner?.('Saving show…');
                             // If it is, the user picked it from the dropdown and it needs no
                             // admin review — skip all pending_venues inserts regardless of
                             // what setlist.fm says.
-                            const { data: knownVenue } = await supabase
-                                .from('venues')
-                                .select('id')
-                                .ilike('name', venue)
-                                .maybeSingle();
-                            const venueIsKnown = !!knownVenue;
+                            const venueIsKnown = !!venueId;
 
                             if (!mbid) {
                                 // No MBID found — queue for admin review if venue is unknown
@@ -911,6 +920,7 @@ window.showSpinner?.('Saving show…');
                                             venueRows.push(buildVenueRow(show.venueRaw));
                                         }
                                         await Promise.all([upsertVenues(venueRows), upsertPerformances(perfRows)]);
+                                        await _linkPerformancesToVenue(journalKey, venueId);
                                     } else {
                                         if (!venueIsKnown) await _submitPendingVenue({ session, journalKey, band, dateStr, venue });
                                     }
@@ -958,6 +968,17 @@ window.showSpinner?.('Saving show…');
            date:               dateStr,
        };
 
+       // Keep an existing precise link if there is one; otherwise the one we just made
+       // (matched on the NEW key: if the date/venue was edited the old row's link no longer applies)
+       const prior = (window.journalData || []).find(g =>
+           (g['Journal Key'] || '').toString().trim() === journalKey);
+       gigRow.venue_id = prior?.venue_id ?? venueId ?? null;
+       const venueInfo = window.resolveVenue?.(gigRow);
+       if (venueInfo) {
+           gigRow.City    = venueInfo.city    || '';
+           gigRow.Country = venueInfo.country || '';
+       }
+
        if (editingKey) {
            const idx = (window.journalData || []).findIndex(g =>
                (g['Journal Key'] || '').toString().trim() === editingKey.toString().trim()
@@ -996,6 +1017,33 @@ window.showSpinner?.('Saving show…');
 };
 
 // ─── PENDING VENUE SUBMIT ─────────────────────────────────────────────────────
+
+/** venues.id for the name the user picked, or null (unknown / new venue, or lookup failed). */
+async function _lookupVenueId(venueName) {
+    if (!venueName) return null;
+    try {
+        const { data, error } = await supabase
+            .from('venues').select('id').eq('official_name', venueName).maybeSingle();
+        if (error) { console.warn('venue lookup failed:', error.message); return null; }
+        return data?.id ?? null;
+    } catch (err) {
+        console.warn('venue lookup error:', err.message);
+        return null;
+    }
+}
+
+/** Fill venue_id on this show's performances that don't have one yet (never overwrites). */
+async function _linkPerformancesToVenue(journalKey, venueId) {
+    if (!venueId) return;
+    try {
+        const { error } = await supabase
+            .from('performances').update({ venue_id: venueId })
+            .eq('journal_key', journalKey).is('venue_id', null);
+        if (error) console.warn('performance venue link failed:', error.message);
+    } catch (err) {
+        console.warn('performance venue link error:', err.message);
+    }
+}
 
 /**
  * Inserts a row into pending_venues when a new show's venue couldn't be
@@ -1675,4 +1723,3 @@ export const openCaptureGigModal = (capture) => {
 };
 
 window.openCaptureGigModal = openCaptureGigModal;
-
