@@ -1,8 +1,10 @@
 /**
  * GigList Core Engine
- * v9.0.4 — 2026-10-14
+ * v9.0.5 — 2026-10-15
  * ------------------------------------------------------------------
- * ✅ Added additional artist images from spotify to allow archive to be built and then used for variety
+ * ✅ Removed auto fill and suggestions from photo url field to prevent linking to incorrect albums
+ * ✅ Added ability to crop spotify photos in gig modal so they frame nicely
+ * ✅ Fixed wording on carousel card to count support appearances as well as headliners
  */
 
 import * as Data from './modules/data.js';
@@ -43,7 +45,7 @@ import { initMixPlaylistCard } from './modules/mix-playlist.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "9.0.4";
+const APP_VERSION = "9.0.5";
 
 // Columns of profiles that the app is allowed to read (see the column grants
 // in Supabase). home_lat / home_lng / home_label are deliberately excluded:
@@ -1163,29 +1165,46 @@ window.track = (event, properties = {}) => {
 
 // ─── SCRAPBOOK PHOTO UPLOAD ───────────────────────────────────────────────────
 
-window.uploadScrapbookPhoto = (input, journalKey, formattedDate, cleanVenue, isBandMode = false) => {
+// options:
+//   skipCrop      – file is already framed by the caller (ui.js crops before calling us),
+//                   so upload it directly instead of opening a second crop modal.
+//   originalFile  – the uncropped source; archived under originals/ so the photo can be
+//                   re-framed from scratch later.
+//   clearOriginal – delete any archived original (used when resetting to the artist image).
+window.uploadScrapbookPhoto = (input, journalKey, formattedDate, cleanVenue, isBandMode = false, options = {}) => {
     const file = input.files?.[0];
     if (!file) return;
+
+    if (options.skipCrop) {
+        _uploadCroppedScrapbookPhoto(file, journalKey, formattedDate, cleanVenue, isBandMode, options);
+        input.value = '';
+        return;
+    }
 
     // Open the crop/frame modal first. The actual upload only fires once the
     // user confirms their framing, via _uploadCroppedScrapbookPhoto below.
     openPhotoCropModal(file, (croppedFile) => {
-        _uploadCroppedScrapbookPhoto(croppedFile, journalKey, formattedDate, cleanVenue, isBandMode);
+        // The file the user picked is the original; croppedFile is the framed result.
+        _uploadCroppedScrapbookPhoto(croppedFile, journalKey, formattedDate, cleanVenue, isBandMode, { originalFile: file });
     });
 
     // Reset so selecting the same file again still fires onchange next time.
     input.value = '';
 };
 
-async function _uploadCroppedScrapbookPhoto(file, journalKey, formattedDate, cleanVenue, isBandMode = false) {
+async function _uploadCroppedScrapbookPhoto(file, journalKey, formattedDate, cleanVenue, isBandMode = false, options = {}) {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
 
     const userId = session.user.id;
     const bucket = isBandMode ? 'band-photos' : 'gig-photos';
-    const storagePath = isBandMode
-        ? `${(window.currentArtist || 'band').toLowerCase().replace(/[^a-z0-9]/g, '-')}/${formattedDate}-${cleanVenue}.jpg`
-        : `${userId}/${formattedDate}-${cleanVenue}.jpg`;
+    const folder = isBandMode
+        ? (window.currentArtist || 'band').toLowerCase().replace(/[^a-z0-9]/g, '-')
+        : userId;
+    const storagePath = `${folder}/${formattedDate}-${cleanVenue}.jpg`;
+    // Uncropped source lives in a subfolder so folder listings / the modal's
+    // filename search never mistake it for the displayed photo.
+    const originalPath = `${folder}/originals/${formattedDate}-${cleanVenue}.jpg`;
 
     const btn = document.getElementById('h-camera-btn');
     const originalHTML = btn?.innerHTML;
@@ -1202,6 +1221,21 @@ async function _uploadCroppedScrapbookPhoto(file, journalKey, formattedDate, cle
             });
 
         if (error) throw error;
+
+        // Best-effort: a failure here must never fail the visible upload.
+        try {
+            if (options.originalFile) {
+                const originalCompressed = await compressImage(options.originalFile, 1920, 0.85);
+                const { error: origErr } = await supabase.storage
+                    .from(bucket)
+                    .upload(originalPath, originalCompressed, { contentType: 'image/jpeg', upsert: true });
+                if (origErr) console.warn('Original photo archive failed:', origErr.message);
+            } else if (options.clearOriginal) {
+                await supabase.storage.from(bucket).remove([originalPath]);
+            }
+        } catch (origEx) {
+            console.warn('Original photo archive failed:', origEx);
+        }
 
         const { data: signedData, error: signedError } = isBandMode
             ? await supabase.storage.from('band-photos').getPublicUrl(storagePath)
@@ -1355,4 +1389,3 @@ window.handleSort = (column) => {
 window.openTopBandsModal = () => {
     window.openChartModal('topbands');
 };
-

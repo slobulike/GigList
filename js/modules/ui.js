@@ -5,7 +5,7 @@
 /**
  * GigList - UI Module
  */
-import { getGlobalSeenCount, slugify, slugifyArtist, parseDate, isFestivalRow, scopeFestivalPerformances, escapeHtml, safeUrl } from './utils.js';
+import { getGlobalSeenCount, slugify, slugifyArtist, parseDate, isFestivalRow, scopeFestivalPerformances, normalizeArtist, escapeHtml, safeUrl } from './utils.js';
 import { searchArtists, getArchiveStatus, submitArchiveRequest } from './artist-sync.js';
 import { renderCalendar } from './calendar.js';
 import { sortGigs, deriveType } from './data.js';
@@ -13,6 +13,7 @@ import { getUniqueSongCount } from './data.js';
 import { initModalTips, teardownModalTips } from './modal-tips.js';
 import { renderEmptyStateTips } from './tip-nudges.js';
 import { syncHomeAudioSlots } from './spotify.js';
+import { openPhotoCropModal } from './photo-crop.js';
 
 let gigMap = null;
 let markerLayer = null;
@@ -412,6 +413,62 @@ export const renderCarousel = (data) => {
     if (window.loadThrowback) window.loadThrowback(data);
 };
 
+// Distinct past gigs where `band` appeared, however it was logged:
+//   - headliner (journal Band column)
+//   - free-text "Notable Support" / "Festival Lineups" on the journal row
+//   - performance rows (setlist-tracked support / festival acts) keyed by Journal Key
+// Same three sources the Journal Data search uses for Support / Lineup matches
+// (see filterGigs in data.js), but with whole-name matching instead of substring
+// so "Sparta" doesn't count a night with "Spartacus".
+const _countPastSightings = (band, fullData, today) => {
+    const target = normalizeArtist(band || '');
+    if (!target) return { total: 0, headline: 0 };
+
+    const escaped = target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const nameInText = new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}($|[^\\p{L}\\p{N}])`, 'iu');
+
+    const keyOf = (g) => (g['Journal Key'] ?? '').toString().trim();
+    const seen = new Set();
+    let headline = 0;
+
+    (fullData || []).forEach(g => {
+        if (!(parseDate(g.Date) < today)) return;
+        const id = keyOf(g) || `${g.Date}|${g.OfficialVenue}`;
+
+        if (normalizeArtist(g.Band || g.band || '') === target) {
+            seen.add(id);
+            headline++;
+        } else if (nameInText.test(g['Notable Support'] || '') || nameInText.test(g['Festival Lineups'] || '')) {
+            seen.add(id);
+        }
+    });
+
+    const perf = window.performanceData || [];
+    if (perf.length) {
+        const journalByKey = new Map();
+        (fullData || []).forEach(g => { const k = keyOf(g); if (k) journalByKey.set(k, g); });
+
+        const rowsByKey = new Map();
+        perf.forEach(p => {
+            if (normalizeArtist(p.Artist || '') !== target) return;
+            const k = (p['Journal Key'] || '').toString().trim();
+            if (!k || seen.has(k)) return;
+            if (!rowsByKey.has(k)) rowsByKey.set(k, []);
+            rowsByKey.get(k).push(p);
+        });
+
+        rowsByKey.forEach((rows, k) => {
+            const gig = journalByKey.get(k);
+            if (!gig || !(parseDate(gig.Date) < today)) return;
+            // Same festival scoping as the gig modal / search
+            if (!scopeFestivalPerformances(gig, rows).length) return;
+            seen.add(k);
+        });
+    }
+
+    return { total: seen.size, headline };
+};
+
 export const renderCarouselItem = (index, carouselData, fullData) => {
     const card = document.getElementById('now-card');
     if (!card || !carouselData || !carouselData[index]) return;
@@ -434,15 +491,17 @@ export const renderCarouselItem = (index, carouselData, fullData) => {
 
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        const pastCount = fullData.filter(g =>
-            (g.Band || g.band || '').toLowerCase() === (item.band || '').toLowerCase()
-            && parseDate(g.Date) < today
-        ).length;
+        // Counts every past gig where they played — as headliner OR support act —
+        // so a first headline show after two support slots reads as show #3.
+        const { total: pastCount, headline: headlineCount } = _countPastSightings(item.band, fullData, today);
 
         const nextCount = pastCount + 1;
 
         if (pastCount === 0) {
             subtext = isFest ? `✨ First time going!` : `✨ First time seeing them!`;
+        } else if (!isFest && headlineCount === 0) {
+            // Seen before, but never as the headliner (support slots / lineups only)
+            subtext = `🎤 First headline slot — ${verb} ${pastCount} time${pastCount !== 1 ? 's' : ''} before`;
         } else if (nextCount === 5 || nextCount === 10 || nextCount === 25 || nextCount === 50 || nextCount === 100) {
             subtext = `🏆 This will be ${isFest ? 'visit' : 'show'} #${nextCount} — Achievement incoming!`;
         } else {
@@ -1489,7 +1548,7 @@ const gigIsPast = (() => {
                                 <img id="h-artist"
                                      src=""
                                      alt=""
-                                     class="absolute inset-0 w-full h-full object-cover z-10 hidden">
+                                     class="absolute inset-0 w-full h-full object-cover object-top z-10 hidden">
 
                                 <div id="h-ticket"
                                      class="absolute inset-0 z-10 items-center justify-center p-6 bg-slate-50 hidden">
@@ -1498,14 +1557,27 @@ const gigIsPast = (() => {
 
                 <!-- Camera upload button — personal users + band admins -->
                 ${(!window.isReadOnly && (window.currentUser?.Type === 'Personal' || (window.isBandMode && window.currentUser?.is_admin))) ? `
-                <label id="h-camera-btn"
-                       aria-label="Add or replace photo for this show"
-                       class="absolute bottom-3 right-14 z-50 bg-black/40 backdrop-blur-md text-white p-2 rounded-full hover:bg-black/60 transition-all cursor-pointer">
-                    <i data-lucide="camera" class="w-5 h-5" aria-hidden="true"></i>
-                    <input type="file" accept="image/*"
-                           id="h-camera-input"
-                           class="hidden">
-                </label>` : ''}
+                <div class="absolute bottom-3 right-14 z-50 flex gap-2">
+                    <button id="h-reframe-btn"
+                            aria-label="Reframe current image"
+                            class="bg-black/40 backdrop-blur-md text-white p-2 rounded-full hover:bg-black/60 transition-all cursor-pointer"
+                            title="Reframe photo">
+                        <i data-lucide="crop" class="w-5 h-5" aria-hidden="true"></i>
+                    </button>
+                    ${(entry.ArtistImages?.length || entry.SpotifyImageUrl) ? `
+                    <button id="h-reframe-original-btn"
+                            aria-label="Reframe from original artist image"
+                            class="bg-black/40 backdrop-blur-md text-white p-2 rounded-full hover:bg-black/60 transition-all cursor-pointer"
+                            title="Start again from artist image">
+                        <i data-lucide="rotate-ccw" class="w-5 h-5" aria-hidden="true"></i>
+                    </button>` : ''}
+                    <label aria-label="Upload new photo"
+                           class="bg-black/40 backdrop-blur-md text-white p-2 rounded-full hover:bg-black/60 transition-all cursor-pointer">
+                        <i data-lucide="camera" class="w-5 h-5" aria-hidden="true"></i>
+                        <input type="file" accept="image/*" id="h-camera-input" class="hidden">
+                    </label>
+                </div>` : ''}
+
 
                 <button onclick="window.closeModal()"
                         aria-label="Close details"
@@ -1663,8 +1735,29 @@ const gigIsPast = (() => {
     const cameraInput = document.getElementById('h-camera-input');
     if (cameraInput) {
         const isBandModeAtRender = window.isBandMode;
-        cameraInput.addEventListener('change', () =>
-            window.uploadScrapbookPhoto(cameraInput, journalKey, formattedDate, cleanVenue, isBandModeAtRender));
+        cameraInput.addEventListener('change', (e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+
+            // Clear the input value so selecting the same file again triggers change if needed
+            e.target.value = '';
+
+            // Open the crop modal before uploading
+            openPhotoCropModal(file, (croppedFile) => {
+                // Assign the cropped file back to the input element using DataTransfer
+                const dt = new DataTransfer();
+                dt.items.add(croppedFile);
+                cameraInput.files = dt.files;
+
+                // Proceed with the original upload flow
+                // ui.js has already framed the photo — skip app.js's own crop step,
+                // and pass the uncropped file so it can be archived for later reframing.
+                window.uploadScrapbookPhoto(cameraInput, journalKey, formattedDate, cleanVenue, isBandModeAtRender, {
+                    skipCrop: true,
+                    originalFile: file
+                });
+            });
+        });
     }
 
 // --- ASSET RESOLUTION WATERFALL ---
@@ -1936,3 +2029,124 @@ window.openArchiveRequest = function(bandName) {
     const safeKey = bandName.replace(/[^a-z0-9]/gi, '_');
     window.requestBandPage?.(bandName, safeKey);
 };
+
+async function urlToFile(url, filename) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.naturalWidth || img.width;
+            canvas.height = img.naturalHeight || img.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            canvas.toBlob((blob) => {
+                if (!blob) {
+                    reject(new Error('Canvas to Blob conversion failed'));
+                    return;
+                }
+                resolve(new File([blob], filename, { type: 'image/jpeg' }));
+            }, 'image/jpeg', 0.92);
+        };
+        img.onerror = () => reject(new Error('Failed to load image due to CORS restrictions.'));
+        img.src = url;
+    });
+}
+
+// Where the archived (uncropped) original for this gig's photo lives.
+// Mirrors the path scheme in app.js → _uploadCroppedScrapbookPhoto.
+function _originalPhotoLocation(formattedDate, cleanVenue) {
+    if (window.isBandMode) {
+        const slug = (window.currentArtist || 'band').toLowerCase().replace(/[^a-z0-9]/g, '-');
+        return { bucket: 'band-photos', path: `${slug}/originals/${formattedDate}-${cleanVenue}.jpg` };
+    }
+    const userId = window.currentUser?.id;
+    if (!userId) return null;
+    return { bucket: 'gig-photos', path: `${userId}/originals/${formattedDate}-${cleanVenue}.jpg` };
+}
+
+// Returns the archived uncropped original as a File, or null if there isn't one.
+async function _fetchStoredOriginal(formattedDate, cleanVenue, filename) {
+    try {
+        const loc = _originalPhotoLocation(formattedDate, cleanVenue);
+        if (!loc) return null;
+        const { supabase } = await import('./supabase.js');
+        const { data, error } = await supabase.storage.from(loc.bucket).download(loc.path);
+        if (error || !data) return null;
+        return new File([data], filename, { type: data.type || 'image/jpeg' });
+    } catch {
+        return null;
+    }
+}
+
+// Delegated listener avoids scope issues and works on dynamically rendered modal buttons.
+// Two entry points:
+//   #h-reframe-btn          -> reframe from the archived original if one exists; otherwise
+//                              from the image currently showing (which then gets archived
+//                              as the original, so the NEXT reframe can start fresh)
+//   #h-reframe-original-btn -> start again from the original artist (Spotify) image,
+//                              discarding any archived original
+document.addEventListener('click', async (e) => {
+    const btn = e.target.closest('#h-reframe-btn, #h-reframe-original-btn');
+    if (!btn) return;
+
+    const entry = window.currentEditingGig;
+    if (!entry) {
+        window.showToast?.('Gig details not found', 'error');
+        return;
+    }
+
+    const [d, m, y] = entry.Date.split('/');
+    const formattedDate = `${y}-${m}-${d}`;
+    const cleanVenue = entry.OfficialVenue.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-');
+    const filename = `${formattedDate}-${cleanVenue}.jpg`;
+    const journalKey = entry['Journal Key'];
+    const fromOriginal = btn.id === 'h-reframe-original-btn';
+
+    try {
+        let file;                   // what the crop tool opens
+        let uploadOptions = { skipCrop: true };
+
+        if (fromOriginal) {
+            const candidates = (entry.ArtistImages?.length ? entry.ArtistImages : [entry.SpotifyImageUrl]).filter(Boolean);
+            if (!candidates[0]) {
+                window.showToast?.('No original artist image available', 'error');
+                return;
+            }
+            file = await urlToFile(candidates[0], filename);
+            uploadOptions.clearOriginal = true;   // Spotify image IS the original; drop any stale archive
+        } else {
+            file = await _fetchStoredOriginal(formattedDate, cleanVenue, filename);
+
+            if (!file) {
+                const activeImg = [
+                    document.getElementById('h-supabase'),
+                    document.getElementById('h-scrapbook'),
+                    document.getElementById('h-artist')
+                ].find(img => img && !img.classList.contains('hidden') && img.src);
+
+                if (!activeImg) {
+                    window.showToast?.('No image available to reframe', 'error');
+                    return;
+                }
+                file = await urlToFile(activeImg.src, filename);
+                // A saved/local photo is about to be overwritten: archive it first.
+                // (The Spotify image doesn't need archiving — it's always re-fetchable.)
+                if (activeImg.id !== 'h-artist') uploadOptions.originalFile = file;
+            }
+        }
+
+        openPhotoCropModal(file, (croppedFile) => {
+            const dt = new DataTransfer();
+            dt.items.add(croppedFile);
+            const cameraInput = document.getElementById('h-camera-input');
+            if (cameraInput) {
+                cameraInput.files = dt.files;
+                window.uploadScrapbookPhoto(cameraInput, journalKey, formattedDate, cleanVenue, window.isBandMode, uploadOptions);
+            }
+        });
+    } catch (err) {
+        console.error('Failed to load image for reframing:', err);
+        window.showToast?.('Could not load image due to cross-origin restrictions', 'error');
+    }
+});

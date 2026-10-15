@@ -408,6 +408,15 @@ const renderEditorModal = (entry) => {
     _val('editor-comments',   entry.Comments   || '');
     _val('editor-price',      entry.Price      || '');
     _val('editor-photos',     entry.Photos     || '');
+    // Stop the keyboard suggesting previously pasted album links above the
+    // field — easy to mistake for the clipboard contents and save the wrong URL.
+    const photosEl = document.getElementById('editor-photos');
+    if (photosEl) {
+        photosEl.setAttribute('autocomplete', 'off');
+        photosEl.setAttribute('autocorrect', 'off');
+        photosEl.setAttribute('autocapitalize', 'off');
+        photosEl.setAttribute('spellcheck', 'false');
+    }
     _val('editor-review',     entry['Review URL'] || entry.review_url || '');
     _check('editor-festival', isFest);
 
