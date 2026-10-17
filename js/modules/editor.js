@@ -14,6 +14,8 @@ import {
     upsertVenues, upsertPerformances, upsertJournals,
 } from './setlist-sync.js';
 import { enrichNewArtist } from './artist-enrichment.js';
+import { createActPicker } from './act-picker.js';
+import { parseActList, joinActList } from './utils.js';
 import { acknowledgeCompanionTag, clearCompanionTagFromBanner } from './onboarding.js';
 
 const WORKER_URL = 'https://setlistfm-proxy.richard-lipscombe.workers.dev';
@@ -303,17 +305,22 @@ function _renderLineupPool(poolNames, checkedKeys) {
     }).join('');
 }
 
+// Multi-artist pickers (support acts, festival "anyone else?"). Created in
+// initEditor() once the editor markup exists.
+let supportPicker = null;
+let lineupPicker  = null;
+const _knownArtistKeys = () => new Set(getArtistOptions().map(normalizeArtist));
+
 /**
  * Re-fetches the pool for the current date+venue, seeds checkbox state from
- * whatever's currently in the free-text textarea (covers opening an existing
- * festival entry, or a user who typed a name that's since been added to the
- * pool by someone else), then strips matched names out of the textarea so it
- * only ever shows genuinely new, unresolved names.
+ * whatever's currently in the "anyone else?" picker (covers opening an existing
+ * festival entry, or a user who added a name that's since been added to the
+ * pool by someone else), then removes matched names from the picker so it
+ * only ever holds genuinely new, unresolved names.
  */
 async function refreshLineupPool() {
     const poolContainer = document.getElementById('editor-lineup-pool');
-    const textarea = document.getElementById('editor-lineups');
-    if (!poolContainer || !textarea) return;
+    if (!poolContainer || !lineupPicker) return;
 
     const journalKey = _currentJournalKeyFromForm();
     if (!journalKey) {
@@ -324,7 +331,7 @@ async function refreshLineupPool() {
     poolContainer.innerHTML = `<p class="text-[11px] text-slate-400 italic px-1">Loading known lineup…</p>`;
     const pool = await fetchLineupPool(journalKey);
 
-    const currentNames = textarea.value.split('/').map(s => s.trim()).filter(Boolean);
+    const currentNames = lineupPicker.getValues();
     const checkedKeys = new Set();
     const leftoverNames = [];
     for (const name of currentNames) {
@@ -332,7 +339,7 @@ async function refreshLineupPool() {
         if (poolMatch) checkedKeys.add(normalizeArtist(poolMatch));
         else leftoverNames.push(name);
     }
-    textarea.value = leftoverNames.join(' / ');
+    lineupPicker.setValues(leftoverNames);
 
     _renderLineupPool(pool, checkedKeys);
 }
@@ -346,8 +353,7 @@ async function refreshLineupPool() {
 function _getLineupSelections() {
     const poolChecked = [...document.querySelectorAll('#editor-lineup-pool .lineup-pool-checkbox:checked')]
         .map(cb => cb.dataset.artist);
-    const extra = (document.getElementById('editor-lineups')?.value || '')
-        .split('/').map(s => s.trim()).filter(Boolean);
+    const extra = lineupPicker ? lineupPicker.getValues() : [];
     const newNames = extra.filter(name => !poolChecked.some(p => artistNamesMatch(p, name)));
     return { fullLineup: [...poolChecked, ...newNames], newNames };
 }
@@ -403,8 +409,9 @@ const renderEditorModal = (entry) => {
     _companions = [];
     _renderCompanionPills();
     setTimeout(() => _loadCompanionsForModal(entry), 0);
-    _val('editor-support',    entry['Notable Support'] || '');
-    _val('editor-lineups',    entry['Festival Lineups'] || '');
+    // Stored as "A / B / C" (older rows may use other separators) — parse into pills
+    supportPicker?.setValues(parseActList(entry['Notable Support'], { known: _knownArtistKeys() }));
+    lineupPicker?.setValues(parseActList(entry['Festival Lineups'], { known: _knownArtistKeys(), splitCommas: false }));
     _val('editor-comments',   entry.Comments   || '');
     _val('editor-price',      entry.Price      || '');
     _val('editor-photos',     entry.Photos     || '');
@@ -538,11 +545,11 @@ function festivalDateWindow(dateStr, windowDays = 3) {
  *
  * Returns an array of raw setlist objects, one per band that was found.
  */
-async function lookupFestivalSetlists(lineupStr, dateStr) {
-    const bands = lineupStr
-        .split('/')
-        .map(b => b.trim())
-        .filter(Boolean);
+async function lookupFestivalSetlists(lineup, dateStr) {
+    // Accepts an array of names (preferred) or a stored "A / B" string.
+    const bands = Array.isArray(lineup)
+        ? lineup.map(b => (b || '').trim()).filter(Boolean)
+        : parseActList(lineup, { splitCommas: false });
 
     const dateWindow = festivalDateWindow(dateStr, 3);
     const allMatches = [];
@@ -687,6 +694,15 @@ window.saveGig = async () => {
         return;
     }
 
+    // Turn any half-typed support/lineup text into pills. If one needs a
+    // decision (e.g. "A / B" typed into a single box) the picker shows its
+    // notice and we stop here rather than saving a bad value.
+    const festOn = document.getElementById('editor-festival')?.checked;
+    if (!(supportPicker?.commitPending() ?? true) || (festOn && !(lineupPicker?.commitPending() ?? true))) {
+        _showError('Check the highlighted artist name before saving.');
+        return;
+    }
+
 // ── Prevent double-submission ─────────────────────────────────────────────────
 const saveBtn = document.querySelector('#editor-modal button[onclick="saveGig()"]');
 if (saveBtn) {
@@ -705,6 +721,9 @@ window.showSpinner?.('Saving show…');
     const { fullLineup, newNames } = isFest === 'Y'
         ? _getLineupSelections()
         : { fullLineup: [], newNames: [] };
+
+    const supportActs = supportPicker ? supportPicker.getValues() : [];
+    const newSupportActs = supportPicker ? supportPicker.getNewNames() : [];
 
     // 2. Auth Check
     const { data: { session } } = await supabase.auth.getSession();
@@ -727,8 +746,8 @@ window.showSpinner?.('Saving show…');
         official_venue: venue,
         venue: venue,
         festival: isFest === 'Y',
-        festival_lineups: fullLineup.join(' / '),
-        notable_support: _get('editor-support').trim(),
+        festival_lineups: joinActList(fullLineup),
+        notable_support: joinActList(supportActs),
         went_with: _companions.map(c => c.name).join(' / '),
         comments: isBandWrite ? 'Historical Artist Entry' : _get('editor-comments').trim(),
         price: _get('editor-price').trim(),
@@ -766,6 +785,19 @@ window.showSpinner?.('Saving show…');
             q = writeUserId ? q.eq('user_id', writeUserId) : q.is('user_id', null);
             const { error: linkErr } = await q;
             if (linkErr) console.warn('journal venue link failed:', linkErr.message);
+        }
+
+        // New support acts get an `artists` row (and enrichment) like headliners
+        // and festival acts do, so they show up in autocomplete next time.
+        // Awaited one at a time (so the same name in a festival lineup below
+        // can't race into a duplicate row), but a failure must never block the save.
+        for (const name of newSupportActs) {
+            try {
+                const id = await _ensureArtistId(name);
+                if (id) enrichNewArtist(name); // fire-and-forget
+            } catch (err) {
+                console.warn('support artist create failed:', name, err);
+            }
         }
 
         // 4a. Save companions to gig_companions
@@ -839,7 +871,7 @@ window.showSpinner?.('Saving show…');
                     // just waste API calls (and rate-limit budget) for nothing.
                     if (newNames.length > 0) {
                         if (saveBtn) saveBtn.textContent = 'Searching Lineup...';
-                        const matches = await lookupFestivalSetlists(newNames.join(' / '), dateStr);
+                        const matches = await lookupFestivalSetlists(newNames, dateStr);
                         if (matches.length > 0) {
                             const grouped = groupByShow(matches);
                             const perfRows = [];
@@ -1607,7 +1639,16 @@ export const initEditor = () => {
     loadVenueOptions();  // pre-fetch venues from global table, not just user's own
     wireCombobox('editor-band',    'editor-band-list',    getArtistOptions);
     wireCombobox('editor-venue',   'editor-venue-list',   getVenueOptions);
-    wireCombobox('editor-support', 'editor-support-list', getSupportOptions);
+    supportPicker = createActPicker({
+        inputId: 'editor-support', listId: 'editor-support-list',
+        pillsId: 'editor-support-pills', msgId: 'editor-support-msg',
+        getOptions: getSupportOptions,
+    });
+    lineupPicker = createActPicker({
+        inputId: 'editor-lineups', listId: 'editor-lineups-list',
+        pillsId: 'editor-lineups-pills', msgId: 'editor-lineups-msg',
+        getOptions: getArtistOptions,
+    });
     initCompanionSelector();
 
     // The lineup pool is keyed on date+venue — if either changes while the

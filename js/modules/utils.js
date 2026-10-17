@@ -128,14 +128,109 @@ export const isFestivalRow = (row) => {
     return typeof raw === 'boolean' ? raw : (raw || '').toString().trim().toUpperCase().startsWith('Y');
 };
 
+// ─── ACT LISTS (notable_support / festival_lineups) ──────────────────────────
+// Both columns hold several artists in ONE text field. The editor writes them
+// as "A / B / C" (spaces around the slash), but older/imported rows also use
+// bare slashes, pipes, semicolons and commas. Everything that reads these
+// fields should go through parseActList() rather than splitting by hand —
+// that's what stops "A / B / C" being counted as a single band.
+
+// Real act names that contain the delimiter characters. Anything that appears
+// in the artists table is protected too (pass it via the `known` option).
+const PROTECTED_ACT_NAMES = new Set([
+    'ac/dc',
+    'earth, wind & fire',
+    'tyler, the creator',
+    'crosby, stills & nash',
+    'crosby, stills, nash & young',
+    'blood, sweat & tears',
+    'emerson, lake & palmer',
+].map(normalizeArtist));
+
+export const ACT_SEPARATOR = ' / ';
+
+/**
+ * Splits a stored act list into clean, de-duplicated artist names.
+ *
+ * Always splits on: | ; newline, and a slash with whitespace on either side.
+ * Then, for each piece that isn't a known name, also splits a bare slash
+ * ("A/B") and — unless `splitCommas` is false — commas.
+ *
+ * @param raw          the stored string
+ * @param opts.known   Set of normalizeArtist()'d names that must never be split
+ * @param opts.splitCommas  false for festival_lineups (written only by the
+ *                     editor, so a comma is part of a name, not a separator)
+ */
+export const parseActList = (raw, { known = null, splitCommas = true } = {}) => {
+    if (raw == null) return [];
+    const text = String(raw).trim();
+    if (!text || text.toLowerCase() === 'nan') return [];
+
+    const isProtected = (s) => {
+        const n = normalizeArtist(s);
+        return PROTECTED_ACT_NAMES.has(n) || (known ? known.has(n) : false);
+    };
+
+    const out = [];
+    const seen = new Set();
+    const push = (s) => {
+        const name = (s || '').trim();
+        const key = normalizeArtist(name);
+        if (!name || key === 'nan' || seen.has(key)) return;
+        seen.add(key);
+        out.push(name);
+    };
+
+    if (isProtected(text)) { push(text); return out; }
+
+    for (const chunk of text.split(/\s*[|;\n]\s*|\s+\/\s*|\s*\/\s+/)) {
+        if (isProtected(chunk)) { push(chunk); continue; }
+        chunk.split(splitCommas ? /\s*[\/,]\s*/ : /\s*\/\s*/).forEach(push);
+    }
+    return out;
+};
+
+/** Joins acts into the canonical stored form: "A / B / C". */
+export const joinActList = (acts) => (acts || []).map(a => (a || '').trim()).filter(Boolean).join(ACT_SEPARATOR);
+
+/**
+ * Looks at ONE typed artist name and says whether it probably contains
+ * several acts. Returns null when it looks fine (or is a protected/known
+ * name — "AC/DC" never warns), otherwise { level, parts }:
+ *   level 'error' — unambiguous separator ( " / ", |, ; ) — almost certainly a mistake
+ *   level 'warn'  — ambiguous ( A/B, comma, &, and, +, w/, with, feat. ) — could be a real name
+ */
+export const detectMultipleActs = (name, known = null) => {
+    const text = (name || '').trim();
+    if (!text) return null;
+    const n = normalizeArtist(text);
+    if (PROTECTED_ACT_NAMES.has(n) || (known && known.has(n))) return null;
+
+    if (/\s\/|\/\s|[|;\n]/.test(text)) {
+        const parts = parseActList(text, { known });
+        if (parts.length > 1) return { level: 'error', parts };
+    }
+
+    if (/[\/,]|\s&\s|\s\+\s|\sand\s|\sw\/\s|\swith\s|\sfeat\.?\s|\sft\.?\s/i.test(text)) {
+        const parts = text
+            .split(/\s*(?:[\/,&+]|\band\b|\bw\/|\bwith\b|\bfeat\.?(?=\s)|\bft\.?(?=\s))\s*/i)
+            .map(s => s.trim())
+            .filter(Boolean);
+        const unique = [...new Map(parts.map(p => [normalizeArtist(p), p])).values()];
+        if (unique.length > 1) return { level: 'warn', parts: unique };
+    }
+    return null;
+};
+
 /**
  * The set of artists a festival row's own attendee logged as seeing, from
- * its 'Festival Lineups' field (bands joined with '/', see editor.js).
- * Also tolerates '|' as a separator for older/imported rows.
+ * its 'Festival Lineups' field (bands joined with ' / ', see editor.js).
+ * Also tolerates '|' as a separator for older/imported rows. Commas are NOT
+ * separators here — the editor never writes them as one.
  */
 export const getOwnFestivalLineup = (row) => {
     const raw = row?.['Festival Lineups'] || row?.FestivalLineups || '';
-    return new Set(raw.split(/[/|]/).map(normalizeArtist).filter(Boolean));
+    return new Set(parseActList(raw, { splitCommas: false }).map(normalizeArtist));
 };
 
 /**
@@ -226,9 +321,6 @@ export const countryToFlag = (country) => {
     if (!iso2) return '';
     return String.fromCodePoint(...[...iso2].map(c => 0x1F1E6 + c.charCodeAt(0) - 65));
 };
-
-/**
- * Builds the image fallback chain for a gig:
 
 /**
  * Builds the image fallback chain for a gig:

@@ -2,7 +2,7 @@
 // OR logic within dimensions, AND logic across dimensions.
 // Companion matching covers both gig_companions rows and legacy went_with text.
 
-import { escapeHtml } from './utils.js';
+import { escapeHtml, normalizeArtist, parseActList } from './utils.js';
 
 // ---------------------------------------------------------------------------
 // State
@@ -46,18 +46,16 @@ export function applyFilters(data) {
   // appearances (e.g. selecting "Ash" would miss festival rows where Ash
   // played but the row's band is the festival name, not "Ash").
   if (_state.artist.trim()) {
-    const q = _state.artist.trim().toLowerCase();
+    const q = normalizeArtist(_state.artist);
     results = results.filter(g => {
-      const band     = (g.band || '').toLowerCase();
-      const lineup   = (g.festival_lineups || '').toLowerCase();
-      const support  = (g.notable_support || '').toLowerCase();
+      if (normalizeArtist(g.band) === q) return true;
 
-      if (band === q) return true;
-
-      // Lineup/support fields can list multiple artists — split and check
-      // for an exact match per artist so "Ash" doesn't match "Ashcroft".
-      const lineupArtists  = lineup.split(/[\/|]/).map(s => s.trim());
-      const supportArtists = support.split(/[,;&/|]/).map(s => s.trim());
+      // Lineup/support fields can list multiple artists — parse them with the
+      // shared parser (utils.js) and check for an exact match per artist so
+      // "Ash" doesn't match "Ashcroft", and "Hall & Oates" / "AC/DC" aren't
+      // torn in half.
+      const lineupArtists  = parseActList(g.festival_lineups, { splitCommas: false }).map(normalizeArtist);
+      const supportArtists = parseActList(g.notable_support).map(normalizeArtist);
 
       return lineupArtists.includes(q) || supportArtists.includes(q);
     });
@@ -450,13 +448,16 @@ function _populateLookupSelects() {
   // notable support fields, so artists only ever seen supporting or at
   // a festival are still selectable (matches how the Top Bands chart counts).
   const headliners = data.map(g => g.band || g.Band).filter(Boolean);
-  const lineupArtists = data.flatMap(g =>
-    (g.festival_lineups || '').split(/[\/|]/).map(s => s.trim()).filter(Boolean)
-  );
-  const supportArtists = data.flatMap(g =>
-    (g.notable_support || '').split(/[,;&/|]/).map(s => s.trim()).filter(Boolean)
-  );
-  const artists = [...new Set([...headliners, ...lineupArtists, ...supportArtists])].sort((a, b) => a.localeCompare(b));
+  const lineupArtists = data.flatMap(g => parseActList(g.festival_lineups, { splitCommas: false }));
+  const supportArtists = data.flatMap(g => parseActList(g.notable_support));
+  // De-dupe case-insensitively (first spelling wins, headliners first) so
+  // "bike routes" and "Bike Routes" don't show as two options.
+  const byKey = new Map();
+  [...headliners, ...lineupArtists, ...supportArtists].forEach(name => {
+    const key = normalizeArtist(name);
+    if (key && !byKey.has(key)) byKey.set(key, name);
+  });
+  const artists = [...byKey.values()].sort((a, b) => a.localeCompare(b));
   _fillSelect('filter-artist-input', artists, 'All artists', _state.artist);
 
   // Venues — unique sorted list from official_venue/venue

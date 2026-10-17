@@ -1475,6 +1475,18 @@ const gigIsPast = (() => {
         .map(s => s.Artist)
         .filter(Boolean)
         .join(' + ');
+
+    // "with …" line: the free-text Notable Support on the journal row is the
+    // primary source (so it shows even when no setlists were found); any
+    // setlist-tracked support acts not already named in that text are appended.
+    const notableRaw = (entry['Notable Support'] || '').toString().trim();
+    const notableText = notableRaw.toLowerCase() === 'nan' ? '' : notableRaw;
+    const trackedSupport = sets
+        .filter(s => (s.Artist || '').toLowerCase() !== entry.Band.toLowerCase())
+        .map(s => (s.Artist || '').trim())
+        .filter(a => a && !notableText.toLowerCase().includes(a.toLowerCase()));
+    const supportDisplay = [notableText, ...new Set(trackedSupport)].filter(Boolean).join(', ');
+
     // PRICE LOGIC: Prioritize journal data, fallback to random if missing
         let displayPrice;
         if (entry.Price && entry.Price !== "nan" && entry.Price.toString().trim() !== "") {
@@ -1497,9 +1509,9 @@ const gigIsPast = (() => {
                     ${escapeHtml(entry.Band)}
                 </div>
 
-                ${supportActs ? `
+                ${supportDisplay ? `
                     <div class="text-[10px] font-bold mb-2 uppercase tracking-tight opacity-70 ${style.accent}" aria-label="Support Acts">
-                        + ${escapeHtml(supportActs)}
+                        + ${escapeHtml(supportDisplay)}
                     </div>` : '<div class="mb-2"></div>'}
 
                 <div class="text-sm mb-4 opacity-80 font-bold ${style.accent}" aria-label="Venue Name">
@@ -1531,6 +1543,13 @@ const gigIsPast = (() => {
 // box and it silently stops working — that's why the rounding/clipping was
 // moved onto the sticky wrapper itself rather than a plain parent div.
     window._gigModalOpenSections = new Set([defaultOpenSection]);
+
+    // Setlist cards: the performance rows, plus a placeholder card for the
+    // headliner when there's no row for them (non-festival), so the panel
+    // never opens blank — it names the artist and says no setlist is available.
+    const setlistCards = (!isFestival && !headlineSet)
+        ? [{ Artist: entry.Band, Role: 'Headline', Setlist: '' }, ...sets]
+        : (sets.length ? sets : [{ Artist: entry.Band, Role: isFestival ? 'Festival' : 'Headline', Setlist: '' }]);
     modalContent.innerHTML = `
         <div class="bg-white">
             <div class="sticky top-0 z-30 bg-white rounded-t-[2.5rem] overflow-hidden">
@@ -1589,10 +1608,33 @@ const gigIsPast = (() => {
             <div class="px-6 pt-4 pb-3 border-b border-slate-100 flex items-start justify-between gap-3">
                 <div class="min-w-0">
                     <h2 id="modal-title" tabindex="-1" class="text-xl md:text-3xl font-black italic uppercase leading-tight text-slate-900 outline-none truncate">${escapeHtml(entry.Band)}</h2>
+                    ${supportDisplay ? `<div class="text-[11px] font-bold text-slate-500 leading-snug mt-1 mb-2.5" aria-label="Support Acts">with ${escapeHtml(supportDisplay)}</div>` : ''}
                     <div class="flex gap-3 text-slate-400 text-[9px] font-bold uppercase tracking-widest mt-1 flex-wrap">
                         <span class="flex items-center gap-1"><i data-lucide="calendar" class="w-3 h-3 text-indigo-500"></i> <time datetime="${escapeHtml(formattedDate)}">${escapeHtml(entry.Date)}</time></span>
                         <span class="flex items-center gap-1 min-w-0"><i data-lucide="map-pin" class="w-3 h-3 text-indigo-500 flex-shrink-0"></i> <span class="truncate">${escapeHtml(entry.OfficialVenue)}</span></span>
                     </div>
+                    ${(hasPhotos || hasReview || hasSetlist) ? `
+                    <div class="flex items-center gap-4 mt-3 flex-wrap" aria-label="Quick links">
+                        ${hasPhotos ? `<a href="${escapeHtml(photosUrl)}" target="_blank" rel="noopener"
+                            class="flex items-center gap-1.5 text-[10px] font-black text-slate-400 hover:text-indigo-600 transition-colors"
+                            title="View photo album">
+                            <i data-lucide="camera" class="w-3.5 h-3.5" aria-hidden="true"></i>
+                            <span class="uppercase tracking-widest">Photos</span>
+                        </a>` : ''}
+                        ${hasReview ? `<a href="${escapeHtml(reviewUrl)}" target="_blank" rel="noopener"
+                            data-tip="setlist"
+                            class="flex items-center gap-1.5 text-[10px] font-black text-slate-400 hover:text-indigo-600 transition-colors"
+                            title="Read review or show page">
+                            <i data-lucide="newspaper" class="w-3.5 h-3.5" aria-hidden="true"></i>
+                            <span class="uppercase tracking-widest">${window.isBandMode && (window.currentArtist||'').toLowerCase() === 'weezer' ? 'Weezerpedia' : 'Review'}</span>
+                        </a>` : ''}
+                        ${hasSetlist ? `<a href="${escapeHtml(setlistUrl)}" target="_blank" rel="noopener"
+                            class="flex items-center gap-1.5 text-[10px] font-black text-slate-400 hover:text-indigo-600 transition-colors"
+                            title="View on setlist.fm">
+                            <i data-lucide="list-music" class="w-3.5 h-3.5" aria-hidden="true"></i>
+                            <span class="uppercase tracking-widest">Setlist.fm</span>
+                        </a>` : ''}
+                    </div>` : ''}
                 </div>
                 ${isFestival ? '<span class="flex-shrink-0 bg-amber-400 text-black text-[8px] font-black px-2 py-1 rounded uppercase">Festival</span>' : ''}
             </div>
@@ -1632,28 +1674,6 @@ const gigIsPast = (() => {
                         <!-- Populated by Spotify.initModalAudioAction: existing playlist embed,
                              a generate CTA, or (past show with no setlist) a generic artist embed -->
                         <div id="modal-spotify-slot-${entry['Journal Key']?.replace(/[^a-z0-9]/gi,'_')}"></div>
-                        ${(hasPhotos || hasReview || hasSetlist) ? `
-                        <div class="flex items-center gap-4 mt-4">
-                            ${hasPhotos ? `<a href="${escapeHtml(photosUrl)}" target="_blank" rel="noopener"
-                                class="flex items-center gap-1.5 text-[10px] font-black text-slate-400 hover:text-indigo-600 transition-colors"
-                                title="View photo album">
-                                <i data-lucide="camera" class="w-3.5 h-3.5" aria-hidden="true"></i>
-                                <span class="uppercase tracking-widest">Photos</span>
-                            </a>` : ''}
-                            ${hasReview ? `<a href="${escapeHtml(reviewUrl)}" target="_blank" rel="noopener"
-                                data-tip="setlist"
-                                class="flex items-center gap-1.5 text-[10px] font-black text-slate-400 hover:text-indigo-600 transition-colors"
-                                title="Read review or show page">
-                                <i data-lucide="newspaper" class="w-3.5 h-3.5" aria-hidden="true"></i>
-                                <span class="uppercase tracking-widest">${window.isBandMode && (window.currentArtist||'').toLowerCase() === 'weezer' ? 'Weezerpedia' : 'Review'}</span>
-                            </a>` : ''}
-                            ${hasSetlist ? `<a href="${escapeHtml(setlistUrl)}" target="_blank" rel="noopener"
-                                class="flex items-center gap-1.5 text-[10px] font-black text-slate-400 hover:text-indigo-600 transition-colors"
-                                title="View on setlist.fm">
-                                <i data-lucide="list-music" class="w-3.5 h-3.5" aria-hidden="true"></i>
-                                <span class="uppercase tracking-widest">Setlist.fm</span>
-                            </a>` : ''}
-                        </div>` : ''}
                     </div>
                 </div>
             </div>
@@ -1670,7 +1690,7 @@ const gigIsPast = (() => {
                 <div style="overflow:hidden;min-height:0">
                     <div class="px-6 py-4">
                         <div class="${isFestival ? 'grid grid-cols-1 md:grid-cols-2 gap-4' : 'flex flex-col gap-4'}">
-                            ${sets.map(s => `
+                            ${setlistCards.map(s => `
                                 <div class="bg-white p-5 rounded-[1.5rem] border border-slate-100 shadow-sm">
                                     <div class="flex justify-between items-center mb-3 border-b border-slate-50 pb-2">
                                         <span class="font-black text-indigo-600 text-xs uppercase italic">${escapeHtml(s.Artist)}</span>
@@ -1679,7 +1699,7 @@ const gigIsPast = (() => {
                                     <div class="text-[11px] text-slate-500 leading-relaxed font-medium">
                                         ${(s.Setlist || '').replace(/^NOT_FOUND$/i, '')
                                             ? (s.Setlist).split('|').map(escapeHtml).join('<br>')
-                                            : '<span class="text-slate-300 italic text-xs">No setlist recorded</span>'
+                                            : '<span class="text-slate-300 italic text-xs">No setlist available</span>'
                                         }
                                     </div>
                                 </div>

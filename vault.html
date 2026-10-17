@@ -1815,26 +1815,36 @@
                         <p class="text-[11px] text-slate-400 italic px-1">Enter a date and venue first.</p>
                     </div>
                 </div>
-                <div>
+                <div class="relative">
                     <label for="editor-lineups" class="block text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-2">Anyone else? (not listed above)</label>
-                    <textarea id="editor-lineups"
-                              rows="2"
-                              placeholder="Artist names separated by / …"
-                              class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all resize-none"></textarea>
+                    <div id="editor-lineups-pills" class="flex flex-wrap gap-2 mb-2 empty:hidden"></div>
+                    <input type="text" id="editor-lineups"
+                           placeholder="Type an artist, pick from the list…"
+                           autocomplete="off"
+                           class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                           aria-controls="editor-lineups-list">
+                    <ul id="editor-lineups-list"
+                        role="listbox" aria-label="Artist suggestions"
+                        class="hidden absolute z-10 left-0 right-0 bg-white border border-slate-200 rounded-2xl shadow-xl mt-1 overflow-hidden max-h-48 overflow-y-auto"></ul>
+                    <div id="editor-lineups-msg" class="hidden" role="alert"></div>
+                    <p class="text-[10px] text-slate-400 mt-1.5 px-1">One artist at a time — press Enter or pick from the list to add each one.</p>
                 </div>
             </div>
 
-            <!-- Notable Support (combobox) -->
+            <!-- Notable Support (multi-artist picker) -->
             <div class="relative">
                 <label for="editor-support" class="block text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-2">Notable Support</label>
+                <div id="editor-support-pills" class="flex flex-wrap gap-2 mb-2 empty:hidden"></div>
                 <input type="text" id="editor-support"
-                       placeholder="Type to search or add new…"
+                       placeholder="Type an artist, pick from the list…"
                        autocomplete="off"
                        class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
-                       role="combobox" aria-autocomplete="list" aria-controls="editor-support-list">
+                       aria-controls="editor-support-list">
                 <ul id="editor-support-list"
                     role="listbox" aria-label="Support act suggestions"
                     class="hidden absolute z-10 left-0 right-0 bg-white border border-slate-200 rounded-2xl shadow-xl mt-1 overflow-hidden max-h-48 overflow-y-auto"></ul>
+                <div id="editor-support-msg" class="hidden" role="alert"></div>
+                <p class="text-[10px] text-slate-400 mt-1.5 px-1">One artist at a time — press Enter or pick from the list to add each one.</p>
             </div>
 
             <!-- Went With -->

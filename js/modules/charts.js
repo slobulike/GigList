@@ -1,7 +1,7 @@
 /**
  * GigList - Charts Module
  */
-import { isFestivalRow, getOwnFestivalLineup, scopeFestivalArtistMap, normalizeArtist, escapeHtml } from './utils.js';
+import { isFestivalRow, getOwnFestivalLineup, scopeFestivalArtistMap, normalizeArtist, escapeHtml, parseActList } from './utils.js';
 import { getCompanionsForGig } from './data.js';
 
 let modalChartInstance      = null;
@@ -329,8 +329,8 @@ export const renderTopBandsChart = (journalData, performanceData, canvasId, isMo
     // Group synced performances by show (journal_key), deduped per artist per
     // show. This is the verified, setlist.fm-sourced record of who actually
     // performed at a given show — more complete than the free-text
-    // "Notable Support" field, which can only hold a single name and is
-    // often left blank on shows with several openers.
+    // "Notable Support" field, which is free text and often left blank
+    // on shows with several openers.
     const perfArtistsByKey = new Map();
     (performanceData || []).forEach(perf => {
         const key    = perf['journal_key'] || perf['Journal Key'];
@@ -364,13 +364,12 @@ export const renderTopBandsChart = (journalData, performanceData, canvasId, isMo
             const isFest = (g['Festival?'] || g['festival'] || '').toString().toUpperCase().startsWith('Y');
             if (!isFest) addBand(headlineBand, 'headline');
 
-            if (g['Notable Support']) {
-                addBand(g['Notable Support'], 'support');
-            }
+            // Notable Support holds several acts ("A / B / C"), so split it
+            parseActList(g['Notable Support']).forEach(act => addBand(act, 'support'));
 
             const lineups = g['Festival Lineups'] || g['FestivalLineups'] || '';
             if (lineups && lineups !== 'nan') {
-                lineups.split(/[\/|]/).forEach(artist => addBand(artist.trim(), 'support'));
+                parseActList(lineups, { splitCommas: false }).forEach(artist => addBand(artist, 'support'));
             }
         }
     });
@@ -675,10 +674,10 @@ export const renderBandFrequencyChart = (journalData, performanceData, canvasId,
         } else {
             const isFest = (g['Festival?'] || g['festival'] || '').toString().toUpperCase().startsWith('Y');
             if (!isFest) addPoint(headlineBand, dateStr);
-            if (g['Notable Support']) addPoint(g['Notable Support'], dateStr);
+            parseActList(g['Notable Support']).forEach(act => addPoint(act, dateStr));
             const lineups = g['Festival Lineups'] || g['FestivalLineups'] || '';
             if (lineups && lineups !== 'nan') {
-                lineups.split(/[\/|]/).forEach(artist => addPoint(artist.trim(), dateStr));
+                parseActList(lineups, { splitCommas: false }).forEach(artist => addPoint(artist, dateStr));
             }
         }
     });
@@ -836,10 +835,10 @@ export const renderHotList = (journalData, performanceData, containerId, isModal
         } else {
             const isFest = (g['Festival?'] || g['festival'] || '').toString().toUpperCase().startsWith('Y');
             if (!isFest) addBand(headlineBand);
-            if (g['Notable Support']) addBand(g['Notable Support']);
+            parseActList(g['Notable Support']).forEach(act => addBand(act));
             const lineups = g['Festival Lineups'] || g['FestivalLineups'] || '';
             if (lineups && lineups !== 'nan') {
-                lineups.split(/[\/|]/).forEach(artist => addBand(artist.trim()));
+                parseActList(lineups, { splitCommas: false }).forEach(artist => addBand(artist));
             }
         }
     });

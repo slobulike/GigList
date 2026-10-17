@@ -1,10 +1,10 @@
 /**
  * GigList Core Engine
- * v9.0.5 — 2026-10-15
+ * v9.1.0 — 2026-10-17
  * ------------------------------------------------------------------
- * ✅ Removed auto fill and suggestions from photo url field to prevent linking to incorrect albums
- * ✅ Added ability to crop spotify photos in gig modal so they frame nicely
- * ✅ Fixed wording on carousel card to count support appearances as well as headliners
+ * ✅ Some initial load performance improvements
+ * ✅ Improved method to add notable support and festival line ups so individual bands can be added instead of relying on the user entering "/"
+ * ✅ Fix to Hot List stats chart to consume "/" separated artists correctly
  */
 
 import * as Data from './modules/data.js';
@@ -172,6 +172,14 @@ export async function initApp() {
     // 1. Check Supabase auth session
     const { data: { session } } = await supabase.auth.getSession();
 
+    // Data loading that only needs the user id is started as early as possible
+    // (personal mode, below) so it overlaps with the profile fetch instead of
+    // waiting behind it.
+    let earlyDataPromise    = null;
+    let earlyStatsPromise   = null;
+    let earlyProfilePromise = null;
+    let cachedStart         = null;   // set when first paint comes from the local cache
+
     // TODO: Re-enable once Profile screens exist. Friend mode (persona-swap via ?friend= URL param)
     // has been retired in favour of the buddy filter bar in the Data tab. Keep this block so it's
     // easy to restore when we build profile pages — at that point ?friend= will navigate to a
@@ -211,27 +219,67 @@ export async function initApp() {
         // Home location is private (not readable via the profiles table), so
         // it comes from get_my_home(), which only ever returns your own. If
         // that call fails the app still loads, just without the saved home.
-        const [{ data: profile }, { data: home }] = await Promise.all([
+        const uid = session.user.id;
+
+        // Network work starts immediately, whichever path we take below.
+        // loadAppData only needs { Type, id } — not the profile — so it runs in
+        // parallel with the profile + home fetch.
+        earlyDataPromise = Data.loadAppData(
+            { Type: 'Personal', id: uid },
+            { skipPerformances: true }
+        );
+        earlyStatsPromise = Promise.all([
+            Data.loadGigPhotoStats(uid),
+            Data.loadCollectionStats(uid),
+        ]);
+        earlyProfilePromise = Promise.all([
             supabase
                 .from('profiles')
                 .select(PROFILE_PUBLIC_COLUMNS)
-                .eq('id', session.user.id)
+                .eq('id', uid)
                 .single(),
             supabase.rpc('get_my_home').maybeSingle(),
         ]);
+        // If we redirect or finish on cached data first, don't leave unhandled rejections
+        earlyDataPromise.catch(() => {});
+        earlyStatsPromise.catch(() => {});
+        earlyProfilePromise.catch(() => {});
 
-        if (!profile) {
-            window.location.href = 'index.html';
-            return;
+        // Cache-first: if we have last session's profile + journal data, paint from
+        // it now (a few ms) and revalidate in the background after first paint.
+        const cached = await Data.loadCachedStart(uid);
+
+        if (cached) {
+            currentUser = {
+                ...cached.profile,
+                ...(cached.home || {}),
+                UserName:   cached.profile.username,
+                Type:       'Personal',
+                id:         uid,
+                isAuthUser: true
+            };
+            cachedStart = {
+                data:      Data.buildAppDataFromRaw(currentUser, cached.raw),
+                profile:   cached.profile,
+                home:      cached.home,
+            };
+        } else {
+            const [{ data: profile }, { data: home }] = await earlyProfilePromise;
+
+            if (!profile) {
+                window.location.href = 'index.html';
+                return;
+            }
+            Data.cacheStartProfile(uid, profile, home);
+            currentUser = {
+                ...profile,
+                ...(home || {}),
+                UserName:   profile.username,
+                Type:       'Personal',
+                id:         uid,
+                isAuthUser: true
+            };
         }
-        currentUser = {
-            ...profile,
-            ...(home || {}),
-            UserName:   profile.username,
-            Type:       'Personal',
-            id:         session.user.id,
-            isAuthUser: true
-        };
     }
 
     document.addEventListener('filtersChanged', _applyFiltersAndRender);
@@ -241,14 +289,21 @@ export async function initApp() {
     // section below) so the home screen becomes interactive as fast as possible.
     // Band mode: performances are also skipped here and loaded on-demand in band.js
     // when the Summary tab is opened (the only consumer of performance data there).
-    const data = await Data.loadAppData(currentUser, { skipPerformances: true });
+    // Personal mode started this above (in parallel with the profile fetch); band
+    // mode needs the band row first, so it starts here.
+    const data = cachedStart
+        ? cachedStart.data
+        : await (earlyDataPromise || Data.loadAppData(currentUser, { skipPerformances: true }));
 
-    // Load achievement stats in parallel — personal mode only
-    if (currentUser?.Type === 'Personal') {
-        await Promise.all([
+    // Achievement stats — personal mode only. Also started early, so on the
+    // network path they've almost always finished by now. On a cached start we
+    // don't hold first paint for them; they're awaited before profile/achievements
+    // init further down instead.
+    if (currentUser?.Type === 'Personal' && !cachedStart) {
+        await (earlyStatsPromise || Promise.all([
             Data.loadGigPhotoStats(currentUser.id),
             Data.loadCollectionStats(currentUser.id),
-        ]);
+        ]));
     }
 
     window.currentUser = currentUser;
@@ -257,9 +312,9 @@ export async function initApp() {
     window.filteredResults = [...data.journalData];
 
     // Set Mode Flags
-    window.isBandMode   = data.user.Type === 'Band';
+    window.isBandMode   = currentUser.Type === 'Band';
     window.isFriendMode  = false; // Friend mode retired — buddy journal overlay is in the Data tab filter bar
-    window.currentArtist = data.user.UserName;
+    window.currentArtist = currentUser.UserName;
 
     // 2. Apply Band Mode / Friend Mode Branding
     // TODO: isFriendMode branding removed — re-enable if Friend mode is restored for profile pages
@@ -406,55 +461,35 @@ export async function initApp() {
     // Register deep-link listeners (URL params + SW postMessage)
     initDeepLink();
 
-    // Load social data FIRST so _following is ready when the switcher panel builds
-        if (currentUser?.isAuthUser && currentUser?.Type === 'Personal') {
-            await initSocial(currentUser);
-            resolveCompanionTags(currentUser); // fire-and-forget, no await needed
-        }
-
-    // Tips seen-state — both modes. Must run before anything renders tip dots or
-    // modal tips, otherwise hasSeen() is false for every tip.
-    if (currentUser?.id) {
-        initTips(currentUser.id);
-        refreshTipDots();
-        syncSeenState().finally(() => refreshTipDots());
+    // ── Cache-first: refresh from the network behind the cached paint ───────────
+    if (cachedStart) {
+        revalidateFromNetwork({
+            uid:             currentUser.id,
+            profilePromise:  earlyProfilePromise,
+            dataPromise:     earlyDataPromise,
+            cachedSignature: cachedStart.data.signature,
+            cachedProfile:   { profile: cachedStart.profile, home: cachedStart.home },
+            cachedKeys:      (cachedStart.data.journalData || []).map(g => g['Journal Key']).filter(Boolean),
+        });
     }
 
-    initModeSwitcher(currentUser);
-
-    // Band mode — initialise tabs and fan data.
-    // Performances are fetched on-demand in band.js when the Summary tab is opened.
-    if (currentUser?.Type === 'Band') {
-        await initBandMode(currentUser, data.journalData, []);
-    }
-
-    // Buddies tab — personal mode only
-    // initBuddies and initProfile have no dependency on each other so run in parallel
+    // After a save, rebuild the cache in the background so the next cached start
+    // isn't missing what was just added.
     if (currentUser?.Type === 'Personal') {
-        await Promise.all([
-            initBuddies(currentUser),
-            initProfile(currentUser),
-        ]);
+        let cacheRefreshTimer = null;
+        const scheduleCacheRefresh = () => {
+            clearTimeout(cacheRefreshTimer);
+            cacheRefreshTimer = setTimeout(() => Data.refreshAppCache(currentUser), 2500);
+        };
+        window.addEventListener('giglist:gigSaved', scheduleCacheRefresh);
+        window.addEventListener('giglist:collectionItemSaved', scheduleCacheRefresh);
     }
 
-    // App is fully ready — flush any queued deep-link intent
-    markAppReady();
-
-    // ── Onboarding & companion notifications ─────────────────────────────────
-    if (currentUser?.Type === 'Personal') {
-        if (isNewUser) {
-            // New user: run the full onboarding flow (companion claim panel + settings modal).
-            // checkCompanionTags is intentionally skipped here — runOnboarding handles
-            // companion matching for new users via the claim panel, and we don't want
-            // the returning-user banner racing with the claim modal.
-            setTimeout(() => runOnboarding(currentUser), 400);
-        } else {
-            // Returning user: check whether anyone has tagged them in a show since
-            // they last dismissed the notification. Delayed so the page settles first.
-            setTimeout(() => checkCompanionTags(currentUser), 2000);
-        }
-    }
-
+    // ── Post-first-paint background loads ─────────────────────────────────────
+    // Everything in this block is fire-and-forget and independent of the social /
+    // buddies / profile init below. It used to sit AFTER those awaits, so the
+    // performances fetch and the charts only started once all of them had finished.
+    // Starting them here lets them overlap instead.
     // ── Eager collection fetch ────────────────────────────────────────────────
     // Fetch full collection items so the Items stat tile AND collection-based
     // achievements are populated on first load, before the user visits the
@@ -497,8 +532,61 @@ export async function initApp() {
                 renderDashboardCharts(results, window.performanceData || []);
             })
             .catch(err => console.warn('app.js: chart/performance load failed:', err));
-    } else {
-        // Band mode: still lazy-load Chart.js for any charts on the Shows tab
+    }
+
+    // Load social data FIRST so _following is ready when the switcher panel builds
+        if (currentUser?.isAuthUser && currentUser?.Type === 'Personal') {
+            await initSocial(currentUser);
+            resolveCompanionTags(currentUser); // fire-and-forget, no await needed
+        }
+
+    // Tips seen-state — both modes. Must run before anything renders tip dots or
+    // modal tips, otherwise hasSeen() is false for every tip.
+    if (currentUser?.id) {
+        initTips(currentUser.id);
+        refreshTipDots();
+        syncSeenState().finally(() => refreshTipDots());
+    }
+
+    initModeSwitcher(currentUser);
+
+    // Band mode — initialise tabs and fan data.
+    // Performances are fetched on-demand in band.js when the Summary tab is opened.
+    if (currentUser?.Type === 'Band') {
+        await initBandMode(currentUser, data.journalData, []);
+    }
+
+    // Buddies tab — personal mode only
+    // initBuddies and initProfile have no dependency on each other so run in parallel
+    if (currentUser?.Type === 'Personal') {
+        if (cachedStart && earlyStatsPromise) await earlyStatsPromise;   // achievements read these
+        await Promise.all([
+            initBuddies(currentUser),
+            initProfile(currentUser),
+        ]);
+    }
+
+    // App is fully ready — flush any queued deep-link intent
+    markAppReady();
+
+    // ── Onboarding & companion notifications ─────────────────────────────────
+    if (currentUser?.Type === 'Personal') {
+        if (isNewUser) {
+            // New user: run the full onboarding flow (companion claim panel + settings modal).
+            // checkCompanionTags is intentionally skipped here — runOnboarding handles
+            // companion matching for new users via the claim panel, and we don't want
+            // the returning-user banner racing with the claim modal.
+            setTimeout(() => runOnboarding(currentUser), 400);
+        } else {
+            // Returning user: check whether anyone has tagged them in a show since
+            // they last dismissed the notification. Delayed so the page settles first.
+            setTimeout(() => checkCompanionTags(currentUser), 2000);
+        }
+    }
+
+    // Band mode: still lazy-load Chart.js for any charts on the Shows tab.
+    // Kept after initBandMode() (as before) so the band DOM exists when charts render.
+    if (window.isBandMode) {
         window.ensureChartJs()
             .then(() => {
                 const results = window.filteredResults || window.journalData || [];
@@ -533,6 +621,62 @@ export async function initApp() {
                 }
             }, 800);
         }
+    }
+}
+
+/**
+ * Cache-first revalidation. The home screen has already been painted from the
+ * local cache; this waits for the real network results, then:
+ *   - refreshes the profile (and its cache) if it changed,
+ *   - swaps in the fresh journal data and re-renders ONLY if it actually differs
+ *     from what the cache painted (compared by signature),
+ *   - otherwise just finishes the post-paint artist-image pass on the rows in use.
+ * Any failure (offline, server error) leaves the cached view in place.
+ */
+async function revalidateFromNetwork({ uid, profilePromise, dataPromise, cachedSignature, cachedProfile, cachedKeys }) {
+    try {
+        const [[{ data: profile }, { data: home }], fresh] = await Promise.all([profilePromise, dataPromise]);
+
+        if (!profile) {            // account/profile no longer exists — same outcome as a cold start
+            window.location.href = 'index.html';
+            return;
+        }
+
+        Data.cacheStartProfile(uid, profile, home);
+        const profileChanged =
+            JSON.stringify(profile)    !== JSON.stringify(cachedProfile.profile) ||
+            JSON.stringify(home || null) !== JSON.stringify(cachedProfile.home || null);
+
+        if (profileChanged) {
+            Object.assign(currentUser, profile, home || {}, { UserName: profile.username });
+        }
+
+        if (fresh.signature !== cachedSignature) {
+            // Fresh data differs from the cached paint: swap it in and re-render.
+            window.journalData     = fresh.journalData;
+            window.filteredResults = [...fresh.journalData];
+            // buildAppData replaced these lookups, so re-alias them
+            window.venueLookup = window.allVenues;
+            window.venuesData  = window.allVenues;
+            refreshUI();
+
+            const newKeys = fresh.journalData.map(g => g['Journal Key']).filter(Boolean);
+            // Compare as sets: the server doesn't guarantee row order between fetches
+            const cachedKeySet = new Set(cachedKeys);
+            const keysChanged  = newKeys.length !== cachedKeys.length ||
+                                 newKeys.some(k => !cachedKeySet.has(k));
+            if (keysChanged && newKeys.length) {
+                Data.loadPerformances(newKeys, window.allVenues || {})
+                    .then(rows => { window.performanceData = rows; refreshUI(); })
+                    .catch(err => console.warn('app.js: performance reload after revalidate failed', err));
+            }
+        } else {
+            // Same data: keep the rows already on screen, just give them the artist images
+            Data.hydrateArtistImages(window.journalData);
+            if (profileChanged) refreshUI();
+        }
+    } catch (err) {
+        console.warn('app.js: background revalidation failed — staying on cached data', err);
     }
 }
 

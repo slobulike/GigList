@@ -4,6 +4,7 @@
 import { parseDate, isFestivalRow, getOwnFestivalLineup, normalizeArtist, scopeFestivalPerformances } from './utils.js';
 import { supabase } from './supabase.js';
 import { loadArtistImages, artistImageCandidates } from './artist-images.js';
+import { cacheGet, cachePut, CACHE_VERSION } from './app-cache.js';
 
 /**
  * Helper to determine show type based on keywords
@@ -142,10 +143,45 @@ export const venueKey = (row) => {
 window.venueKey     = venueKey;
 window.resolveVenue = resolveVenue;
 
-export const loadAppData = async (user, { skipPerformances = false } = {}) => {
-    const now = new Date();
-    now.setHours(0, 0, 0, 0);
+// Latest artist lookup built by loadAppData: { [bandName]: { id, spotify_artist_id, spotify_image_url } }
+let _artistLookup = {};
 
+/**
+ * Loads the per-artist image sets and rebuilds row.ArtistImages in place.
+ *
+ * Runs AFTER first paint (loadAppData starts it fire-and-forget) because it
+ * only refines which of an artist's images a gig shows — the artist's current
+ * image (SpotifyImageUrl) is already on every row without it. Rows are
+ * mutated in place, so window.journalData picks the result up with no
+ * re-render needed; anything drawn after it resolves uses the full set.
+ * Non-fatal: on failure rows simply keep their first-paint ArtistImages.
+ */
+export const hydrateArtistImages = async (rows) => {
+    const lookup = _artistLookup;
+    const ids = Object.values(lookup).map(a => a.id).filter(Boolean);
+    if (!ids.length || !rows?.length) return;
+    try {
+        await loadArtistImages(ids);
+    } catch (e) {
+        console.warn('hydrateArtistImages: failed, keeping first-paint images:', e?.message || e);
+        return;
+    }
+    rows.forEach(row => {
+        const a = lookup[row.band];
+        if (a) {
+            row.ArtistImages = artistImageCandidates(a, {
+                strategy: 'stable',
+                seed: row.journal_key || row['Journal Key'],
+            });
+        }
+    });
+};
+
+/**
+ * NETWORK PHASE — fetches the raw Supabase rows. No normalising here, so the
+ * result is exactly what gets cached (see loadAppData / loadCachedStart).
+ */
+const fetchRawAppData = async (user, { skipPerformances = false } = {}) => {
     // ── Step 1: Journals ──────────────────────────────────────────────────────
     // Must resolve first so we can extract bands + venue names for scoped fetches.
     // Band mode: fetch by band name (null user_id rows)
@@ -186,81 +222,89 @@ export const loadAppData = async (user, { skipPerformances = false } = {}) => {
     const journalVenues   = [...new Set(journalData.filter(r => !r.venue_id).map(r => r.official_venue).filter(Boolean))];
     const journalVenueIds = [...new Set(journalData.map(r => r.venue_id).filter(Boolean))];
 
-// ── Step 1b: Artist lookup (spotify IDs for deep links) ──────────────────────
-const journalBands = [...new Set(journalData.map(r => r.band).filter(Boolean))];
-const artistLookup = {};
+// ── Steps 1b / 1c / 2: everything that depends only on the journal rows ──────
+    // These used to run one after another (artists → artist images → companions →
+    // venues), so each added a full network round trip before first paint.
+    // None of them depends on another, so they now go out together and the
+    // slowest one sets the pace.
+    //
+    // Artist *images* (the per-artist image picker) are no longer on this path:
+    // they only refine which image a gig shows, so they load after first paint
+    // (see hydrateArtistImages below).
+    const CHUNK_SIZE = 100;
 
-if (journalBands.length) {
-    const ARTIST_CHUNK = 100;
-    const artistChunks = [];
-    for (let i = 0; i < journalBands.length; i += ARTIST_CHUNK) {
-        artistChunks.push(journalBands.slice(i, i + ARTIST_CHUNK));
-    }
-    const artistResults = await Promise.all(
-        artistChunks.map(chunk =>
-            supabase.from('artists').select('id, name, spotify_artist_id, spotify_image_url').in('name', chunk)
-        )
-    );
-    artistResults.flatMap(r => r.data || []).forEach(a => {
-        artistLookup[a.name] = {
-            id: a.id,
-            spotify_artist_id: a.spotify_artist_id,
-            spotify_image_url: a.spotify_image_url,
-        };
-    });
-    // All known images for these artists (non-fatal if it fails — everything falls back to the current image).
-    await loadArtistImages(Object.values(artistLookup).map(a => a.id));
-}
+    const chunked = (arr) => {
+        const chunks = [];
+        for (let i = 0; i < arr.length; i += CHUNK_SIZE) chunks.push(arr.slice(i, i + CHUNK_SIZE));
+        return chunks;
+    };
 
-// ── Step 1c: Companion tags (gig_companions) ──────────────────────────────
-// Bulk-fetch structured companion tags for these journal rows so every
-// companion-counting feature (dashboard chart, achievement buddy count,
-// Squad share card) can read one merged source via getCompanionsForGig
-// below, instead of each independently falling back to the legacy
-// free-text 'Went With' field. Scoped to the same owner as the journals
-// query above — own id, the friend being viewed, or skipped entirely for
-// band mode, where per-gig companions aren't a meaningful concept.
-const companionOwnerId = user.Type === 'Band' ? null : (user.Type === 'Friend' ? user.friendId : user.id);
-const journalIds = [...new Set(journalData.map(r => r.id).filter(v => v != null))];
+    // Artist lookup (spotify IDs for deep links + current artist image)
+    const journalBands = [...new Set(journalData.map(r => r.band).filter(Boolean))];
 
-const companionsByJournalId = {};
-if (journalIds.length && companionOwnerId) {
-    const { data: companionRows, error: companionErr } = await supabase
-        .from('gig_companions')
-        .select('journal_id, companion_name, companion_user_id, status')
-        .eq('owner_id', companionOwnerId)
-        .in('journal_id', journalIds);
-
-    if (companionErr) {
-        console.warn('loadAppData: companion tag fetch failed:', companionErr.message);
-    } else {
-        (companionRows || []).forEach(c => {
-            if (!c.companion_name) return;
-            (companionsByJournalId[c.journal_id] = companionsByJournalId[c.journal_id] || []).push({
-                name:        c.companion_name,
-                userId:      c.companion_user_id || null,
-                isConfirmed: c.status === 'confirmed',
-            });
+    async function fetchArtistLookup() {
+        const lookup = {};
+        if (!journalBands.length) return lookup;
+        const results = await Promise.all(
+            chunked(journalBands).map(chunk =>
+                supabase.from('artists').select('id, name, spotify_artist_id, spotify_image_url').in('name', chunk)
+            )
+        );
+        results.flatMap(r => r.data || []).forEach(a => {
+            lookup[a.name] = {
+                id: a.id,
+                spotify_artist_id: a.spotify_artist_id,
+                spotify_image_url: a.spotify_image_url,
+            };
         });
+        return lookup;
     }
-}
 
-// ── Step 2: Performances + Venues in parallel ─────────────────────────────
+    // Companion tags (gig_companions)
+    // Bulk-fetch structured companion tags for these journal rows so every
+    // companion-counting feature (dashboard chart, achievement buddy count,
+    // Squad share card) can read one merged source via getCompanionsForGig
+    // below, instead of each independently falling back to the legacy
+    // free-text 'Went With' field. Scoped to the same owner as the journals
+    // query above — own id, the friend being viewed, or skipped entirely for
+    // band mode, where per-gig companions aren't a meaningful concept.
+    const companionOwnerId = user.Type === 'Band' ? null : (user.Type === 'Friend' ? user.friendId : user.id);
+    const journalIds = [...new Set(journalData.map(r => r.id).filter(v => v != null))];
+
+    async function fetchCompanionsByJournalId() {
+        const byJournalId = {};
+        if (!journalIds.length || !companionOwnerId) return byJournalId;
+        const { data: companionRows, error: companionErr } = await supabase
+            .from('gig_companions')
+            .select('journal_id, companion_name, companion_user_id, status')
+            .eq('owner_id', companionOwnerId)
+            .in('journal_id', journalIds);
+
+        if (companionErr) {
+            console.warn('loadAppData: companion tag fetch failed:', companionErr.message);
+        } else {
+            (companionRows || []).forEach(c => {
+                if (!c.companion_name) return;
+                (byJournalId[c.journal_id] = byJournalId[c.journal_id] || []).push({
+                    name:        c.companion_name,
+                    userId:      c.companion_user_id || null,
+                    isConfirmed: c.status === 'confirmed',
+                });
+            });
+        }
+        return byJournalId;
+    }
+
+    // Performances + Venues
     // Both are scoped to the user's journal content to keep payloads minimal.
     // Performances are scoped by journal_key (not artist) so festival shows
     // return all acts on the lineup regardless of whether those artists appear
     // elsewhere in the user's personal journal.
     // Both fetches are batched in chunks of 100 to avoid URL length limits.
-    const CHUNK_SIZE = 100;
-
     async function fetchPerformancesInBatches(keys) {
         if (!keys.length) return [];
-        const chunks = [];
-        for (let i = 0; i < keys.length; i += CHUNK_SIZE) {
-            chunks.push(keys.slice(i, i + CHUNK_SIZE));
-        }
         const results = await Promise.all(
-            chunks.map(chunk => supabase.from('performances').select('*').in('journal_key', chunk))
+            chunked(keys).map(chunk => supabase.from('performances').select('*').in('journal_key', chunk))
         );
         const errors = results.filter(r => r.error);
         if (errors.length) throw new Error(`Failed to load performances: ${errors[0].error.message}`);
@@ -269,12 +313,8 @@ if (journalIds.length && companionOwnerId) {
 
     async function fetchVenuesInBatches(venueNames) {
         if (!venueNames.length) return [];
-        const chunks = [];
-        for (let i = 0; i < venueNames.length; i += CHUNK_SIZE) {
-            chunks.push(venueNames.slice(i, i + CHUNK_SIZE));
-        }
         const results = await Promise.all(
-            chunks.map(chunk => supabase.from('venues').select('*').in('official_name', chunk))
+            chunked(venueNames).map(chunk => supabase.from('venues').select('*').in('official_name', chunk))
         );
         const errors = results.filter(r => r.error);
         if (errors.length) throw new Error(`Failed to load venues: ${errors[0].error.message}`);
@@ -283,12 +323,8 @@ if (journalIds.length && companionOwnerId) {
 
     async function fetchVenuesByIds(ids) {
         if (!ids.length) return [];
-        const chunks = [];
-        for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
-            chunks.push(ids.slice(i, i + CHUNK_SIZE));
-        }
         const results = await Promise.all(
-            chunks.map(chunk => supabase.from('venues').select('*').in('id', chunk))
+            chunked(ids).map(chunk => supabase.from('venues').select('*').in('id', chunk))
         );
         const errors = results.filter(r => r.error);
         if (errors.length) throw new Error(`Failed to load venues: ${errors[0].error.message}`);
@@ -303,12 +339,30 @@ if (journalIds.length && companionOwnerId) {
         return [...byName, ...byId];
     }
 
-    const [perfRows, venueRows] = skipPerformances
-        ? [[], await fetchAllVenues()]
-        : await Promise.all([
-            fetchPerformancesInBatches(journalKeys),
-            fetchAllVenues(),
-          ]);
+    const [artistLookup, companionsByJournalId, perfRows, venueRows] = await Promise.all([
+        fetchArtistLookup(),
+        fetchCompanionsByJournalId(),
+        skipPerformances ? Promise.resolve([]) : fetchPerformancesInBatches(journalKeys),
+        fetchAllVenues(),
+    ]);
+
+    return { journalRows: journalData, artistLookup, companionsByJournalId, venueRows, perfRows };
+};
+
+/**
+ * BUILD PHASE — pure, synchronous: turns raw rows (fresh from the network OR
+ * read back from the cache) into the shapes the rest of the app uses. Also
+ * sets window.allVenues / window.venuesById.
+ */
+const buildAppData = (user, raw) => {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+
+    const { artistLookup, companionsByJournalId, venueRows, perfRows } = raw;
+    let journalData = raw.journalRows;
+
+    // Remembered so the post-paint image pass (hydrateArtistImages) can rebuild ArtistImages
+    _artistLookup = artistLookup;
 
     const venueRes = { data: venueRows };
 
@@ -396,6 +450,102 @@ if (journalIds.length && companionOwnerId) {
     });
 
     return { journalData, performanceData, user };
+};
+
+// ── Cache-first startup ──────────────────────────────────────────────────────
+// Only the personal-mode home load is cached (band / friend views always hit the
+// network). What's stored is the RAW rows from fetchRawAppData, keyed per user,
+// so a cached start runs through exactly the same buildAppData as a network one.
+const MAX_CACHE_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+const dataCacheKey    = (userId) => `data:${userId}`;
+const profileCacheKey = (userId) => `profile:${userId}`;
+const isCacheable = (user, skipPerformances) =>
+    user?.Type === 'Personal' && !!user.id && skipPerformances;
+
+const _hash = (str) => {
+    let h = 5381;
+    for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
+    return h;
+};
+
+/**
+ * Order-independent fingerprint of a raw payload, used to tell whether the
+ * network data actually differs from what the cache painted (so an unchanged
+ * background refresh doesn't trigger a pointless re-render).
+ */
+export const rawSignature = (raw) => {
+    const byId = (a, b) => (a.id > b.id) - (a.id < b.id);
+    const parts = [
+        JSON.stringify([...(raw.journalRows || [])].sort(byId)),
+        JSON.stringify((raw.venueRows || []).map(v =>
+            [v.id, v.official_name, v.latitude, v.longitude, v.city, v.country, v.capacity].join('|')).sort()),
+        JSON.stringify(Object.entries(raw.artistLookup || {}).map(([n, a]) =>
+            [n, a.id, a.spotify_artist_id, a.spotify_image_url].join('|')).sort()),
+        JSON.stringify(Object.entries(raw.companionsByJournalId || {}).map(([k, v]) =>
+            k + ':' + v.map(c => `${c.name}|${c.userId}|${c.isConfirmed}`).sort().join(',')).sort()),
+    ];
+    return parts.map(p => `${p.length}:${_hash(p)}`).join('/');
+};
+
+/**
+ * Loads the user's journal and everything built from it, from the network.
+ * Successful personal-mode loads also refresh the cache (fire-and-forget).
+ * Result includes `signature` (see rawSignature).
+ */
+export const loadAppData = async (user, { skipPerformances = false } = {}) => {
+    const raw = await fetchRawAppData(user, { skipPerformances });
+
+    if (isCacheable(user, skipPerformances)) {
+        cachePut(dataCacheKey(user.id), { v: CACHE_VERSION, savedAt: Date.now(), raw });
+    }
+
+    const result = buildAppData(user, raw);
+
+    // Post-paint: per-artist image sets (not awaited — see hydrateArtistImages)
+    hydrateArtistImages(result.journalData);
+
+    return { ...result, signature: rawSignature(raw) };
+};
+
+/**
+ * Reads the cached profile + raw journal data for a user, or null if there is
+ * no usable cache (missing, wrong version, older than 30 days, or IndexedDB
+ * unavailable). Resolves in a few ms; never rejects.
+ */
+export const loadCachedStart = async (userId) => {
+    if (!userId) return null;
+    const [p, d] = await Promise.all([
+        cacheGet(profileCacheKey(userId)),
+        cacheGet(dataCacheKey(userId)),
+    ]);
+    if (!p?.profile || !d?.raw) return null;
+    if (p.v !== CACHE_VERSION || d.v !== CACHE_VERSION) return null;
+    if (Date.now() - (d.savedAt || 0) > MAX_CACHE_AGE_MS) return null;
+    return { profile: p.profile, home: p.home || null, raw: d.raw, savedAt: d.savedAt };
+};
+
+/** Builds app data from cached raw rows (same pipeline as a network load, minus the network). */
+export const buildAppDataFromRaw = (user, raw) => ({
+    ...buildAppData(user, raw),
+    signature: rawSignature(raw),
+});
+
+/** Stores the profile (+ private home location) used to paint the next cached start. */
+export const cacheStartProfile = (userId, profile, home) =>
+    cachePut(profileCacheKey(userId), { v: CACHE_VERSION, savedAt: Date.now(), profile, home: home || null });
+
+/**
+ * Re-fetches the raw data and refreshes the cache without touching any live
+ * state. Called after the user saves something so the NEXT cached start isn't stale.
+ */
+export const refreshAppCache = async (user) => {
+    if (!isCacheable(user, true)) return;
+    try {
+        const raw = await fetchRawAppData(user, { skipPerformances: true });
+        await cachePut(dataCacheKey(user.id), { v: CACHE_VERSION, savedAt: Date.now(), raw });
+    } catch (e) {
+        console.warn('refreshAppCache failed:', e?.message || e);
+    }
 };
 
 /**
