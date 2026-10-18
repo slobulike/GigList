@@ -1,10 +1,8 @@
 /**
  * GigList Core Engine
- * v9.1.0 — 2026-10-17
+ * v9.1.1 — 2026-10-18
  * ------------------------------------------------------------------
- * ✅ Some initial load performance improvements
- * ✅ Improved method to add notable support and festival line ups so individual bands can be added instead of relying on the user entering "/"
- * ✅ Fix to Hot List stats chart to consume "/" separated artists correctly
+ * ✅ Opus 5.5 Review bug fixes
  */
 
 import * as Data from './modules/data.js';
@@ -20,6 +18,7 @@ import * as Games from './modules/games.js';
 import { GigPuzzle } from './modules/puzzle.js';
 import { initEditor, exportCSV } from './modules/editor.js';
 import { supabase } from './modules/supabase.js';
+import { cacheClear } from './modules/app-cache.js';
 import { runSetlistSync } from './modules/setlist-sync.js';
 import { runOnboarding, checkCompanionTags } from './modules/onboarding.js';
 import { handleZeroSyncResult } from './modules/setlist-sync.js';
@@ -45,7 +44,7 @@ import { initMixPlaylistCard } from './modules/mix-playlist.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "9.0.5";
+const APP_VERSION = "9.1.1";
 
 // Columns of profiles that the app is allowed to read (see the column grants
 // in Supabase). home_lat / home_lng / home_label are deliberately excluded:
@@ -482,6 +481,7 @@ export async function initApp() {
             cacheRefreshTimer = setTimeout(() => Data.refreshAppCache(currentUser), 2500);
         };
         window.addEventListener('giglist:gigSaved', scheduleCacheRefresh);
+        window.addEventListener('giglist:gigDeleted', scheduleCacheRefresh);
         window.addEventListener('giglist:collectionItemSaved', scheduleCacheRefresh);
     }
 
@@ -1443,9 +1443,12 @@ async function compressImage(file, maxDimension, quality) {
 
 window.signOut = async function() {
     window.track('sign_out');
-    await supabase.auth.signOut();
+    try { await supabase.auth.signOut(); } catch (e) { console.warn('signOut failed:', e?.message || e); }
     // Signed photo links outlive the session — don't leave them on a shared device
     try { localStorage.removeItem('giglist_col_signed_urls_v1'); } catch { /* storage unavailable */ }
+    // Same for the start-up cache: it holds the journal, buddies and the private
+    // home location. cacheClear() never throws.
+    await cacheClear();
     window.location.href = 'index.html';
 };
 

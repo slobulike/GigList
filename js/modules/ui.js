@@ -1590,7 +1590,7 @@ const gigIsPast = (() => {
                             title="Start again from artist image">
                         <i data-lucide="rotate-ccw" class="w-5 h-5" aria-hidden="true"></i>
                     </button>` : ''}
-                    <label aria-label="Upload new photo"
+                    <label id="h-camera-btn" aria-label="Upload new photo"
                            class="bg-black/40 backdrop-blur-md text-white p-2 rounded-full hover:bg-black/60 transition-all cursor-pointer">
                         <i data-lucide="camera" class="w-5 h-5" aria-hidden="true"></i>
                         <input type="file" accept="image/*" id="h-camera-input" class="hidden">

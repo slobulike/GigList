@@ -233,9 +233,14 @@ export function createActPicker({ inputId, listId, pillsId, msgId, getOptions })
     return {
         getValues:   () => acts.map(a => a.name),
         getNewNames: () => acts.filter(a => a.isNew).map(a => a.name),
-        setValues(names) {
+        /**
+         * `stored: true` = names read back from a saved row. They're never
+         * flagged "new", so re-saving an old show can't create artist rows
+         * for whatever the stored text happened to split into.
+         */
+        setValues(names, { stored = false } = {}) {
             acts = [];
-            (names || []).forEach(addResolved);
+            (names || []).forEach(n => stored ? add(canonical(n) || n, false) : addResolved(n));
             render();
             input.value = '';
             hideList();

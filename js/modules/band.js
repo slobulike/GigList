@@ -421,6 +421,9 @@ function _buildJournalRow(src, me) {
         price:            '',
         review_url:       '',
         artist_id:        src.artist_id ?? null,
+        // Keep the archive row's venue link, so the copy resolves to the same
+        // venue rather than falling back to a name match (duplicate names).
+        venue_id:         src.venue_id ?? null,
     };
 }
 

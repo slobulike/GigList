@@ -607,7 +607,7 @@ async function _renderBuddyProfile(userId) {
     // ── Fetch buddy's profile ──
     const { data: profile, error } = await supabase
         .from('profiles')
-        .select('id, username, display_name, avatar_url, is_public, favourite_band, favourite_venue, favourite_song, favourite_show_key, home_lat, home_lng, home_label')
+        .select('id, username, display_name, avatar_url, is_public, favourite_band, favourite_venue, favourite_song, favourite_show_key')
         .eq('id', userId)
         .single();
 
@@ -1304,3 +1304,4 @@ function _topValue(gigs, field) {
     }
     return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
 }
+

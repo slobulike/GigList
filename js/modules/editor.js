@@ -310,6 +310,10 @@ function _renderLineupPool(poolNames, checkedKeys) {
 let supportPicker = null;
 let lineupPicker  = null;
 const _knownArtistKeys = () => new Set(getArtistOptions().map(normalizeArtist));
+// Support field as loaded into the editor (see openEditor / saveGig)
+let _loadedSupportRaw  = '';
+let _loadedSupportActs = [];
+const _sameActs = (a, b) => a.length === b.length && a.every((n, i) => normalizeArtist(n) === normalizeArtist(b[i]));
 
 /**
  * Re-fetches the pool for the current date+venue, seeds checkbox state from
@@ -410,7 +414,11 @@ const renderEditorModal = (entry) => {
     _renderCompanionPills();
     setTimeout(() => _loadCompanionsForModal(entry), 0);
     // Stored as "A / B / C" (older rows may use other separators) — parse into pills
-    supportPicker?.setValues(parseActList(entry['Notable Support'], { known: _knownArtistKeys() }));
+    // Remember what was loaded: if the pills are untouched on save, the stored
+    // text is written back exactly as it was rather than re-joined from pieces.
+    _loadedSupportRaw  = entry['Notable Support'] || '';
+    _loadedSupportActs = parseActList(_loadedSupportRaw, { known: _knownArtistKeys() });
+    supportPicker?.setValues(_loadedSupportActs, { stored: true });
     lineupPicker?.setValues(parseActList(entry['Festival Lineups'], { known: _knownArtistKeys(), splitCommas: false }));
     _val('editor-comments',   entry.Comments   || '');
     _val('editor-price',      entry.Price      || '');
@@ -736,7 +744,7 @@ window.showSpinner?.('Saving show…');
     const writeUserId = isBandWrite ? null : session.user.id;
 
     // The venue the user picked, as a venues.id (null if it's a new / unmatched name)
-    const venueId = await _lookupVenueId(venue);
+    const { id: venueId, known: venueIsKnown } = await _lookupVenue(venue);
 
     const supabaseRow = {
         user_id: writeUserId,
@@ -747,7 +755,7 @@ window.showSpinner?.('Saving show…');
         venue: venue,
         festival: isFest === 'Y',
         festival_lineups: joinActList(fullLineup),
-        notable_support: joinActList(supportActs),
+        notable_support: _sameActs(supportActs, _loadedSupportActs) ? _loadedSupportRaw : joinActList(supportActs),
         went_with: _companions.map(c => c.name).join(' / '),
         comments: isBandWrite ? 'Historical Artist Entry' : _get('editor-comments').trim(),
         price: _get('editor-price').trim(),
@@ -926,8 +934,7 @@ window.showSpinner?.('Saving show…');
                             // Check once whether this venue is already in our venues table.
                             // If it is, the user picked it from the dropdown and it needs no
                             // admin review — skip all pending_venues inserts regardless of
-                            // what setlist.fm says.
-                            const venueIsKnown = !!venueId;
+                            // what setlist.fm says. (`venueIsKnown` comes from _lookupVenue above.)
 
                             if (!mbid) {
                                 // No MBID found — queue for admin review if venue is unknown
@@ -1059,17 +1066,26 @@ window.showSpinner?.('Saving show…');
 
 // ─── PENDING VENUE SUBMIT ─────────────────────────────────────────────────────
 
-/** venues.id for the name the user picked, or null (unknown / new venue, or lookup failed). */
-async function _lookupVenueId(venueName) {
-    if (!venueName) return null;
+/**
+ * Looks up the venue the user picked by name.
+ *   id    — venues.id when exactly ONE venue has that name, else null. Several
+ *           venues can share a name ("The Garage"), and a name alone can't say
+ *           which one is meant, so those shows are left for the setlist.fm
+ *           backfill to link precisely.
+ *   known — the name exists in the venues table at all (one or more rows), so
+ *           it doesn't need to go to pending_venues for admin review.
+ */
+async function _lookupVenue(venueName) {
+    if (!venueName) return { id: null, known: false };
     try {
         const { data, error } = await supabase
-            .from('venues').select('id').eq('official_name', venueName).maybeSingle();
-        if (error) { console.warn('venue lookup failed:', error.message); return null; }
-        return data?.id ?? null;
+            .from('venues').select('id').eq('official_name', venueName).limit(2);
+        if (error) { console.warn('venue lookup failed:', error.message); return { id: null, known: false }; }
+        const rows = data || [];
+        return { id: rows.length === 1 ? rows[0].id : null, known: rows.length > 0 };
     } catch (err) {
         console.warn('venue lookup error:', err.message);
-        return null;
+        return { id: null, known: false };
     }
 }
 
@@ -1240,6 +1256,9 @@ window.deleteGig = async () => {
     window.journalData = (window.journalData || []).filter(
         g => g['Journal Key'] !== keyToDelete
     );
+    // Not 'giglist:gigSaved' — that also drives the gig-count tip nudges.
+    // This one only refreshes the start-up cache so the show doesn't reappear.
+    window.dispatchEvent(new CustomEvent('giglist:gigDeleted'));
 
     closeEditorModal();
     if (window.closeModal) window.closeModal(); // also close the gig detail modal behind it

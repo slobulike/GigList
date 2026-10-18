@@ -130,8 +130,10 @@ export const isFestivalRow = (row) => {
 
 // ─── ACT LISTS (notable_support / festival_lineups) ──────────────────────────
 // Both columns hold several artists in ONE text field. The editor writes them
-// as "A / B / C" (spaces around the slash), but older/imported rows also use
-// bare slashes, pipes, semicolons and commas. Everything that reads these
+// as "A / B / C" (spaces around the slash), but older/imported rows may use
+// bare slashes, pipes or semicolons. Commas are NOT separators: old comma
+// splits were cleaned up to "/" (Oct 2026), so a comma is part of a name
+// ("Black Country, New Road"). Everything that reads these
 // fields should go through parseActList() rather than splitting by hand —
 // that's what stops "A / B / C" being counted as a single band.
 
@@ -154,14 +156,14 @@ export const ACT_SEPARATOR = ' / ';
  *
  * Always splits on: | ; newline, and a slash with whitespace on either side.
  * Then, for each piece that isn't a known name, also splits a bare slash
- * ("A/B") and — unless `splitCommas` is false — commas.
+ * ("A/B") and — only if `splitCommas` is true — commas.
  *
  * @param raw          the stored string
  * @param opts.known   Set of normalizeArtist()'d names that must never be split
- * @param opts.splitCommas  false for festival_lineups (written only by the
- *                     editor, so a comma is part of a name, not a separator)
+ * @param opts.splitCommas  default false: stored data uses "/" only, so a
+ *                     comma is part of a name, not a separator
  */
-export const parseActList = (raw, { known = null, splitCommas = true } = {}) => {
+export const parseActList = (raw, { known = null, splitCommas = false } = {}) => {
     if (raw == null) return [];
     const text = String(raw).trim();
     if (!text || text.toLowerCase() === 'nan') return [];
@@ -185,7 +187,8 @@ export const parseActList = (raw, { known = null, splitCommas = true } = {}) => 
 
     for (const chunk of text.split(/\s*[|;\n]\s*|\s+\/\s*|\s*\/\s+/)) {
         if (isProtected(chunk)) { push(chunk); continue; }
-        chunk.split(splitCommas ? /\s*[\/,]\s*/ : /\s*\/\s*/).forEach(push);
+        // A comma straight before a digit is a number ("10,000 Maniacs"), not a separator
+        chunk.split(splitCommas ? /\s*(?:\/|,(?!\d))\s*/ : /\s*\/\s*/).forEach(push);
     }
     return out;
 };
