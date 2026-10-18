@@ -9,7 +9,7 @@ import * as Charts from './charts.js';
 import * as UI from './ui.js';
 import { sortGigs } from './data.js';
 import { renderCalendar } from './calendar.js';
-import { escapeHtml, safeUrl } from './utils.js';
+import { escapeHtml, safeUrl, parseDate } from './utils.js';
 
 // ─── MODULE STATE ─────────────────────────────────────────────────────────────
 
@@ -382,6 +382,9 @@ function _renderDrillTable(rows) {
     }
 
     const myKeys = new Set((window.journalData || []).map(g => g['Journal Key']));
+    // A shared show from today onwards hasn't happened yet: "going together", not "were there"
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
 
     container.innerHTML = `
         <div class="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
@@ -396,6 +399,8 @@ function _renderDrillTable(rows) {
                 <tbody class="divide-y divide-slate-50">
                     ${rows.map(gig => {
                         const isShared = myKeys.has(gig['Journal Key']);
+                        const gigDate  = parseDate(gig['Date']);
+                        const isFuture = !!gigDate && gigDate >= startOfToday;
                         return `
                         <tr data-buddy-gig-key="${escapeHtml(gig['Journal Key'])}"
                             class="group hover:bg-indigo-50/30 transition-all cursor-pointer">
@@ -403,7 +408,9 @@ function _renderDrillTable(rows) {
                             <td class="p-4 leading-tight">
                                 <div class="flex flex-col gap-1">
                                     <span class="text-sm font-bold text-slate-900">${escapeHtml(gig['Band'])}</span>
-                                    ${isShared ? `<span class="inline-flex items-center gap-1 text-[9px] bg-indigo-500/10 text-indigo-600 font-black uppercase px-2 py-0.5 rounded-full w-fit">
+                                    ${isShared && isFuture ? `<span class="inline-flex items-center gap-1 text-[9px] bg-emerald-500/10 text-emerald-600 font-black uppercase px-2 py-0.5 rounded-full w-fit">
+                                        <i data-lucide="calendar-check" class="w-2.5 h-2.5"></i> Going together
+                                    </span>` : isShared ? `<span class="inline-flex items-center gap-1 text-[9px] bg-indigo-500/10 text-indigo-600 font-black uppercase px-2 py-0.5 rounded-full w-fit">
                                         <i data-lucide="check" class="w-2.5 h-2.5"></i> You were there
                                     </span>` : ''}
                                 </div>
@@ -454,3 +461,4 @@ window.viewBuddyGig = (key) => {
         _origClose();
     };
 };
+

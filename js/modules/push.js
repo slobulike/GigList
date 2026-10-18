@@ -1,9 +1,26 @@
 /**
  * GigList — Push Notifications Module
- * Handles subscription, unsubscription, and permission state.
+ * Handles subscription, unsubscription, permission state, and silent
+ * self-healing of lost/stale subscriptions (e.g. after a VAPID key rotation).
  */
 
 const PUSH_WORKER_URL = 'https://giglist-push.richard-lipscombe.workers.dev';
+
+// Remembers that THIS browser opted in, so a subscription the browser/push
+// service has dropped can be recreated silently — while a user who deliberately
+// switched notifications off (flag cleared) is never resubscribed.
+const OPT_IN_KEY = 'giglist_push_opted_in';
+
+function setOptIn(on) {
+  try {
+    if (on) localStorage.setItem(OPT_IN_KEY, '1');
+    else localStorage.removeItem(OPT_IN_KEY);
+  } catch { /* storage unavailable — healing just won't cover the no-subscription case */ }
+}
+
+function getOptIn() {
+  try { return localStorage.getItem(OPT_IN_KEY) === '1'; } catch { return false; }
+}
 
 // ─── UTILITIES ────────────────────────────────────────────────────────────────
 
@@ -18,6 +35,20 @@ async function getVapidPublicKey() {
   const res = await fetch(`${PUSH_WORKER_URL}/push/vapid-public-key`);
   const { key } = await res.json();
   return key;
+}
+
+/**
+ * True if an existing browser subscription was created with the given VAPID
+ * public key. A subscription made with an old key can never receive pushes
+ * signed with the new one, and pushManager.subscribe() throws if you try to
+ * re-subscribe over it with a different key.
+ */
+function keysMatch(sub, vapidKey) {
+  const current = sub.options?.applicationServerKey;
+  if (!current) return true; // browser doesn't expose it — can't tell, assume OK
+  const a = new Uint8Array(current);
+  const b = urlBase64ToUint8Array(vapidKey);
+  return a.length === b.length && a.every((v, i) => v === b[i]);
 }
 
 // ─── STATE ────────────────────────────────────────────────────────────────────
@@ -52,6 +83,76 @@ export async function getPushState(supabase = null) {
   return 'subscribed';
 }
 
+// ─── SELF-HEAL ────────────────────────────────────────────────────────────────
+
+/**
+ * Call once per app open (personal mode, signed in), BEFORE initPushUI so the
+ * settings toggle reads the healed state. Never throws and never prompts.
+ *
+ * Recreates the subscription silently when the user has opted in but:
+ *   - the browser has no subscription any more (opt-in flag still set),
+ *   - the subscription was made with a different (rotated) VAPID key, or
+ *   - the DB row is missing (e.g. the Worker pruned it after a 404/410).
+ * Does nothing if notifications are off, denied, or already healthy.
+ */
+export async function syncPushSubscription(supabase) {
+  try {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+    // Resubscribing without a prompt is only possible once permission is granted
+    if (Notification.permission !== 'granted') return;
+
+    const reg = await navigator.serviceWorker.ready;
+    const existing = await reg.pushManager.getSubscription();
+
+    // No subscription and no record that they opted in → they're off. Leave it.
+    if (!existing && !getOptIn()) return;
+
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    const userId = session.user.id;
+
+    const vapidKey = await getVapidPublicKey();
+
+    if (existing && keysMatch(existing, vapidKey)) {
+      const { data: row } = await supabase
+        .from('push_subscriptions')
+        .select('id')
+        .eq('endpoint', existing.endpoint)
+        .maybeSingle();
+
+      if (row) {
+        setOptIn(true); // healthy — also migrates users who subscribed before the flag existed
+        return;
+      }
+      // Browser subscription is fine but its DB row is gone → fall through and recreate
+    }
+
+    // Recreate: drop the old browser subscription (if any), make a fresh one
+    const oldEndpoint = existing?.endpoint;
+    if (existing) await existing.unsubscribe();
+
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(vapidKey),
+    });
+    const { endpoint, keys } = sub.toJSON();
+
+    if (oldEndpoint) {
+      await supabase.from('push_subscriptions').delete().eq('endpoint', oldEndpoint);
+    }
+
+    const { error } = await supabase
+      .from('push_subscriptions')
+      .insert({ user_id: userId, endpoint, p256dh: keys.p256dh, auth: keys.auth });
+    if (error) throw error;
+
+    setOptIn(true);
+    console.log('[Push] Subscription re-created');
+  } catch (err) {
+    console.warn('[Push] Subscription sync failed:', err);
+  }
+}
+
 // ─── SUBSCRIBE ────────────────────────────────────────────────────────────────
 
 export async function subscribeToPush(supabase) {
@@ -70,6 +171,10 @@ export async function subscribeToPush(supabase) {
     const reg = await navigator.serviceWorker.ready;
     const vapidKey = await getVapidPublicKey();
 
+    // A leftover subscription made with an old VAPID key makes subscribe() throw
+    const stale = await reg.pushManager.getSubscription();
+    if (stale && !keysMatch(stale, vapidKey)) await stale.unsubscribe();
+
     const subscription = await reg.pushManager.subscribe({
       userVisibleOnly: true,
       applicationServerKey: urlBase64ToUint8Array(vapidKey),
@@ -78,14 +183,15 @@ export async function subscribeToPush(supabase) {
     const { endpoint, keys } = subscription.toJSON();
 
     // Get authenticated user — required for user_id in the DB row
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    let { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
-        // Try to refresh the session first
-        const { data: { session } } = await supabase.auth.refreshSession();
-        if (!session) {
-            window.showToast('Please sign in again to enable notifications', 'warning');
-            return false;
-        }
+      // Try to refresh the session first
+      const { data: { session } } = await supabase.auth.refreshSession();
+      if (!session) {
+        window.showToast('Please sign in again to enable notifications', 'warning');
+        return false;
+      }
+      user = session.user;
     }
 
     // Check if already stored — avoids duplicate insert
@@ -103,6 +209,7 @@ export async function subscribeToPush(supabase) {
       if (error) throw error;
     }
 
+    setOptIn(true);
     window.showToast('Notifications enabled! 🎸', 'success');
     return true;
   } catch (err) {
@@ -116,6 +223,9 @@ export async function subscribeToPush(supabase) {
 
 export async function unsubscribeFromPush(supabase) {
   try {
+    // Deliberate opt-out: clear first so sync never resurrects it
+    setOptIn(false);
+
     const reg = await navigator.serviceWorker.ready;
     const sub = await reg.pushManager.getSubscription();
     if (!sub) return true;

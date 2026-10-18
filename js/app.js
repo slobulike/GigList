@@ -1,8 +1,8 @@
 /**
  * GigList Core Engine
- * v9.1.1 — 2026-10-18
+ * v9.1.3 — 2026-10-18
  * ------------------------------------------------------------------
- * ✅ Opus 5.5 Review bug fixes
+ * ✅ Small change to push and buddies modules to refresh push subscription silently if it gets dropped
  */
 
 import * as Data from './modules/data.js';
@@ -39,12 +39,12 @@ import { openPhotoCropModal } from './modules/photo-crop.js';
 import './modules/collection-charts.js';
 import './modules/stats-switcher.js';
 import { initMixPlaylistCard } from './modules/mix-playlist.js';
-
+import { syncPushSubscription } from './modules/push.js';
 
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "9.1.1";
+const APP_VERSION = "9.1.3";
 
 // Columns of profiles that the app is allowed to read (see the column grants
 // in Supabase). home_lat / home_lng / home_label are deliberately excluded:
@@ -562,7 +562,7 @@ export async function initApp() {
         if (cachedStart && earlyStatsPromise) await earlyStatsPromise;   // achievements read these
         await Promise.all([
             initBuddies(currentUser),
-            initProfile(currentUser),
+            syncPushSubscription(supabase).then(() => initProfile(currentUser)),
         ]);
     }
 
