@@ -1,8 +1,9 @@
 /**
  * GigList Core Engine
- * v9.1.3 — 2026-10-18
+ * v9.1.4 — 2026-10-18
  * ------------------------------------------------------------------
- * ✅ Small change to push and buddies modules to refresh push subscription silently if it gets dropped
+ * ✅ Added colour picker to collection item editor to allow this to be manually set
+ * ✅ Bug fix - added "signed by" back in to all item types
  */
 
 import * as Data from './modules/data.js';
@@ -44,7 +45,7 @@ import { syncPushSubscription } from './modules/push.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "9.1.3";
+const APP_VERSION = "9.1.4";
 
 // Columns of profiles that the app is allowed to read (see the column grants
 // in Supabase). home_lat / home_lng / home_label are deliberately excluded:

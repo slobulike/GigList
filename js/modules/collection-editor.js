@@ -54,6 +54,10 @@ let _taggedBuddies   = [];  // Array of { id, name } — buddies tagged in this 
 let _extendedOpen    = false; // Whether the "Extended Details" section is expanded
 let _discogsId       = null; // Set once a Discogs lookup has populated this item
 let _discogsData     = null; // { genres, styles, tracklist, discogs_uri } — read-only snapshot
+let _heroColor       = null; // Current spine colour (hex) shown in the colour chip
+let _heroColorManual = false; // True once the user picked a colour themselves (always saved)
+let _colorPanelOpen  = false; // Whether the spine-colour panel is expanded
+let _coverSwatches   = [];   // Candidate colours extracted from the hero photo
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
@@ -127,21 +131,21 @@ let _dismissedSuggestions = new Set(); // reset per editor open — see openColl
 // of showing an empty shell. Memories never use this (whole catalogue
 // section is hidden for type === 'memory').
 const SUBTYPE_FIELD_RULES = {
-    cd:          ['format', 'label', 'catalogue_number', 'country', 'condition'],
-    vinyl:       ['format', 'label', 'catalogue_number', 'country', 'condition'],
-    tape:        ['format', 'label', 'catalogue_number', 'condition'],
-    minidisc:    ['format', 'label', 'catalogue_number', 'condition'],
+    cd:          ['format', 'label', 'catalogue_number', 'country', 'condition', 'signed_by'],
+    vinyl:       ['format', 'label', 'catalogue_number', 'country', 'condition', 'signed_by'],
+    tape:        ['format', 'label', 'catalogue_number', 'condition', 'signed_by'],
+    minidisc:    ['format', 'label', 'catalogue_number', 'condition', 'signed_by'],
     apparel:     ['size', 'condition', 'signed_by', 'provenance'],
     poster:      ['size', 'condition', 'signed_by', 'provenance'],
-    magazine:    ['format', 'condition', 'provenance'],
+    magazine:    ['format', 'condition', 'signed_by', 'provenance'],
     book:        ['format', 'condition', 'signed_by'],
     tab_book:    ['format', 'condition', 'signed_by'],
-    ticket:      ['provenance', 'condition'],
-    laminate:    ['provenance', 'condition'],
+    ticket:      ['provenance', 'condition', 'signed_by'],
+    laminate:    ['provenance', 'condition', 'signed_by'],
     video:       ['format', 'condition', 'signed_by'],
-    game:        ['format', 'condition'],
+    game:        ['format', 'condition', 'signed_by'],
     memorabilia: ['size', 'condition', 'signed_by', 'provenance'],
-    ephemera:    ['condition', 'provenance'],
+    ephemera:    ['condition', 'signed_by', 'provenance'],
     other:       ['format', 'label', 'catalogue_number', 'country', 'size', 'condition', 'signed_by', 'provenance'],
 };
 
@@ -734,7 +738,9 @@ function _renderPhotoPreviews() {
         </label>` : '';
 
     // Update the container
-    container.innerHTML = `<div class="flex gap-2 flex-wrap items-center">${photosHtml}${addMore}</div>`;
+    const colorCtl = _renderColorControl();
+    container.innerHTML = `<div class="flex gap-2 flex-wrap items-center">${photosHtml}${addMore}${colorCtl.chip}</div>${colorCtl.panel}`;
+    _syncAutoColor();
 
     // Re-initialize icons if necessary
     if (window.lucide) {
@@ -771,82 +777,301 @@ async function _uploadPhotos(userId, itemId) {
     }
 }
 
-/**
- * Sample dominant colour from an image file using Canvas API.
- * Returns a hex string e.g. "#1e3a5f", or null on failure.
- */
-async function _sampleHeroColor(file) {
+// ─── SPINE COLOUR ─────────────────────────────────────────────────────────────
+// Averaging every pixel mixes hues together and lands on muddy brown/grey.
+// Instead we bucket pixels by hue, weight each by how "vivid" it is (greys,
+// near-black and near-white count for almost nothing) and take the winning
+// hue bucket, so a mostly-blue cover with some grey text yields blue.
+
+function _rgbToHsl(r, g, b) {
+    r /= 255; g /= 255; b /= 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    const l = (max + min) / 2;
+    if (max === min) return [0, 0, l];
+    const d = max - min;
+    const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    let h;
+    if (max === r)      h = ((g - b) / d + (g < b ? 6 : 0)) * 60;
+    else if (max === g) h = ((b - r) / d + 2) * 60;
+    else                h = ((r - g) / d + 4) * 60;
+    return [h, s, l];
+}
+
+function _hslToHex(h, s, l) {
+    h = ((h % 360) + 360) % 360;
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+    const m = l - c / 2;
+    let r = 0, g = 0, b = 0;
+    if (h < 60)       [r, g, b] = [c, x, 0];
+    else if (h < 120) [r, g, b] = [x, c, 0];
+    else if (h < 180) [r, g, b] = [0, c, x];
+    else if (h < 240) [r, g, b] = [0, x, c];
+    else if (h < 300) [r, g, b] = [x, 0, c];
+    else              [r, g, b] = [c, 0, x];
+    const hex = v => Math.round((v + m) * 255).toString(16).padStart(2, '0');
+    return `#${hex(r)}${hex(g)}${hex(b)}`;
+}
+
+// Draw an image Blob/File to a small canvas and return its RGBA pixels (or null).
+function _readPixels(file, size = 64) {
     return new Promise((resolve) => {
-        try {
-            const img = new Image();
-            const url = URL.createObjectURL(file);
-            img.onload = () => {
-                try {
-                    const canvas = document.createElement('canvas');
-                    canvas.width = 50; canvas.height = 50;
-                    const ctx = canvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0, 50, 50);
-                    const d = ctx.getImageData(0, 0, 50, 50).data;
-                    let r = 0, g = 0, b = 0, count = 0;
-                    for (let i = 0; i < d.length; i += 16) { // sample every 4th pixel
-                        r += d[i]; g += d[i+1]; b += d[i+2]; count++;
-                    }
-                    r = Math.round(r / count);
-                    g = Math.round(g / count);
-                    b = Math.round(b / count);
-
-                    // Convert to HSL to boost saturation and control lightness
-                    const rn = r / 255, gn = g / 255, bn = b / 255;
-                    const max = Math.max(rn, gn, bn), min = Math.min(rn, gn, bn);
-                    let h, s, l = (max + min) / 2;
-
-                    if (max === min) {
-                        h = s = 0;
-                    } else {
-                        const d = max - min;
-                        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-                        switch (max) {
-                            case rn: h = ((gn - bn) / d + (gn < bn ? 6 : 0)) / 6; break;
-                            case gn: h = ((bn - rn) / d + 2) / 6; break;
-                            default: h = ((rn - gn) / d + 4) / 6; break;
-                        }
-                    }
-
-                    // Boost saturation, clamp lightness to a usable dark-mid range for spine
-                    s = Math.min(1, s * 2.2);          // Boost saturation significantly
-                    l = Math.min(0.45, Math.max(0.18, l * 0.75)); // Keep it mid-dark
-
-                    // Convert back to RGB
-                    const hue2rgb = (p, q, t) => {
-                        if (t < 0) t += 1;
-                        if (t > 1) t -= 1;
-                        if (t < 1/6) return p + (q - p) * 6 * t;
-                        if (t < 1/2) return q;
-                        if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
-                        return p;
-                    };
-                    let fr, fg, fb;
-                    if (s === 0) {
-                        fr = fg = fb = l;
-                    } else {
-                        const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-                        const p = 2 * l - q;
-                        fr = hue2rgb(p, q, h + 1/3);
-                        fg = hue2rgb(p, q, h);
-                        fb = hue2rgb(p, q, h - 1/3);
-                    }
-                    r = Math.round(fr * 255);
-                    g = Math.round(fg * 255);
-                    b = Math.round(fb * 255);
-                    resolve(`#${r.toString(16).padStart(2,'0')}${g.toString(16).padStart(2,'0')}${b.toString(16).padStart(2,'0')}`);
-                } catch { resolve(null); }
-                finally { URL.revokeObjectURL(url); }
-            };
-            img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
-            img.src = url;
-        } catch { resolve(null); }
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = () => {
+            try {
+                const canvas = document.createElement('canvas');
+                canvas.width = size; canvas.height = size;
+                const ctx = canvas.getContext('2d', { willReadFrequently: true });
+                ctx.drawImage(img, 0, 0, size, size);
+                resolve(ctx.getImageData(0, 0, size, size).data);
+            } catch { resolve(null); }
+            finally { URL.revokeObjectURL(url); }
+        };
+        img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+        img.src = url;
     });
 }
+
+// Pull the strongest distinct colours out of an image, tuned for a spine
+// (saturated enough to read as a colour, mid-dark so light text sits on it).
+// Returns up to `n` hex strings, best first. Mono covers return one neutral.
+async function _extractSpineColors(file, n = 6) {
+    const px = await _readPixels(file);
+    if (!px) return [];
+
+    const BUCKETS = 24;
+    const bins = Array.from({ length: BUCKETS }, () => ({ w: 0, x: 0, y: 0, s: 0, l: 0 }));
+    let totalVivid = 0, lumSum = 0, count = 0;
+
+    for (let i = 0; i < px.length; i += 4) {
+        if (px[i + 3] < 128) continue;
+        const [h, s, l] = _rgbToHsl(px[i], px[i + 1], px[i + 2]);
+        lumSum += l; count++;
+        const vivid = s * (1 - Math.abs(2 * l - 1));
+        if (vivid < 0.08) continue;
+        const bin = bins[Math.floor(h / 360 * BUCKETS) % BUCKETS];
+        const rad = h * Math.PI / 180;
+        bin.w += vivid;
+        bin.x += Math.cos(rad) * vivid;
+        bin.y += Math.sin(rad) * vivid;
+        bin.s += s * vivid;
+        bin.l += l * vivid;
+        totalVivid += vivid;
+    }
+    if (!count) return [];
+
+    const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+    // Basically greyscale cover → a neutral spine at the cover's lightness.
+    if (totalVivid < count * 0.03) {
+        return [_hslToHex(220, 0.08, clamp((lumSum / count) * 0.8, 0.22, 0.42))];
+    }
+
+    const out = [];
+    const hues = [];
+    for (const b of bins.slice().sort((a, c) => c.w - a.w)) {
+        if (out.length >= n || b.w < totalVivid * 0.04) break;
+        const hue = (Math.atan2(b.y, b.x) * 180 / Math.PI + 360) % 360;
+        // Skip near-duplicates of a hue we already picked
+        if (hues.some(h => Math.min(Math.abs(h - hue), 360 - Math.abs(h - hue)) < 22)) continue;
+        hues.push(hue);
+        out.push(_hslToHex(
+            hue,
+            clamp(b.s / b.w, 0.45, 0.85),
+            clamp((b.l / b.w) * 0.85, 0.26, 0.46)
+        ));
+    }
+    return out;
+}
+
+async function _sampleHeroColor(file) {
+    const [best] = await _extractSpineColors(file, 1);
+    return best || null;
+}
+
+// Hero photo as a Blob — pending photos are already local; existing ones are
+// fetched (same approach the re-crop flow uses).
+async function _getHeroBlob() {
+    const hero = _photos[0];
+    if (!hero) return null;
+    if (hero.kind === 'pending') return hero.file;
+    try {
+        const resp = await fetch(hero.url);
+        if (!resp.ok) throw new Error(`fetch failed: ${resp.status}`);
+        return await resp.blob();
+    } catch (err) {
+        console.error('[ColEditor] could not load hero for colour sampling:', err.message);
+        return null;
+    }
+}
+
+// Keeps the chip in step with the auto-sampled colour until the user overrides it.
+async function _syncAutoColor() {
+    if (_heroColorManual) return;
+    const hero = _photos[0];
+    if (!hero || hero.kind !== 'pending') return;
+    if (!hero.spineColor) hero.spineColor = await _sampleHeroColor(hero.file);
+    if (_photos[0] === hero && !_heroColorManual && hero.spineColor) {
+        _heroColor = hero.spineColor;
+        _updateColorChip();
+    }
+}
+
+// ─── SPINE COLOUR PICKER UI ───────────────────────────────────────────────────
+
+// Full Tailwind v3 palette: 22 hues x shades 300-900 (light -> dark).
+const PALETTE_HUES = {
+    red:     ['#fca5a5', '#f87171', '#ef4444', '#dc2626', '#b91c1c', '#991b1b', '#7f1d1d'],
+    orange:  ['#fdba74', '#fb923c', '#f97316', '#ea580c', '#c2410c', '#9a3412', '#7c2d12'],
+    amber:   ['#fcd34d', '#fbbf24', '#f59e0b', '#d97706', '#b45309', '#92400e', '#78350f'],
+    yellow:  ['#fde047', '#facc15', '#eab308', '#ca8a04', '#a16207', '#854d0e', '#713f12'],
+    lime:    ['#bef264', '#a3e635', '#84cc16', '#65a30d', '#4d7c0f', '#3f6212', '#365314'],
+    green:   ['#86efac', '#4ade80', '#22c55e', '#16a34a', '#15803d', '#166534', '#14532d'],
+    emerald: ['#6ee7b7', '#34d399', '#10b981', '#059669', '#047857', '#065f46', '#064e3b'],
+    teal:    ['#5eead4', '#2dd4bf', '#14b8a6', '#0d9488', '#0f766e', '#115e59', '#134e4a'],
+    cyan:    ['#67e8f9', '#22d3ee', '#06b6d4', '#0891b2', '#0e7490', '#155e75', '#164e63'],
+    sky:     ['#7dd3fc', '#38bdf8', '#0ea5e9', '#0284c7', '#0369a1', '#075985', '#0c4a6e'],
+    blue:    ['#93c5fd', '#60a5fa', '#3b82f6', '#2563eb', '#1d4ed8', '#1e40af', '#1e3a8a'],
+    indigo:  ['#a5b4fc', '#818cf8', '#6366f1', '#4f46e5', '#4338ca', '#3730a3', '#312e81'],
+    violet:  ['#c4b5fd', '#a78bfa', '#8b5cf6', '#7c3aed', '#6d28d9', '#5b21b6', '#4c1d95'],
+    purple:  ['#d8b4fe', '#c084fc', '#a855f7', '#9333ea', '#7e22ce', '#6b21a8', '#581c87'],
+    fuchsia: ['#f0abfc', '#e879f9', '#d946ef', '#c026d3', '#a21caf', '#86198f', '#701a75'],
+    pink:    ['#f9a8d4', '#f472b6', '#ec4899', '#db2777', '#be185d', '#9d174d', '#831843'],
+    rose:    ['#fda4af', '#fb7185', '#f43f5e', '#e11d48', '#be123c', '#9f1239', '#881337'],
+    slate:   ['#cbd5e1', '#94a3b8', '#64748b', '#475569', '#334155', '#1e293b', '#0f172a'],
+    gray:    ['#d1d5db', '#9ca3af', '#6b7280', '#4b5563', '#374151', '#1f2937', '#111827'],
+    zinc:    ['#d4d4d8', '#a1a1aa', '#71717a', '#52525b', '#3f3f46', '#27272a', '#18181b'],
+    neutral: ['#d4d4d4', '#a3a3a3', '#737373', '#525252', '#404040', '#262626', '#171717'],
+    stone:   ['#d6d3d1', '#a8a29e', '#78716c', '#57534e', '#44403c', '#292524', '#1c1917'],
+};
+
+function _isHex(v) { return /^#[0-9a-f]{6}$/i.test(v || ''); }
+
+function _updateColorChip() {
+    const chip = document.getElementById('col-editor-color-chip');
+    if (chip && _isHex(_heroColor)) chip.style.backgroundColor = _heroColor;
+    const input = document.getElementById('col-editor-color-hex');
+    if (input && document.activeElement !== input && _heroColor) input.value = _heroColor;
+    const prev = document.getElementById('col-editor-color-preview');
+    if (prev && _isHex(_heroColor)) prev.style.backgroundColor = _heroColor;
+}
+
+function _swatchBtn(hex, size = 'w-8 h-8') {
+    const active = _heroColor && hex.toLowerCase() === _heroColor.toLowerCase();
+    return `<button type="button" onclick="window.colEditorSetColor('${hex}')" title="${hex}" aria-label="Use ${hex}"
+        class="${size} rounded-lg border ${active ? 'border-slate-900 ring-2 ring-amber-400' : 'border-black/10'} flex-shrink-0 transition-transform hover:scale-110"
+        style="background-color:${hex}"></button>`;
+}
+
+function _renderColorPanel() {
+    const rows = Object.values(PALETTE_HUES);
+    const half = Math.ceil(rows.length / 2);
+    const block = (hues) => {
+        let html = '';
+        for (let shade = 0; shade < hues[0].length; shade++) {
+            html += hues.map(h => _swatchBtn(h[shade], 'w-full aspect-square')).join('');
+        }
+        return `<div class="grid gap-0.5" style="grid-template-columns:repeat(${hues.length},minmax(0,1fr))">${html}</div>`;
+    };
+
+    const cover = _coverSwatches.length
+        ? `<div>
+               <div class="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1.5">From the cover</div>
+               <div class="flex gap-1.5 flex-wrap">${_coverSwatches.map(h => _swatchBtn(h)).join('')}</div>
+           </div>` : '';
+
+    const eyedropper = ('EyeDropper' in window) ? `
+        <button type="button" onclick="window.colEditorEyedrop()"
+                class="px-2.5 py-1.5 rounded-lg border border-slate-200 text-[10px] font-black uppercase tracking-widest text-slate-600 hover:border-amber-400 hover:text-amber-600 transition-colors">
+            Pick from screen
+        </button>` : '';
+
+    return `
+    <div class="mt-3 p-3 rounded-2xl border border-slate-200 bg-slate-50 space-y-3">
+        <div class="flex items-center gap-2 flex-wrap">
+            <div id="col-editor-color-preview" class="w-8 h-8 rounded-lg border border-black/10" style="background-color:${_isHex(_heroColor) ? _heroColor : '#64748b'}"></div>
+            <input id="col-editor-color-hex" type="text" maxlength="7" spellcheck="false" autocomplete="off"
+                   value="${_isHex(_heroColor) ? _heroColor : ''}" placeholder="#rrggbb"
+                   oninput="window.colEditorHexInput(this.value)"
+                   class="w-24 px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-mono font-bold text-slate-700 bg-white focus:outline-none focus:border-amber-400">
+            <input type="color" value="${_isHex(_heroColor) ? _heroColor : '#64748b'}"
+                   oninput="window.colEditorSetColor(this.value, true)"
+                   aria-label="Custom colour"
+                   class="w-8 h-8 p-0 border border-slate-200 rounded-lg bg-white cursor-pointer">
+            ${eyedropper}
+            <button type="button" onclick="window.colEditorAutoColor()"
+                    class="px-2.5 py-1.5 rounded-lg border border-slate-200 text-[10px] font-black uppercase tracking-widest text-slate-600 hover:border-amber-400 hover:text-amber-600 transition-colors">
+                Auto
+            </button>
+        </div>
+        ${cover}
+        <div class="space-y-2">${block(rows.slice(0, half))}${block(rows.slice(half))}</div>
+    </div>`;
+}
+
+function _renderColorControl() {
+    const bg = _isHex(_heroColor) ? _heroColor : '#e2e8f0';
+    const chip = `
+        <button type="button" onclick="window.colEditorToggleColorPanel()"
+                aria-label="Adjust spine colour" aria-expanded="${_colorPanelOpen}" title="Spine colour"
+                class="w-16 h-16 rounded-xl border-2 ${_colorPanelOpen ? 'border-amber-400' : 'border-slate-200'} flex flex-col items-center justify-center flex-shrink-0 hover:border-amber-400 transition-colors">
+            <span id="col-editor-color-chip" class="w-7 h-7 rounded-full border border-black/10 flex items-center justify-center text-white" style="background-color:${bg}">
+                <i data-lucide="pipette" class="w-3.5 h-3.5"></i>
+            </span>
+            <span class="text-[8px] font-black uppercase text-slate-400 mt-1">Spine</span>
+        </button>`;
+    return { chip, panel: _colorPanelOpen ? _renderColorPanel() : '' };
+}
+
+window.colEditorToggleColorPanel = async () => {
+    _colorPanelOpen = !_colorPanelOpen;
+    _renderPhotoPreviews();
+    if (_colorPanelOpen) {
+        const blob = await _getHeroBlob();
+        if (blob && _colorPanelOpen) {
+            _coverSwatches = await _extractSpineColors(blob, 6);
+            if (_colorPanelOpen) _renderPhotoPreviews();
+        }
+    }
+};
+
+window.colEditorSetColor = (hex, fromNativePicker = false) => {
+    if (!_isHex(hex)) return;
+    _heroColor = hex.toLowerCase();
+    _heroColorManual = true;
+    // Don't re-render while the native picker is being dragged — it would close it.
+    if (fromNativePicker) _updateColorChip(); else _renderPhotoPreviews();
+};
+
+window.colEditorHexInput = (value) => {
+    let v = value.trim();
+    if (v && !v.startsWith('#')) v = '#' + v;
+    if (_isHex(v)) {
+        _heroColor = v.toLowerCase();
+        _heroColorManual = true;
+        const chip = document.getElementById('col-editor-color-chip');
+        if (chip) chip.style.backgroundColor = _heroColor;
+        const prev = document.getElementById('col-editor-color-preview');
+        if (prev) prev.style.backgroundColor = _heroColor;
+    }
+};
+
+window.colEditorEyedrop = async () => {
+    try {
+        const { sRGBHex } = await new window.EyeDropper().open();
+        window.colEditorSetColor(sRGBHex);
+    } catch { /* user cancelled */ }
+};
+
+// Re-run the automatic pick on the current hero photo and use that.
+window.colEditorAutoColor = async () => {
+    const blob = await _getHeroBlob();
+    if (!blob) { _showError('Add a photo first to sample a colour from.'); return; }
+    const hex = await _sampleHeroColor(blob);
+    if (hex) { _heroColor = hex; _heroColorManual = true; _renderPhotoPreviews(); }
+};
+
 // Add this function near _sampleHeroColor:
 async function _compressImage(file, maxPx = 1600, quality = 0.82) {
     return new Promise((resolve) => {
@@ -911,6 +1136,10 @@ async function _populateForm(item) {
     _photos          = [];
     _discogsId       = item.discogs_id || null;
     _discogsData     = item.discogs_data || null;
+    _heroColor       = item.hero_color || null;
+    _heroColorManual = false;
+    _colorPanelOpen  = false;
+    _coverSwatches   = [];
     _renderDiscogsCard();
     _setDiscogsStatus('');
     const discogsInput = document.getElementById('col-editor-discogs-input');
@@ -1180,8 +1409,26 @@ function _setHidden(id, hidden) {
     if (el) el.classList.toggle('hidden', hidden);
 }
 
+// The Signed-by input is read on save and filled on edit, so it must exist in
+// the modal. If the template ever loses it, rebuild it next to Condition.
+function _ensureSignedByField() {
+    if (document.getElementById('col-editor-signed-by')) return;
+    const anchor = document.getElementById('col-editor-condition-container');
+    if (!anchor) return;
+    const wrap = document.createElement('div');
+    wrap.id = 'col-editor-signed-by-container';
+    wrap.className = 'mt-3';
+    wrap.innerHTML = `
+        <label for="col-editor-signed-by" class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5">Signed by</label>
+        <input id="col-editor-signed-by" type="text" autocomplete="off" maxlength="300"
+               placeholder="Names, separated by commas — e.g. Rivers Cuomo, Brian Bell"
+               class="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm font-bold text-slate-700 placeholder:font-medium placeholder:text-slate-300 focus:outline-none focus:border-amber-400">`;
+    anchor.insertAdjacentElement('afterend', wrap);
+}
+
 function _updateFieldVisibility() {
     const isMemory = _selectedType === 'memory';
+    _ensureSignedByField();
 
     // Whole catalogue/extended-details section only applies to artefacts.
     const catalogueFields = document.getElementById('col-editor-catalogue-fields');
@@ -1361,6 +1608,10 @@ export const openCollectionEditor = async (type = null, itemId = null) => {
     _labels          = [];
     _links           = [];
     _taggedBuddies   = [];
+    _heroColor       = null;
+    _heroColorManual = false;
+    _colorPanelOpen  = false;
+    _coverSwatches   = [];
     _labelCache      = null; // refresh label suggestions on each open
     _dismissedSuggestions = new Set();
     _discogsId       = null;
@@ -1531,10 +1782,13 @@ window.saveCollectionItem = async () => {
         // file we have local pixels for. If the hero is unchanged, or was
         // reordered to an existing (already-uploaded) photo, leave hero_color
         // as-is rather than fetching the remote image back down.
+        // A colour the user picked by hand always wins and is always saved.
         let heroColor = null;
         const heroPhoto = _photos[0];
-        if (heroPhoto?.kind === 'pending') {
-            heroColor = await _sampleHeroColor(heroPhoto.file);
+        if (_heroColorManual && _isHex(_heroColor)) {
+            heroColor = _heroColor;
+        } else if (heroPhoto?.kind === 'pending') {
+            heroColor = heroPhoto.spineColor || await _sampleHeroColor(heroPhoto.file);
         }
 
         const acquiredYear  = document.getElementById('col-editor-acquired-year')?.value?.trim() || '';
