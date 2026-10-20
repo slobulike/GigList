@@ -1,9 +1,9 @@
 /**
  * GigList Core Engine
- * v9.1.4 — 2026-10-18
+ * v10.0.0 — 2026-10-20
  * ------------------------------------------------------------------
- * ✅ Added colour picker to collection item editor to allow this to be manually set
- * ✅ Bug fix - added "signed by" back in to all item types
+ * ✅ Releases added to band mode - syncs with discogs, links to Collection items, and opens albums directly in Spotify
+ * ✅ Improved discogs syncing in Collection so this is now automatically added from the queue when successfully received
  */
 
 import * as Data from './modules/data.js';
@@ -45,7 +45,7 @@ import { syncPushSubscription } from './modules/push.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "9.1.4";
+const APP_VERSION = "10.0.0";
 
 // Columns of profiles that the app is allowed to read (see the column grants
 // in Supabase). home_lat / home_lng / home_label are deliberately excluded:

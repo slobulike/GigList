@@ -3,8 +3,9 @@
  * v1.0.0 — October 2026
  *
  * Data layer + inbox rendering for the `notifications` table (see
- * 001_notifications.sql). Rows are written by DB triggers only; the client
- * reads them, listens for new ones, and sets read_at.
+ * 001_notifications.sql). Rows are written server-side only (DB triggers, plus
+ * the collection-image-import Worker for 'discogs_ready'); the client reads
+ * them, listens for new ones, and sets read_at.
  *
  * ─── WIRING ───────────────────────────────────────────────────────────────────
  *
@@ -304,6 +305,12 @@ function describe(n) {
     if (n.type === 'memory_tag') {
         return { icon: 'disc', text: `${who} tagged you in a memory` };
     }
+    // Written by the collection-image-import Worker when a Discogs lookup that
+    // was rate-limited at save time finally completes. No actor: it's about the
+    // viewer's own item, and the item row is what makes it drawable.
+    if (n.type === 'discogs_ready' && n.item) {
+        return { icon: 'disc', text: `Discogs details for ${n.item.title || 'your item'} are ready` };
+    }
     // Reaction whose target has since been deleted, or a future type this
     // client doesn't know yet: stay quiet rather than show something wrong.
     return null;
@@ -333,6 +340,10 @@ function avatarHtml(actor) {
 
 const DISMISS_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
 
+// For notifications with no actor (something finished on the viewer's behalf)
+const SYSTEM_AVATAR = '<span class="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 text-lg" ' +
+                      'style="background:rgba(200,160,80,0.15)" aria-hidden="true">💿</span>';
+
 function rowHtml(n) {
     const d = describe(n);
     if (!d) return '';
@@ -347,7 +358,7 @@ function rowHtml(n) {
                     data-notif-actor-name="${escapeHtml(actorName(n))}"
                     data-notif-item="${escapeHtml(String(n.collection_item_id ?? ''))}"
                     class="flex-1 min-w-0 flex items-center gap-3 pl-4 pr-2 py-3 text-left rounded-2xl hover:bg-slate-50/70 transition-colors">
-                ${avatarHtml(n.actor)}
+                ${n.type === 'discogs_ready' ? SYSTEM_AVATAR : avatarHtml(n.actor)}
                 <span class="flex-1 min-w-0">
                     <span class="block text-sm ${unread ? 'font-bold text-slate-900' : 'font-medium text-slate-700'}">
                         ${escapeHtml(d.text)}

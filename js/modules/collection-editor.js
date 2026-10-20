@@ -8,7 +8,8 @@
  *   initCollectionEditor()              — wire up once DOM is ready (called from app.js)
  *
  * Window helpers (called from inline HTML / other modules):
- *   window.openCollectionEditor(type?, itemId?)
+ *   window.openCollectionEditor(type?, itemId?, prefill?)
+ *                                       prefill = { discogsUrl?, bandName? } (add mode only)
  *   window.closeCollectionEditor()
  *   window.saveCollectionItem()
  *   window.deleteCollectionItem()
@@ -53,7 +54,9 @@ let _links           = [];  // Current reference-URL array (Discogs, Weezerpedia
 let _taggedBuddies   = [];  // Array of { id, name } — buddies tagged in this memory
 let _extendedOpen    = false; // Whether the "Extended Details" section is expanded
 let _discogsId       = null; // Set once a Discogs lookup has populated this item
+let _prefillBandName = null; // Set when opened from band-mode Discography; keeps Discogs from overwriting the band
 let _discogsData     = null; // { genres, styles, tracklist, discogs_uri } — read-only snapshot
+let _pendingDiscogsUrl = null; // A pasted Discogs link whose lookup was rate-limited this session — saved on the item so the Worker can finish the lookup (/hydrate)
 let _heroColor       = null; // Current spine colour (hex) shown in the colour chip
 let _heroColorManual = false; // True once the user picked a colour themselves (always saved)
 let _colorPanelOpen  = false; // Whether the spine-colour panel is expanded
@@ -421,18 +424,31 @@ window.colEditorLookupDiscogs = async () => {
         // was silently populating the form with nothing and claiming
         // success, since every field there just falls back to '' or [].
         if (data?.rateLimited) {
-            _setDiscogsStatus(data.error || "Discogs is busy right now — try again in a few minutes.", true);
+            // Don't dead-end the user: remember the link and let them save now. The
+            // Worker fills the details in (and fetches the cover) once Discogs answers.
+            _pendingDiscogsUrl = discogsUrl;
+            _setDiscogsStatus("Discogs is busy right now. You can save now and we'll fill in the details automatically.");
             return;
         }
 
-        if (!res.ok) throw new Error(data?.error || `lookup failed (${res.status})`);
+        if (!res.ok) {
+            const lookupErr = new Error(data?.error || `lookup failed (${res.status})`);
+            // A 400 means the link itself is the problem (not a Discogs link, or a
+            // master/album page instead of a pressing) and the Worker's message is
+            // written for users — show it instead of the generic "couldn't find".
+            lookupErr.userFacing = res.status === 400 && !!data?.error;
+            throw lookupErr;
+        }
 
         await _applyDiscogsLookup(data);
         _renderSuggestedLabels(); // Discogs just filled title/etc. — re-scan for label matches
         _setDiscogsStatus('Filled in from Discogs — edit anything below as needed.');
     } catch (err) {
         console.error('[ColEditor] Discogs lookup failed:', err.message);
-        _setDiscogsStatus("Couldn't find that release — you can still fill the form in yourself.", true);
+        _setDiscogsStatus(
+            err.userFacing ? err.message : "Couldn't find that release — you can still fill the form in yourself.",
+            true
+        );
     } finally {
         if (btn) btn.disabled = false;
         window.hideSpinner?.();
@@ -449,7 +465,9 @@ async function _applyDiscogsLookup(data) {
     _val('col-editor-country',    data.country          || '');
 
     const bandInput = document.getElementById('col-editor-band-input');
-    if (bandInput && data.artist) bandInput.value = data.artist;
+    // A prefilled band (opened from the band's Discography) wins over Discogs' artist name,
+    // which can carry disambiguators like "Name (2)".
+    if (bandInput && data.artist && !_prefillBandName) bandInput.value = data.artist;
 
     // Adding the Discogs page itself to the links chips means it's still
     // there even if the discogs_data snapshot below ever falls out of sync.
@@ -461,6 +479,7 @@ async function _applyDiscogsLookup(data) {
     // Reveal the specs fields that were just populated (they live in the
     // Extended section) and open the read-only Discogs card underneath them.
     _discogsId   = data.discogs_id || null;
+    _pendingDiscogsUrl = null; // this lookup succeeded — nothing left to hydrate
     _discogsData = {
         genres:      data.genres || [],
         styles:      data.styles || [],
@@ -1136,6 +1155,7 @@ async function _populateForm(item) {
     _photos          = [];
     _discogsId       = item.discogs_id || null;
     _discogsData     = item.discogs_data || null;
+    _pendingDiscogsUrl = null; // only set when a lookup is rate-limited during THIS editing session
     _heroColor       = item.hero_color || null;
     _heroColorManual = false;
     _colorPanelOpen  = false;
@@ -1144,6 +1164,14 @@ async function _populateForm(item) {
     _setDiscogsStatus('');
     const discogsInput = document.getElementById('col-editor-discogs-input');
     if (discogsInput) discogsInput.value = '';
+    // An item saved while Discogs was unavailable keeps its link, so the existing
+    // fetch button doubles as Retry — no hunting for the link again.
+    if (discogsInput && !item.discogs_id && item.discogs_url) {
+        discogsInput.value = item.discogs_url;
+        _setDiscogsStatus(item.discogs_status === 'failed'
+            ? "We couldn't get the Discogs details for this item. Press fetch to try again."
+            : "Fetching the Discogs details in the background — they'll fill in automatically.");
+    }
 
     _renderTypeToggle();
     _renderSubtypeSelector();
@@ -1602,8 +1630,9 @@ function _wireBandCombobox() {
 
 // ─── OPEN / CLOSE ─────────────────────────────────────────────────────────────
 
-export const openCollectionEditor = async (type = null, itemId = null) => {
+export const openCollectionEditor = async (type = null, itemId = null, prefill = null) => {
     _editingId       = itemId || null;
+    _prefillBandName = (!itemId && prefill?.bandName) || null;
     _photos          = [];
     _labels          = [];
     _links           = [];
@@ -1616,6 +1645,7 @@ export const openCollectionEditor = async (type = null, itemId = null) => {
     _dismissedSuggestions = new Set();
     _discogsId       = null;
     _discogsData     = null;
+    _pendingDiscogsUrl = null;
     _selectedType    = type || 'artefact';
     _selectedSubtype = 'cd';
     _extendedOpen    = false; // always start collapsed to Quick Add; _populateForm reopens it for edits with existing extended data
@@ -1701,6 +1731,22 @@ export const openCollectionEditor = async (type = null, itemId = null) => {
     modal.classList.remove('hidden');
     modal.setAttribute('aria-hidden', 'false');
     document.body.style.overflow = 'hidden';
+
+    // Prefill (add mode only): band name and/or a Discogs link, which runs through the
+    // normal lookup path so rate-limit handling and pending-hydrate behave as usual.
+    if (!itemId && prefill) {
+        if (prefill.bandName) {
+            const bi = document.getElementById('col-editor-band-input');
+            if (bi) bi.value = prefill.bandName;
+        }
+        if (prefill.discogsUrl) {
+            const di = document.getElementById('col-editor-discogs-input');
+            if (di) {
+                di.value = prefill.discogsUrl;
+                window.colEditorLookupDiscogs();
+            }
+        }
+    }
     // Do NOT auto-focus the title field — on mobile this opens the keyboard immediately,
     // which is jarring. The photo tile is naturally the first tap on add.
     // document.getElementById('col-editor-title')?.focus();
@@ -1806,6 +1852,9 @@ window.saveCollectionItem = async () => {
 
         const taggedUserIds = _taggedBuddies.map(b => b.id);
 
+        // A link whose lookup was rate-limited this session (and never succeeded since)
+        const pendingDiscogsUrl = _discogsId ? null : _pendingDiscogsUrl;
+
         // 2. Include artist_id in the row payload
         const row = {
             id:               itemId,
@@ -1836,8 +1885,19 @@ window.saveCollectionItem = async () => {
             links:            _links,
             tagged_user_ids:  taggedUserIds.length ? taggedUserIds : null,
             ...(heroColor && { hero_color: heroColor }),
-            discogs_id:       _discogsId,
-            discogs_data:     _discogsData,
+            // Only written when there is something to write. A pending item's
+            // discogs_id/data may have been filled in by the Worker since this editor
+            // opened, and writing null here would erase it.
+            ...(_discogsId && {
+                discogs_id:     _discogsId,
+                discogs_data:   _discogsData,
+                discogs_status: 'complete',
+                ...(_discogsData?.discogs_uri && { discogs_url: _discogsData.discogs_uri }),
+            }),
+            ...(pendingDiscogsUrl && {
+                discogs_url:    pendingDiscogsUrl,
+                discogs_status: 'pending',
+            }),
         };
 
         const { error } = await supabase
@@ -1853,7 +1913,9 @@ window.saveCollectionItem = async () => {
 
         closeCollectionEditor();
         if (window.showToast) window.showToast(
-            _editingId ? 'Item updated ✓' : 'Added to collection ✓',
+            pendingDiscogsUrl
+                ? 'Saved ✓ — Discogs details will fill in shortly'
+                : (_editingId ? 'Item updated ✓' : 'Added to collection ✓'),
             'success'
         );
 
@@ -1870,6 +1932,10 @@ window.saveCollectionItem = async () => {
         // a failed image fetch shouldn't make the user think their save failed.
         _maybeImportSourceImages(itemId, session.user.id, _links);
 
+        // Rate-limited lookup: ask the Worker to finish it now (it queues the work
+        // itself if Discogs is still unavailable).
+        if (pendingDiscogsUrl) _hydrateFromDiscogs(itemId);
+
     } catch (err) {
         console.error('[ColEditor] save failed:', err);
         _showError(err.message || 'Could not save item.');
@@ -1877,6 +1943,30 @@ window.saveCollectionItem = async () => {
         _setBusy(false);
     }
 };
+
+// ─── DISCOGS HYDRATE ─────────────────────────────────────────────────────────
+
+/**
+ * Asks the Worker to fill a just-saved item in from the Discogs link stored on
+ * it (discogs_url). The Worker fetches the release, fills only the fields the
+ * user left empty, attaches the cover, and — if Discogs is still rate-limiting —
+ * queues the job and finishes it later with no further action from the user.
+ * Non-blocking; failures are logged, never shown.
+ */
+function _hydrateFromDiscogs(itemId) {
+    authedFetch(`${IMPORT_WORKER_URL}/hydrate`, {
+        method: 'POST',
+        body: JSON.stringify({ itemId }),
+    })
+        .then(res => res.json())
+        .then(data => {
+            // Discogs may have recovered by now — show the filled-in item
+            if (data?.status === 'complete' && window._refreshCollection) window._refreshCollection();
+        })
+        .catch(err => {
+            console.warn('[ColEditor] Discogs hydrate failed (non-fatal):', err);
+        });
+}
 
 // ─── COVER ART IMPORT ────────────────────────────────────────────────────────
 
@@ -1966,6 +2056,23 @@ window.deleteCollectionItem = async () => {
 // ─── WINDOW HELPERS ──────────────────────────────────────────────────────────
 
 window.openCollectionEditor  = openCollectionEditor;
+
+// Retry button on a collection item whose Discogs details failed (see
+// collection.js): re-submits the link stored on the item to the Worker, which
+// fills it in or queues it again. Resolves to 'complete' | 'pending' | 'failed'.
+window.colRetryDiscogsHydrate = async (itemId) => {
+    try {
+        const res = await authedFetch(`${IMPORT_WORKER_URL}/hydrate`, {
+            method: 'POST',
+            body: JSON.stringify({ itemId }),
+        });
+        const data = await res.json();
+        return data?.status || 'failed';
+    } catch (err) {
+        console.warn('[ColEditor] Discogs retry failed:', err);
+        return 'failed';
+    }
+};
 window.closeCollectionEditor = closeCollectionEditor;
 
 window.colEditorSetType = (type) => {

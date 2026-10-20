@@ -9,7 +9,7 @@
  * Imported and called from app.js after data load when isBandMode.
  *
  * Public API (exposed on window):
- *   window.switchBandView(tab)   — 'gigs' | 'stats' | 'fans'
+ *   window.switchBandView(tab)   — 'gigs' | 'stats' | 'discography' | 'fans'
  *                                   ('shows' / 'summary' still accepted)
  *   window.bandShowsSearch(val)  — sets the shared search box (back-compat)
  *
@@ -22,6 +22,7 @@
 import { supabase }             from './supabase.js';
 import { parseDate, escapeHtml, safeUrl } from './utils.js';
 import { loadPerformances }     from './data.js';
+import { renderBandDiscography } from './band-discography.js';
 
 // ─── Module-level state ───────────────────────────────────────────────────────
 
@@ -104,7 +105,7 @@ function _applyBandCopy() {
 // ─── TAB SWITCHER ─────────────────────────────────────────────────────────────
 
 const _BAND_TAB_ALIASES = { shows: 'gigs', summary: 'stats' };
-const _BAND_TAB_SECTION = { gigs: 'view-data', stats: 'view-stats', fans: 'view-band-fans' };
+const _BAND_TAB_SECTION = { gigs: 'view-data', stats: 'view-stats', discography: 'view-band-discography', fans: 'view-band-fans' };
 
 function switchBandView(tab) {
     tab = _BAND_TAB_ALIASES[tab] || tab;
@@ -124,7 +125,7 @@ function switchBandView(tab) {
     }
 
     // Update band nav active state
-    ['gigs', 'stats', 'fans'].forEach(t => {
+    ['gigs', 'stats', 'discography', 'fans'].forEach(t => {
         const btn = document.getElementById(`band-nav-${t}`);
         if (!btn) return;
         if (t === tab) {
@@ -143,6 +144,7 @@ function switchBandView(tab) {
         window.refreshUI?.();
         if (tab === 'stats') _renderBandStory();
     }
+    if (tab === 'discography') renderBandDiscography();
     if (tab === 'fans') _renderBandFans();
 
     if (window.lucide) lucide.createIcons();

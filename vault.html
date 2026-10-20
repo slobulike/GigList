@@ -1482,6 +1482,20 @@
         </div>
     </section>
 
+    <section id="view-band-discography"
+             class="band-view-section hidden space-y-6"
+             role="region"
+             aria-label="Band Discography"
+             aria-hidden="true">
+
+        <div class="flex items-center justify-between">
+            <h2 class="font-display text-5xl italic tracking-tight text-slate-900">Discography</h2>
+        </div>
+
+        <!-- Populated by band-discography.js -->
+        <div id="band-discography-body"></div>
+    </section>
+
 </main>
 
 <!-- Personal nav — hidden in band mode -->
@@ -1521,6 +1535,12 @@
             aria-current="false" aria-label="Stats">
         <i data-lucide="bar-chart-2" class="w-6" aria-hidden="true"></i>
         <span class="text-[9px] font-black uppercase">Stats</span>
+    </button>
+    <button onclick="window.switchBandView('discography')" id="band-nav-discography"
+            class="band-nav-item text-slate-400 flex flex-col items-center gap-1 flex-1 rounded-xl py-1 transition-all"
+            aria-current="false" aria-label="Discography">
+        <i data-lucide="disc-3" class="w-6" aria-hidden="true"></i>
+        <span class="text-[9px] font-black uppercase">Releases</span>
     </button>
     <button onclick="window.switchBandView('fans')" id="band-nav-fans"
             class="band-nav-item text-slate-400 flex flex-col items-center gap-1 flex-1 rounded-xl py-1 transition-all"

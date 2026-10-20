@@ -19,6 +19,7 @@
  *   window._colSetTypeFilter(subtype)
  *   window._colSetDrillFilter(filter)
  *   window._colToggleDisposed()
+ *   window._colRetryDiscogs(id, btn) — Retry button for items whose Discogs details failed
  */
 
 import { supabase } from './supabase.js';
@@ -185,6 +186,7 @@ async function _fetchItems(userId) {
             'format', 'label', 'catalogue_number', 'condition',
             'labels', 'links', 'tagged_user_ids',
             'still_owned', 'disposed_date', 'disposal_reason',
+            'discogs_url', 'discogs_status',
         ].join(', '))
         .eq('user_id', userId)
         .order('item_date', { ascending: true });
@@ -577,6 +579,23 @@ function _curateShelf(items, max = 8) {
     return [...withStory, ...withPhoto, ...withSigned, ...shuffled].slice(0, max);
 }
 
+// Items saved while Discogs was unavailable: 'pending' means the Worker is still
+// fetching the details in the background, 'failed' means it gave up and the
+// owner can Retry (from the item sheet). Anything else (null, 'complete') shows
+// nothing. Inline styles, so this doesn't depend on which Tailwind utilities
+// happen to be compiled in.
+function _discogsBadge(item) {
+    if (item.discogs_status === 'pending') {
+        return `<span class="inline-block text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full mt-2"
+                      style="background:rgba(245,158,11,0.14);color:#b45309">Fetching details…</span>`;
+    }
+    if (item.discogs_status === 'failed') {
+        return `<span class="inline-block text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full mt-2"
+                      style="background:rgba(244,63,94,0.10);color:#e11d48">Details missing</span>`;
+    }
+    return '';
+}
+
 function _renderShelfItem(item) {
     const [bg, text] = _itemColors(item);
 
@@ -590,6 +609,10 @@ function _renderShelfItem(item) {
 
     const icon      = SUBTYPE_ICONS[item.subtype] || '✦';
     const hasStory  = item.body ? `<div class="absolute top-1 right-1 w-2 h-2 rounded-full bg-[#c8a050]" title="Has a story"></div>` : '';
+    const discogsDot = (item.discogs_status === 'pending' || item.discogs_status === 'failed')
+        ? `<div class="absolute top-1 left-1 w-2 h-2 rounded-full" style="background:${item.discogs_status === 'failed' ? '#fb7185' : '#fbbf24'}"
+                title="${item.discogs_status === 'failed' ? 'Discogs details missing' : 'Fetching details from Discogs'}"></div>`
+        : '';
     const heroPath  = item.photos?.[0];
     const heroUrl   = heroPath ? safeUrl(_signedUrlCache.get(heroPath)) : '';
 
@@ -607,6 +630,7 @@ function _renderShelfItem(item) {
                  style="width:${coverW};height:${coverH};border-radius:${radius};background:${bg};">
                 ${coverInner}
                 ${hasStory}
+                ${discogsDot}
             </div>
             <p class="text-[11px] font-black text-slate-700 mt-1.5 leading-tight truncate" style="max-width:${coverW}">${escapeHtml(item.title)}</p>
             <p class="text-[10px] text-slate-400 truncate" style="max-width:${coverW}">${escapeHtml(item.item_date || '')}</p>
@@ -915,6 +939,7 @@ function _renderGridCard(item) {
                 <p class="text-[10px] text-slate-400 mt-0.5">${escapeHtml(year)}${item.format ? ' · ' + escapeHtml(item.format) : ''}</p>
                 ${item.body ? `<span class="inline-block text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full mt-2" style="background:rgba(200,160,80,0.12);color:#c8a050">Story</span>` : ''}
                 ${item.signed_by ? `<span class="inline-block text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full mt-2 ml-1 bg-slate-100 text-slate-400">Signed</span>` : ''}
+                ${_discogsBadge(item)}
             </div>
         </div>`;
 }
@@ -1079,6 +1104,26 @@ function _renderItemDetail(item) {
             </p>
         </div>` : '';
 
+    // Discogs details still on their way, or given up on (owner gets a Retry).
+    const discogsBanner = item.discogs_status === 'pending' ? `
+        <div class="mx-5 mb-4 p-3 rounded-2xl flex items-start gap-2" style="background:rgba(245,158,11,0.10)">
+            <span class="text-xs mt-0.5" aria-hidden="true">⏳</span>
+            <p class="text-[11px] font-bold leading-snug" style="color:#92400e">
+                Fetching the details from Discogs. They'll fill in automatically, so there's nothing you need to do.
+            </p>
+        </div>` : item.discogs_status === 'failed' ? `
+        <div class="mx-5 mb-4 p-3 rounded-2xl flex items-start gap-2" style="background:rgba(244,63,94,0.08)">
+            <span class="text-xs mt-0.5" aria-hidden="true">⚠️</span>
+            <div class="flex-1 min-w-0">
+                <p class="text-[11px] font-bold leading-snug" style="color:#be123c">We couldn't get the details from Discogs.</p>
+                ${window.currentUser?.id === item.user_id && item.discogs_url ? `
+                <button type="button" data-col-discogs-retry="${escapeHtml(item.id)}"
+                        class="mt-2 text-[11px] font-black px-3 py-1.5 rounded-full bg-white border border-slate-200 text-slate-700 active:scale-95 transition-transform">
+                    Retry
+                </button>` : ''}
+            </div>
+        </div>` : '';
+
     // Tagged buddies — resolve names from _buddyOptions cache or show IDs
     const taggedIds = item.tagged_user_ids || [];
     const taggedHtml = taggedIds.length
@@ -1145,6 +1190,9 @@ const allPhotoUrls = (item.photos || []).map(p => safeUrl(_signedUrlCache.get(p)
 
             <!-- No longer owned -->
             ${disposedBanner}
+
+            <!-- Discogs details pending / failed -->
+            ${discogsBanner}
 
             <!-- Detail rows -->
             ${detailRows.length ? `
@@ -1309,6 +1357,9 @@ window._colCloseLightbox = () => {
 function _handleCollectionClick(e) {
     const openEl = e.target.closest('[data-col-item-id]');
     if (openEl) { window._colOpenItem(openEl.dataset.colItemId); return; }
+
+    const retryEl = e.target.closest('[data-col-discogs-retry]');
+    if (retryEl) { window._colRetryDiscogs(retryEl.dataset.colDiscogsRetry, retryEl); return; }
 
     const editEl = e.target.closest('[data-col-edit-id]');
     if (editEl) { window.openCollectionEditor(null, editEl.dataset.colEditId); return; }
@@ -1476,6 +1527,27 @@ window._colOpenItem = (id) => {
 window._colCloseItem = () => {
     _closeLayerUI('item');
     _releaseLayer('item');
+};
+
+// Retry on an item whose Discogs details failed: re-submits the link stored on
+// the item to the Worker (the editor module owns the Worker URL and auth).
+window._colRetryDiscogs = async (id, btn) => {
+    if (btn) { btn.disabled = true; btn.textContent = 'Retrying…'; }
+    const status = (await window.colRetryDiscogsHydrate?.(id)) || 'failed';
+    await refresh();
+
+    // Redraw the sheet only if it is still open — the retry can take a few
+    // seconds, and the user may have closed it meanwhile.
+    const sheet = document.getElementById('col-item-sheet');
+    const updated = _items.find(i => i.id === id);
+    if (updated && sheet?.getAttribute('aria-hidden') === 'false') _renderItemDetail(updated);
+
+    window.showToast?.(
+        status === 'complete' ? 'Details filled in from Discogs ✓'
+        : status === 'pending' ? "Discogs is still busy. We'll keep trying in the background."
+        : "Still couldn't get the details. Try again later.",
+        status === 'complete' ? 'success' : 'info'
+    );
 };
 
 window._colSetCuration = (key) => {
@@ -1835,6 +1907,8 @@ export async function init(currentUser) {
     // refresh() bypasses this and always re-fetches (called after save/delete).
     if (_items.length > 0) {
         _renderCollectionTab();
+        // Items still waiting on Discogs may have been filled in since we last fetched
+        if (_items.some(i => i.discogs_status === 'pending')) refresh();
         return;
     }
 
