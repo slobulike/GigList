@@ -1,9 +1,8 @@
 /**
  * GigList Core Engine
- * v10.0.0 — 2026-10-20
+ * v10.0.1 — 2026-10-21
  * ------------------------------------------------------------------
- * ✅ Releases added to band mode - syncs with discogs, links to Collection items, and opens albums directly in Spotify
- * ✅ Improved discogs syncing in Collection so this is now automatically added from the queue when successfully received
+ * ✅ Added "warmed" library info to discography and moved to pull from cache instead of live (due to discogs rate limiting)
  */
 
 import * as Data from './modules/data.js';
@@ -45,7 +44,7 @@ import { syncPushSubscription } from './modules/push.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "10.0.0";
+const APP_VERSION = "10.0.1";
 
 // Columns of profiles that the app is allowed to read (see the column grants
 // in Supabase). home_lat / home_lng / home_label are deliberately excluded:

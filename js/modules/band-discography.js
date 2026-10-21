@@ -649,6 +649,7 @@ async function _loadVersions() {
         sh.page   = r.data.pagination?.page || sh.page + 1;
         sh.pages  = r.data.pagination?.pages || 1;
         sh.total  = r.data.pagination?.items ?? sh.versions.length;
+        sh.truncated = !!r.data.truncated;
         sh.facets = r.data.facets || sh.facets;
     } else {
         sh.error = r.data?.rateLimited || r.status === 202
@@ -660,7 +661,11 @@ async function _loadVersions() {
 
 function _facetSelect(name, label, facet) {
     const cur = S.sheet.filters[name] || '';
-    const entries = Object.entries(facet || {}).sort((a, b) => b[1] - a[1]).slice(0, 25);
+    const entries = Object.entries(facet || {});
+    // Years read best chronologically; everything else by how many pressings it covers.
+    if (name === 'released') entries.sort((a, b) => a[0].localeCompare(b[0]));
+    else entries.sort((a, b) => b[1] - a[1]);
+    entries.splice(name === 'released' ? 60 : 25);
     if (cur && !entries.some(([k]) => k === cur)) entries.unshift([cur, 0]);
     return `
     <label class="block">
@@ -718,6 +723,7 @@ function _pressingsHtml() {
         ${!sh.loading && sh.page < sh.pages ? `<button type="button" data-action="more-pressings"
             class="w-full text-xs font-black uppercase tracking-wider py-3 rounded-full border border-slate-200 text-slate-600">Show more</button>` : ''}
         ${!sh.loading && !sh.versions.length && !sh.error ? '<p class="text-sm text-slate-500">No pressings match those filters.</p>' : ''}
+        ${sh.truncated ? '<p class="text-[10px] text-slate-400">Very long list \u2014 showing the first 1,000 pressings.</p>' : ''}
         <p class="text-[10px] text-slate-400">Have/want counts are Discogs community numbers \u2014 a rough rarity cue.</p>
     </div>`;
 }
