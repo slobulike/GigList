@@ -20,9 +20,10 @@
  * Wants live in discogs_wants (master-level: discogs_id null; pressing-level:
  * discogs_id set), never in collection_items.
  *
- * Browsing 80+ releases: a search box (title or year), type chips with counts, and
- * selects for collection status, promos and sort. Filters live in S.filters and
- * survive opening/closing a release; they reset when the band changes.
+ * Browsing 80+ releases: a search box (title or year) with a Filter button, type chips with
+ * counts, and a Filter & sort sheet (collection status, promos, sort). Active sheet filters
+ * show as removable pills under the chips. Filters live in S.filters and survive
+ * opening/closing a release; they reset when the band changes.
  *
  * Data comes from two places:
  *   - Supabase directly (RLS applies): discogs_masters, discogs_wants, collection_items
@@ -39,6 +40,10 @@ import { escapeHtml, safeUrl }   from './utils.js';
 const IMPORT_WORKER_URL = 'https://collection-image-import.richard-lipscombe.workers.dev';
 
 const SPOTIFY_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false"><path fill="#1DB954" d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/></svg>';
+
+const _ICON_ATTRS = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"';
+const SEARCH_ICON = `<svg ${_ICON_ATTRS} width="16" height="16"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>`;
+const FILTER_ICON = `<svg ${_ICON_ATTRS} width="20" height="20"><line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/></svg>`;
 
 const KIND_GROUPS = [
     ['album',       'Albums'],
@@ -58,6 +63,7 @@ const S = {
     userId:   null,
     owned:    new Map(),       // masterId -> [collection item rows]
     ownedPressings: new Set(), // discogs_id values the user owns
+    itemsByRelease: new Map(), // discogs_id -> collection item row
     wants:    new Set(),       // `${masterId}:${discogsId || 0}`
     sheet:    null,            // see _openMaster
     candidates: null,          // admin: Discogs artist search results
@@ -134,7 +140,7 @@ async function _loadCatalogue() {
     if (S.artist) {
         const { data, error: mErr } = await supabase
             .from('discogs_masters')
-            .select('discogs_master_id, title, year, main_release_id, thumb, kind, classified_at, promo, spotify_album_id, hidden, pinned')
+            .select('discogs_master_id, title, year, main_release_id, thumb, cover_url, cover_checked_at, kind, classified_at, promo, spotify_album_id, hidden, pinned')
             .eq('artist_id', S.artist.id)
             .order('year', { ascending: true, nullsFirst: false });
         if (mErr) console.warn('band-discography: masters load failed', mErr.message);
@@ -144,7 +150,7 @@ async function _loadCatalogue() {
 }
 
 async function _loadMine() {
-    S.owned = new Map(); S.ownedPressings = new Set(); S.wants = new Set();
+    S.owned = new Map(); S.ownedPressings = new Set(); S.wants = new Set(); S.itemsByRelease = new Map();
     if (!S.artist || !S.userId) return;
 
     const [itemsRes, wantsRes] = await Promise.all([
@@ -162,6 +168,7 @@ async function _loadMine() {
     const byMain = new Map(S.masters.filter(m => m.main_release_id).map(m => [m.main_release_id, m.discogs_master_id]));
     for (const it of (itemsRes.data || [])) {
         S.ownedPressings.add(it.discogs_id);
+        S.itemsByRelease.set(it.discogs_id, it);
         const rel = Array.isArray(it.discogs_releases) ? it.discogs_releases[0] : it.discogs_releases;
         const masterId = rel?.master_id || byMain.get(it.discogs_id);
         if (!masterId) continue;
@@ -204,19 +211,30 @@ function _draw() {
     // The shell (search box, chips, results container) is built once so typing in the
     // search box never loses focus; later redraws only touch the pieces that changed.
     if (root.dataset.shell !== 'ready') {
+        _ensureStyles();
         root.innerHTML = `
         <div id="band-disco-admin"></div>
         <div class="space-y-3 mb-4">
-            <label class="block">
-                <span class="sr-only">Search releases</span>
-                <input id="band-disco-search" type="search" value="${escapeHtml(S.filters.q)}"
-                       placeholder="Search releases or years" autocomplete="off" enterkeyhint="search"
-                       class="w-full rounded-full border border-slate-200 bg-white px-5 py-3 text-sm text-slate-900 placeholder-slate-400">
-            </label>
-            <div id="band-disco-chips" class="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1" role="group" aria-label="Release type"></div>
-            <div id="band-disco-selects" class="grid grid-cols-3 gap-2"></div>
+            <div class="flex items-center gap-2">
+                <label class="relative block flex-1 min-w-0">
+                    <span class="sr-only">Search releases</span>
+                    <span class="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">${SEARCH_ICON}</span>
+                    <input id="band-disco-search" type="search" value="${escapeHtml(S.filters.q)}"
+                           placeholder="Search releases or years" autocomplete="off" enterkeyhint="search"
+                           class="w-full rounded-full border border-slate-200 bg-white pl-11 pr-5 py-3 text-sm text-slate-900 placeholder-slate-400">
+                </label>
+                <button id="band-disco-filter-btn" type="button" data-action="open-filters" aria-haspopup="dialog" aria-label="Filter and sort"
+                        class="relative shrink-0 w-12 h-12 rounded-full border border-slate-200 bg-white text-slate-600 flex items-center justify-center">
+                    ${FILTER_ICON}
+                    <span id="band-disco-filter-badge" class="hidden absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-[#189BCC] text-white text-[10px] font-black leading-[18px] text-center"></span>
+                </button>
+            </div>
+            <div id="band-disco-chips" class="flex gap-2 overflow-x-auto -mx-1 px-1 pb-1" role="group" aria-label="Release type"></div>
         </div>
-        <div id="band-disco-summary" class="flex items-center justify-between text-xs text-slate-400 mb-6"></div>
+        <div class="mb-6">
+            <div id="band-disco-summary" class="flex items-center justify-between text-xs text-slate-400"></div>
+            <div id="band-disco-active" class="hidden"></div>
+        </div>
         <div id="band-disco-results" class="space-y-8"></div>
         <p class="text-[10px] text-slate-400 mt-8">Release data from Discogs. Listening links open Spotify.</p>`;
         root.dataset.shell = 'ready';
@@ -233,7 +251,13 @@ function _draw() {
 
 const _SORTS = [['year-asc', 'Oldest first'], ['year-desc', 'Newest first'], ['title', 'A\u2013Z']];
 const _OWN_OPTS = [['all', 'Everything'], ['owned', 'In collection'], ['not-owned', 'Not in collection'], ['wanted', 'Wanted']];
-const _PROMO_OPTS = [['all', 'Promos: include'], ['hide', 'Hide promos'], ['only', 'Promos only']];
+const _PROMO_OPTS = [['all', 'Include'], ['hide', 'Hide'], ['only', 'Only']];
+// Labels for the removable pills under the chips (defaults get none).
+const _PILL_LABELS = {
+    own:   { owned: 'In collection', 'not-owned': 'Not in collection', wanted: 'Wanted' },
+    promo: { hide: 'No promos', only: 'Promos only' },
+};
+const _SHEET_KEYS = new Set(['own', 'promo', 'sort']);
 
 function _baseMasters() {
     const admin = _isAdmin();
@@ -266,41 +290,161 @@ function _filtersActive() {
     return !!f.q || f.kind !== 'all' || f.own !== 'all' || f.promo !== 'all';
 }
 
-function _select(name, options, current, label) {
-    return `
-    <label class="block">
-        <span class="sr-only">${escapeHtml(label)}</span>
-        <select data-disco-filter="${name}" class="w-full rounded-full border border-slate-200 bg-white text-xs font-bold text-slate-600 px-3 py-2">
-            ${options.map(([v, l]) => `<option value="${v}" ${v === current ? 'selected' : ''}>${escapeHtml(l)}</option>`).join('')}
-        </select>
-    </label>`;
+// How many of the sheet's filters differ from their defaults (search and type are visible inline).
+function _sheetFilterCount() {
+    const f = S.filters, d = _defaultFilters();
+    return (f.own !== d.own) + (f.promo !== d.promo) + (f.sort !== d.sort);
+}
+
+function _countMatching() {
+    return _baseMasters().filter(m => _passes(m)).length;
+}
+
+// Right/left edge fades on the chip row, only while there is more to scroll in that direction.
+function _syncChipFade() {
+    const el = document.getElementById('band-disco-chips');
+    if (!el) return;
+    el.dataset.more = String(el.scrollWidth - el.clientWidth - el.scrollLeft > 4);
+    el.dataset.less = String(el.scrollLeft > 4);
+}
+
+function _ensureStyles() {
+    if (document.getElementById('band-disco-styles')) return;
+    const fade = (g) => `-webkit-mask-image:${g};mask-image:${g};`;
+    const st = document.createElement('style');
+    st.id = 'band-disco-styles';
+    st.textContent = `
+    #band-disco-chips { scrollbar-width: none; scroll-snap-type: x proximity; }
+    #band-disco-chips::-webkit-scrollbar { display: none; }
+    #band-disco-chips > button { scroll-snap-align: start; }
+    #band-disco-chips[data-more="true"][data-less="false"] { ${fade('linear-gradient(to right,#000 calc(100% - 28px),transparent)')} }
+    #band-disco-chips[data-more="false"][data-less="true"] { ${fade('linear-gradient(to right,transparent,#000 28px)')} }
+    #band-disco-chips[data-more="true"][data-less="true"]  { ${fade('linear-gradient(to right,transparent,#000 28px,#000 calc(100% - 28px),transparent)')} }`;
+    document.head.appendChild(st);
 }
 
 function _drawFilters() {
     const chips = document.getElementById('band-disco-chips');
-    const selects = document.getElementById('band-disco-selects');
-    if (!chips || !selects) return;
+    if (!chips) return;
 
     const pool = _baseMasters().filter(m => _passes(m, true));
-    const counts = { all: pool.length };
+    const counts = {};
     for (const [k] of KIND_GROUPS) counts[k] = pool.filter(m => (m.kind || 'other') === k).length;
 
     const chip = (kind, label) => {
         const active = S.filters.kind === kind;
         if (kind !== 'all' && !counts[kind] && !active) return '';
+        // "All" carries no count: the summary line underneath already says it.
+        const count = kind === 'all' ? '' : ` <span class="font-bold ${active ? 'text-slate-300' : 'text-slate-400'}">${counts[kind]}</span>`;
         return `<button type="button" data-action="filter-kind" data-kind="${kind}" aria-pressed="${active}"
-            class="shrink-0 whitespace-nowrap text-xs font-black uppercase tracking-wider px-4 py-2 rounded-full border ${active ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-500 border-slate-200'}">
-            ${escapeHtml(label)} <span class="${active ? 'text-slate-300' : 'text-slate-400'}">${counts[kind] ?? 0}</span></button>`;
+            class="shrink-0 whitespace-nowrap text-[11px] font-black uppercase tracking-wider px-3.5 py-2 rounded-full border ${active ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-500 border-slate-200'}">${escapeHtml(label)}${count}</button>`;
     };
-    chips.innerHTML = chip('all', 'All') + KIND_GROUPS.map(([k, l]) => chip(k, l)).join('');
 
-    // Only offer the promo filter once at least one release is known to be a promo.
-    const hasPromo = S.masters.some(m => m.promo);
-    selects.className = `grid gap-2 ${hasPromo ? 'grid-cols-3' : 'grid-cols-2'}`;
-    selects.innerHTML =
-        _select('own', _OWN_OPTS, S.filters.own, 'Collection status') +
-        (hasPromo ? _select('promo', _PROMO_OPTS, S.filters.promo, 'Promos') : '') +
-        _select('sort', _SORTS, S.filters.sort, 'Sort order');
+    // Replacing innerHTML resets the scroll position, so keep it and make sure the selected chip is in view.
+    const prevScroll = chips.scrollLeft;
+    chips.innerHTML = chip('all', 'All') + KIND_GROUPS.map(([k, l]) => chip(k, l)).join('');
+    chips.scrollLeft = prevScroll;
+    const on = chips.querySelector('[aria-pressed="true"]');
+    if (on) {
+        const cr = chips.getBoundingClientRect(), ar = on.getBoundingClientRect();
+        if (ar.left < cr.left + 16) chips.scrollLeft -= (cr.left + 16 - ar.left);
+        else if (ar.right > cr.right - 16) chips.scrollLeft += (ar.right - (cr.right - 16));
+    }
+    _syncChipFade();
+
+    // Filter button badge + removable pills for the filters that live in the sheet.
+    const n = _sheetFilterCount();
+    const badge = document.getElementById('band-disco-filter-badge');
+    const btn = document.getElementById('band-disco-filter-btn');
+    if (badge) { badge.textContent = String(n); badge.classList.toggle('hidden', !n); }
+    if (btn) btn.setAttribute('aria-label', n ? `Filter and sort, ${n} applied` : 'Filter and sort');
+
+    const pills = ['own', 'promo']
+        .map(key => ({ key, label: _PILL_LABELS[key][S.filters[key]] }))
+        .filter(p => p.label)
+        .map(({ key, label }) => `<button type="button" data-action="reset-filter" data-filter="${key}" aria-label="Remove filter: ${escapeHtml(label)}"
+            class="inline-flex items-center gap-1 text-[11px] font-bold pl-3 pr-2 py-1 rounded-full bg-sky-50 text-[#189BCC]">${escapeHtml(label)}<span aria-hidden="true" class="text-sm leading-none">&times;</span></button>`);
+    const active = document.getElementById('band-disco-active');
+    if (active) {
+        active.className = pills.length ? 'flex flex-wrap gap-1.5 mt-2' : 'hidden';
+        active.innerHTML = pills.join('');
+    }
+}
+
+// ─── FILTER & SORT SHEET ──────────────────────────────────────────────────────
+
+function _filterSheetEls() {
+    let sheet = document.getElementById('band-disco-filter-sheet');
+    if (!sheet) {
+        sheet = document.createElement('div');
+        sheet.id = 'band-disco-filter-sheet';
+        sheet.className = 'hidden fixed inset-0 z-[60]';
+        sheet.setAttribute('role', 'dialog');
+        sheet.setAttribute('aria-modal', 'true');
+        sheet.setAttribute('aria-label', 'Filter and sort');
+        sheet.setAttribute('aria-hidden', 'true');
+        sheet.innerHTML = `
+            <div data-action="close-filters" class="absolute inset-0 bg-slate-900/50"></div>
+            <div id="band-disco-filter-body" tabindex="-1"
+                 class="absolute inset-x-0 bottom-0 max-h-[90vh] overflow-y-auto bg-white rounded-t-[2rem] p-6 pb-10 outline-none"></div>`;
+        document.body.appendChild(sheet);
+        sheet.addEventListener('click', _onClick);
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') _closeFilters(); });
+    }
+    return { sheet, body: sheet.querySelector('#band-disco-filter-body') };
+}
+
+function _drawFilterSheet() {
+    const { body } = _filterSheetEls();
+    const f = S.filters;
+    const group = (title, name, options) => `
+        <div>
+            <h4 class="text-xs font-black uppercase tracking-widest text-slate-400 mb-2">${escapeHtml(title)}</h4>
+            <div class="flex flex-wrap gap-2" role="radiogroup" aria-label="${escapeHtml(title)}">
+                ${options.map(([v, l]) => {
+                    const on = f[name] === v;
+                    return `<button type="button" role="radio" aria-checked="${on}" data-action="set-filter" data-filter="${name}" data-value="${v}"
+                        class="text-xs font-black uppercase tracking-wider px-4 py-2.5 rounded-full border ${on ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-500 border-slate-200'}">${escapeHtml(l)}</button>`;
+                }).join('')}
+            </div>
+        </div>`;
+
+    const hasPromo = S.masters.some(m => m.promo);   // only offer the promo filter once one is known
+    const n = _countMatching();
+    body.innerHTML = `
+    <div class="relative space-y-6">
+        <button type="button" data-action="close-filters" aria-label="Close"
+                class="absolute top-0 right-0 w-9 h-9 rounded-full bg-slate-100 text-slate-500 text-lg leading-none">&times;</button>
+        <h3 class="font-display text-2xl italic text-slate-900 pr-10">Filter &amp; sort</h3>
+        ${group('Show', 'own', _OWN_OPTS)}
+        ${hasPromo ? group('Promos', 'promo', _PROMO_OPTS) : ''}
+        ${group('Sort by', 'sort', _SORTS)}
+        <div class="flex items-center gap-3 pt-2">
+            <button type="button" data-action="reset-sheet-filters" class="shrink-0 text-xs font-black uppercase tracking-wider text-slate-500 px-2 py-3">Reset</button>
+            <button type="button" data-action="close-filters"
+                    class="flex-1 rounded-full bg-[#189BCC] text-white text-sm font-black uppercase tracking-wider py-3">${n ? `Show ${n} release${n === 1 ? '' : 's'}` : 'No matches'}</button>
+        </div>
+    </div>`;
+}
+
+function _openFilters() {
+    const { sheet, body } = _filterSheetEls();
+    _drawFilterSheet();
+    sheet.classList.remove('hidden');
+    sheet.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+    body.focus();
+}
+
+function _closeFilters() {
+    const sheet = document.getElementById('band-disco-filter-sheet');
+    if (!sheet || sheet.classList.contains('hidden')) return;
+    sheet.classList.add('hidden');
+    sheet.setAttribute('aria-hidden', 'true');
+    document.body.style.overflow = '';
+    _drawFilters();      // chip counts, badge, pills
+    _drawResults();      // the grid only redraws once, on close
+    document.getElementById('band-disco-filter-btn')?.focus();
 }
 
 function _sorter() {
@@ -319,7 +463,7 @@ function _drawResults() {
     const all = _baseMasters();
     const shown = all.filter(m => _passes(m));
 
-    summary.innerHTML = `<span aria-live="polite">${shown.length} of ${all.length} releases</span>
+    summary.innerHTML = `<span aria-live="polite">${_filtersActive() ? `${shown.length} of ${all.length}` : all.length} releases</span>
         ${_filtersActive() ? '<button type="button" data-action="clear-filters" class="font-black uppercase tracking-wider text-[#189BCC]">Clear filters</button>' : ''}`;
 
     if (!shown.length) {
@@ -347,12 +491,13 @@ function _tile(m) {
     const id      = m.discogs_master_id;
     const owned   = S.owned.has(id);
     const wanted  = !owned && S.wants.has(_wantKey(id, null));
-    const thumb   = safeUrl(m.thumb || '');
+    const thumb   = safeUrl(m.cover_url || m.thumb || '');   // cover_url is the full-size art; thumb is a 150px fallback
+    const fallback = safeUrl(m.thumb || '');
     const spotify = _spotifyUrl(m.spotify_album_id);
     const admin   = _isAdmin();
 
     const cover = thumb
-        ? `<img src="${escapeHtml(thumb)}" alt="" loading="lazy" class="w-full h-full object-cover">`
+        ? `<img src="${escapeHtml(thumb)}" ${fallback && fallback !== thumb ? `data-fallback="${escapeHtml(fallback)}" ` : ''}alt="" loading="lazy" decoding="async" class="w-full h-full object-cover">`
         : `<div class="w-full h-full flex items-center justify-center text-slate-300"><i data-lucide="disc-3" class="w-10 h-10" aria-hidden="true"></i></div>`;
 
     const badge = owned
@@ -387,7 +532,7 @@ function _tile(m) {
 // ─── ADMIN: SETUP + CURATION ──────────────────────────────────────────────────
 
 function _adminToolbar() {
-    const pending = S.masters.filter(m => !m.classified_at || m.promo == null).length;
+    const pending = S.masters.filter(m => !m.classified_at || m.promo == null || !m.cover_checked_at).length;
     return `
     <div class="rounded-[1.5rem] bg-slate-50 border border-slate-100 p-4 flex items-center justify-between gap-3 mb-6">
         <div class="text-xs text-slate-500">
@@ -564,7 +709,7 @@ function _masterHtml() {
     const spotify = _spotifyUrl(m.spotify_album_id);
     const owned   = S.owned.get(masterId) || [];
     const wanted  = S.wants.has(_wantKey(masterId, null));
-    const cover   = safeUrl(detail?.image_url || m.thumb || '');
+    const cover   = safeUrl(detail?.image_url || m.cover_url || m.thumb || '');
     const chips   = [...(detail?.genres || []), ...(detail?.styles || [])]
         .map(g => `<span class="text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full bg-slate-100 text-slate-500">${escapeHtml(g)}</span>`).join('');
 
@@ -646,6 +791,14 @@ async function _loadVersions() {
 
     if (r.ok && !r.data?.rateLimited) {
         sh.versions.push(...(r.data.versions || []));
+        // Any pressing we own that appears in this master's list belongs to this master, even
+        // when its cached release row has no master_id yet (see discography-phase3.sql).
+        for (const v of (r.data.versions || [])) {
+            const it = S.itemsByRelease.get(v.id);
+            if (!it) continue;
+            const list = S.owned.get(masterId) || [];
+            if (!list.some(x => x.id === it.id)) { list.push(it); S.owned.set(masterId, list); }
+        }
         sh.page   = r.data.pagination?.page || sh.page + 1;
         sh.pages  = r.data.pagination?.pages || 1;
         sh.total  = r.data.pagination?.items ?? sh.versions.length;
@@ -771,8 +924,20 @@ function _bindOnce(root) {
     if (_bound) return;
     _bound = true;
     root.addEventListener('click', _onClick);
-    root.addEventListener('change', _onFilterChange);
     root.addEventListener('input', _onSearchInput);
+    // scroll and error don't bubble, so listen in the capture phase
+    root.addEventListener('scroll', (e) => { if (e.target.id === 'band-disco-chips') _syncChipFade(); }, true);
+    root.addEventListener('error', _onImgError, true);
+    window.addEventListener('resize', _syncChipFade);
+}
+
+// If a full-size cover fails to load, drop back to the 150px thumb rather than a broken tile.
+function _onImgError(e) {
+    const img = e.target;
+    if (img?.tagName !== 'IMG' || !img.dataset.fallback) return;
+    const fb = img.dataset.fallback;
+    delete img.dataset.fallback;
+    img.src = fb;
 }
 
 let _searchTimer = null;
@@ -785,14 +950,6 @@ function _onSearchInput(e) {
         _drawFilters();
         _drawResults();
     }, 120);
-}
-
-function _onFilterChange(e) {
-    const sel = e.target.closest('select[data-disco-filter]');
-    if (!sel) return;
-    S.filters[sel.dataset.discoFilter] = sel.value;
-    _drawFilters();
-    _drawResults();
 }
 
 function _onClick(e) {
@@ -808,6 +965,27 @@ function _onClick(e) {
             S.filters = _defaultFilters();
             const box = document.getElementById('band-disco-search');
             if (box) box.value = '';
+            _drawFilters();
+            return void _drawResults();
+        }
+        case 'open-filters':   return void _openFilters();
+        case 'close-filters':  return void _closeFilters();
+        case 'set-filter': {
+            const name = el.dataset.filter;
+            if (!_SHEET_KEYS.has(name)) return;
+            S.filters[name] = el.dataset.value;
+            _drawFilterSheet();   // re-renders the buttons, so put keyboard focus back
+            _filterSheetEls().body.querySelector(`[data-filter="${name}"][data-value="${el.dataset.value}"]`)?.focus();
+            return;
+        }
+        case 'reset-sheet-filters': {
+            const d = _defaultFilters();
+            Object.assign(S.filters, { own: d.own, promo: d.promo, sort: d.sort });
+            return void _drawFilterSheet();
+        }
+        case 'reset-filter': {
+            if (!_SHEET_KEYS.has(el.dataset.filter)) return;
+            S.filters[el.dataset.filter] = _defaultFilters()[el.dataset.filter];
             _drawFilters();
             return void _drawResults();
         }
