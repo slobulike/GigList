@@ -1,10 +1,8 @@
 /**
  * GigList Core Engine
- * v10.0.2 — 2026-10-21
+ * v10.1.0 — 2026-10-22
  * ------------------------------------------------------------------
- * ✅ Update to better match "In Collection" with master items view
- * ✅ Improved image quality from discogs
- * ✅ Improved filtering options on band catalogue
+ * ✅ Improved band mode switcher to include modal with artist details
  */
 
 import * as Data from './modules/data.js';
@@ -46,7 +44,7 @@ import { syncPushSubscription } from './modules/push.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "10.0.2";
+const APP_VERSION = "10.1.0";
 
 // Columns of profiles that the app is allowed to read (see the column grants
 // in Supabase). home_lat / home_lng / home_label are deliberately excluded:

@@ -1,9 +1,13 @@
 /**
  * GigList — Switcher Module
- * v1.0.0 — 2026-04-19
+ * v1.1.0 — 2026-10-22
  * -------------------------------------------------------------------
- * Mode switcher panel: Personal / Gig Buddies / Band Archives / Sign Out.
+ * Mode switcher panel: Personal / Band Pages / Want to See / Clashfinder / Sign Out.
  * Extracted from app.js.
+ *
+ * v1.1.0: the Band Pages accordion is replaced by a short list (your
+ * favourites, or the top bands by rank with Weezer pinned) plus an
+ * "All bands" row that opens the Band Browser modal (band-browser.js).
  *
  * Exports:
  *   initModeSwitcher(currentUser, supabaseClient)
@@ -12,13 +16,32 @@
 import { supabase } from './supabase.js';
 import { escapeHtml } from './utils.js';
 
+const PINNED_BAND   = 'Weezer';   // always in the default (no favourites) short list
+const DEFAULT_COUNT = 3;          // default short list size
+const MAX_FAVS      = 4;          // max favourites shown in the switcher
+
 // ─── INIT ─────────────────────────────────────────────────────────────────────
 
 export async function initModeSwitcher(currentUser) {
     if (!currentUser?.isAuthUser) return;
 
-    const { data: bands } = await supabase.from('bands').select('name, rank').order('rank');
-    window._switcherBands = bands || [];
+    // Never let a failed fetch stop the logo handler below from attaching:
+    // without it the logo keeps its href and a tap reloads the whole app.
+    // NB: keep .order('rank') — the default short list is "top bands by rank".
+    // A–Z ordering lives in the Band Browser.
+    try {
+        const [bandsRes, favsRes] = await Promise.all([
+            supabase.from('bands').select('name, rank').order('rank'),
+            supabase.from('user_favourite_bands').select('band_name').order('created_at'),
+        ]);
+        window._switcherBands = bandsRes.data || [];
+        // If the favourites table isn't deployed yet this errors; fall back to no favourites.
+        window._switcherFavs  = favsRes.error ? [] : (favsRes.data || []).map(r => r.band_name);
+    } catch (err) {
+        console.warn('[switcher] could not load bands/favourites', err);
+        window._switcherBands = window._switcherBands || [];
+        window._switcherFavs  = window._switcherFavs  || [];
+    }
 
     const logoLink = document.getElementById('header-logo-link');
     if (!logoLink) return;
@@ -43,6 +66,13 @@ export async function initModeSwitcher(currentUser) {
             !panel.contains(e.target) && !logoLink.contains(e.target)) {
             closeSwitcher();
         }
+    });
+
+    // Band Browser tells us when favourites change; drop the stale panel so
+    // it rebuilds with the new short list next time it opens.
+    window.addEventListener('giglist:favourites-changed', (e) => {
+        window._switcherFavs = e.detail || [];
+        document.getElementById('mode-switcher-panel')?.remove();
     });
 }
 
@@ -75,6 +105,35 @@ function closeSwitcher() {
 // Exposed on window so social.js navigation functions (_switchToFriend etc.) can close the panel
 window._closeSwitcher = closeSwitcher;
 
+// ─── SHORT LIST ───────────────────────────────────────────────────────────────
+
+/**
+ * Which bands appear directly in the switcher.
+ *  - With favourites: up to MAX_FAVS of them, in the order they were favourited.
+ *  - Without: the top DEFAULT_COUNT by rank, with PINNED_BAND guaranteed.
+ * The band you're currently viewing is always included so you can see where you are.
+ * Returns band names.
+ */
+function _shortlist(bands, favs, currentBand) {
+    const known = new Set(bands.map(b => b.name));
+    let picked;
+
+    const validFavs = favs.filter(n => known.has(n));
+    if (validFavs.length) {
+        picked = validFavs.slice(0, MAX_FAVS);
+    } else {
+        picked = bands.slice(0, DEFAULT_COUNT).map(b => b.name);   // bands arrive ordered by rank
+        if (known.has(PINNED_BAND) && !picked.includes(PINNED_BAND) && picked.length) {
+            picked[picked.length - 1] = PINNED_BAND;
+        }
+    }
+
+    if (currentBand && known.has(currentBand) && !picked.includes(currentBand)) {
+        picked.push(currentBand);
+    }
+    return picked;
+}
+
 // ─── BUILD PANEL ──────────────────────────────────────────────────────────────
 
 function _buildSwitcherPanel() {
@@ -82,8 +141,9 @@ function _buildSwitcherPanel() {
     const isPersonal    = currentUser.Type === 'Personal';
     const isBand        = currentUser.Type === 'Band';
     const bands         = window._switcherBands || [];
+    const favs          = window._switcherFavs  || [];
     const currentBand   = isBand ? currentUser.UserName : null;
-    const bandsExpanded     = isBand;
+    const shortlist     = _shortlist(bands, favs, currentBand);
 
     const panel = document.createElement('div');
     panel.id        = 'mode-switcher-panel';
@@ -106,6 +166,8 @@ function _buildSwitcherPanel() {
             </span>
         </button>`;
 
+    const favSet = new Set(favs);
+
     panel.innerHTML = `
         ${row(window.authDisplayName || 'My Gig List',
               'Personal Archive',
@@ -113,22 +175,28 @@ function _buildSwitcherPanel() {
               isPersonal ? '' : "window._switchToPersonal()")}
 
         <div class="border-t border-slate-100">
-            <button onclick="window._toggleBandSection(this)" role="menuitem"
-                    class="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-colors"
-                    aria-expanded="${bandsExpanded}" aria-controls="switcher-band-list">
-                <span class="w-5 flex-shrink-0"></span>
-                <span class="flex-1 text-sm font-black text-slate-900">Band Pages</span>
-                <i data-lucide="chevron-${bandsExpanded ? 'up' : 'down'}" class="w-4 h-4 text-slate-400 pointer-events-none" aria-hidden="true"></i>
-            </button>
-            <div id="switcher-band-list" class="${bandsExpanded ? '' : 'hidden'} bg-slate-50/50">
-                ${bands.map(b => row(
-                    b.name, 'Band Page',
-                    currentBand === b.name,
+            <p class="px-4 pt-3 pb-1 text-sm font-black text-slate-900">Band Pages</p>
+            <div id="switcher-band-list" class="bg-slate-50/50">
+                ${shortlist.map(name => row(
+                    name,
+                    favSet.has(name) ? 'Favourite' : 'Band Page',
+                    currentBand === name,
                     '', 'check',
-                    `data-switch-band="${escapeHtml(b.name)}"`
+                    `data-switch-band="${escapeHtml(name)}"`
                 )).join('')}
                 ${bands.length === 0 ? '<p class="px-4 py-3 text-xs text-slate-400">No band pages yet.</p>' : ''}
             </div>
+            ${bands.length ? `
+            <button onclick="window._closeSwitcher(); window.openBandBrowser();" role="menuitem"
+                    class="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-colors">
+                <span class="w-5 flex-shrink-0 flex items-center justify-center">
+                    <i data-lucide="layout-grid" class="w-4 h-4 text-indigo-400"></i>
+                </span>
+                <span class="flex-1 min-w-0">
+                    <span class="block text-sm font-black text-slate-900">All bands</span>
+                    <span class="block text-[10px] text-slate-400 font-bold uppercase tracking-widest">${bands.length} band page${bands.length === 1 ? '' : 's'}</span>
+                </span>
+            </button>` : ''}
         </div>
 
         <div class="border-t border-slate-100">
@@ -182,21 +250,12 @@ function _buildSwitcherPanel() {
     return panel;
 }
 
-// ─── SECTION TOGGLES ─────────────────────────────────────────────────────────
+// ─── BAND BROWSER (lazy) ──────────────────────────────────────────────────────
+// Loaded on first use so it adds nothing to initial app load.
 
-window._toggleBandSection = (btn) => {
-    const list = document.getElementById('switcher-band-list');
-    if (!list) return;
-    const expanding = list.classList.contains('hidden');
-    list.classList.toggle('hidden');
-    if (btn) {
-        btn.setAttribute('aria-expanded', expanding ? 'true' : 'false');
-        const chevron = btn.querySelector('[data-lucide^="chevron"]');
-        if (chevron) {
-            chevron.setAttribute('data-lucide', expanding ? 'chevron-up' : 'chevron-down');
-            if (window.lucide) lucide.createIcons();
-        }
-    }
+window.openBandBrowser = async () => {
+    const mod = await import('./band-browser.js');
+    mod.openBandBrowser();
 };
 
 // ─── NAVIGATION ───────────────────────────────────────────────────────────────
