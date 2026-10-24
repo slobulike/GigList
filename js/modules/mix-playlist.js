@@ -366,6 +366,9 @@ export const initMixPlaylistCard = async (rootId) => {
     if (!root) return;
     root.innerHTML = '';                                   // (re)start empty so `empty:hidden` applies
     if (!window.currentUser?.isAuthUser) return;
+    // Playlist generation needs the Spotify OAuth connection, which is limited
+    // to spotify_access users (Spotify dev-mode user cap).
+    if (window.currentUser.spotify_access !== true) return;
 
     injectStyles();
     expanded = false;

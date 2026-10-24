@@ -1,11 +1,8 @@
 /**
  * GigList Core Engine
- * v10.2.0 — 2026-10-23
+ * v10.2.1 — 2026-10-24
  * ------------------------------------------------------------------
- * ✅ Small UI changes to switcher and band selector page
- * ✅ sw update to include all modules
- * ✅ Amend load order to use cache first then network to improve speed when network is slow
- * ✅ Added US zip code lookup to "Home" location
+ * ✅ Gated spotify playlist features to users with spotify oauth access
  */
 
 import * as Data from './modules/data.js';
@@ -47,14 +44,14 @@ import { syncPushSubscription } from './modules/push.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "10.2.0";
+const APP_VERSION = "10.2.1";
 
 // Columns of profiles that the app is allowed to read (see the column grants
 // in Supabase). home_lat / home_lng / home_label are deliberately excluded:
 // they're private and only come back via the get_my_home() function.
 // A NEW profiles column must be added here AND granted in Supabase.
 const PROFILE_PUBLIC_COLUMNS =
-    'id, username, rank, is_admin, is_public, companion_acknowledged_keys, display_name, ' +
+    'id, username, rank, is_admin, spotify_access, is_public, companion_acknowledged_keys, display_name, ' +
     'avatar_url, favourite_band, favourite_venue, favourite_show_key, favourite_song, tips_seen';
 
 // ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
@@ -378,7 +375,7 @@ export async function initApp() {
         if (currentUser.Type === 'Band') {
             const { data: authProfile, error: profileErr } = await supabase
                 .from('profiles')
-                .select('username, is_admin')
+                .select('username, is_admin, spotify_access')
                 .eq('id', currentUser.id)
                 .single();
             if (profileErr) {
@@ -390,10 +387,12 @@ export async function initApp() {
                 authDisplayName = basicProfile?.username || 'User';
                 window.authUserProfile = basicProfile;
                 currentUser.is_admin = false;
+                currentUser.spotify_access = false;
             } else {
                 authDisplayName = authProfile?.username || 'User';
                 window.authUserProfile = authProfile;
                 currentUser.is_admin = authProfile?.is_admin || false;
+                currentUser.spotify_access = authProfile?.spotify_access === true;
             }
         } else {
             authDisplayName = currentUser.UserName || currentUser.username || 'User';
