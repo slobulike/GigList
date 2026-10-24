@@ -10,7 +10,7 @@
  *   window.toggleIdentityEdit()      — toggle edit mode for music identity
  *   window.saveIdentity()            — persist music identity fields
  *   window.toggleHomeLocationEdit()  — toggle edit mode for home location
- *   window.saveHomeLocation()        — geocode postcode via postcodes.io, persist
+ *   window.saveHomeLocation()        — geocode UK postcode (postcodes.io) or US zip (zippopotam.us), persist
  *
  * Called from app.js:
  *   initProfile(currentUser)     — populates header avatar, wires privacy toggle
@@ -130,11 +130,47 @@ window.toggleHomeLocationEdit = function() {
         if (btn) btn.textContent = 'Cancel';
         const input = document.getElementById('profile-edit-postcode');
         if (input) {
-            input.value = _currentUser?.home_label || '';
+            // US labels look like "Beverly Hills, CA 90210" — prefill just the zip
+            // so it re-validates; UK labels (postcodes) are used as-is.
+            const lbl = _currentUser?.home_label || '';
+            input.value = /\d{5}$/.test(lbl) ? lbl.slice(-5) : lbl;
             input.focus();
         }
     }
 };
+
+const US_ZIP = /^\d{5}(-\d{4})?$/;
+
+/**
+ * Resolves a UK postcode or US zip code to coordinates. Both providers are
+ * free, keyless and browser-callable (CORS). US zips are 5 digits (optional
+ * -1234 suffix); UK postcodes always contain letters, so no country picker
+ * is needed. Throws if not found.
+ *   UK — postcodes.io
+ *   US — zippopotam.us (GeoNames data; zip centroid, plenty for distance stats)
+ * @returns {Promise<{lat:number, lng:number, label:string}>}
+ */
+async function _geocodePostcode(raw) {
+    const input = raw.trim();
+
+    if (US_ZIP.test(input)) {
+        const zip = input.slice(0, 5); // zippopotam doesn't support ZIP+4
+        const res = await fetch(`https://api.zippopotam.us/us/${zip}`);
+        if (!res.ok) throw new Error('not found');
+        const json = await res.json();
+        const place = json.places?.[0];
+        const lat = parseFloat(place?.latitude);
+        const lng = parseFloat(place?.longitude);
+        if (!place || isNaN(lat) || isNaN(lng)) throw new Error('not found');
+        return { lat, lng, label: `${place['place name']}, ${place['state abbreviation']} ${zip}` };
+    }
+
+    const res  = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(input)}`);
+    const json = await res.json();
+    if (json.status !== 200 || !json.result) throw new Error('not found');
+    // postcodes.io's formatted form, e.g. "SW1A 1AA"
+    return { lat: json.result.latitude, lng: json.result.longitude, label: json.result.postcode };
+}
 
 window.saveHomeLocation = async function() {
     if (!_currentUser?.id) return;
@@ -146,22 +182,14 @@ window.saveHomeLocation = async function() {
     const saveBtn = document.getElementById('profile-home-save-btn');
     if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Checking…'; }
 
-    // postcodes.io — free, no API key, UK-only (matches this app's audience)
-    let result;
+    let home_lat, home_lng, home_label;
     try {
-        const res  = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(postcode)}`);
-        const json = await res.json();
-        if (json.status !== 200 || !json.result) throw new Error('not found');
-        result = json.result;
+        ({ lat: home_lat, lng: home_lng, label: home_label } = await _geocodePostcode(postcode));
     } catch (err) {
-        window.showToast("Couldn't find that postcode — please check and try again", 'error');
+        window.showToast("Couldn't find that postcode or zip code — please check and try again", 'error');
         if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save'; }
         return;
     }
-
-    const home_lat   = result.latitude;
-    const home_lng   = result.longitude;
-    const home_label = result.postcode; // postcodes.io's formatted form, e.g. "SW1A 1AA"
 
     const { error } = await supabase
         .from('profiles')
@@ -1304,4 +1332,3 @@ function _topValue(gigs, field) {
     }
     return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
 }
-

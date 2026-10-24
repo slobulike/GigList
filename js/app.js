@@ -1,8 +1,11 @@
 /**
  * GigList Core Engine
- * v10.1.0 — 2026-10-22
+ * v10.2.0 — 2026-10-23
  * ------------------------------------------------------------------
- * ✅ Improved band mode switcher to include modal with artist details
+ * ✅ Small UI changes to switcher and band selector page
+ * ✅ sw update to include all modules
+ * ✅ Amend load order to use cache first then network to improve speed when network is slow
+ * ✅ Added US zip code lookup to "Home" location
  */
 
 import * as Data from './modules/data.js';
@@ -44,7 +47,7 @@ import { syncPushSubscription } from './modules/push.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "10.1.0";
+const APP_VERSION = "10.2.0";
 
 // Columns of profiles that the app is allowed to read (see the column grants
 // in Supabase). home_lat / home_lng / home_label are deliberately excluded:

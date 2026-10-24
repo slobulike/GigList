@@ -1,13 +1,14 @@
 /**
  * GigList — Switcher Module
- * v1.1.0 — 2026-10-22
+ * v1.2.2 — 2026-10-24
  * -------------------------------------------------------------------
  * Mode switcher panel: Personal / Band Pages / Want to See / Clashfinder / Sign Out.
  * Extracted from app.js.
  *
- * v1.1.0: the Band Pages accordion is replaced by a short list (your
- * favourites, or the top bands by rank with Weezer pinned) plus an
- * "All bands" row that opens the Band Browser modal (band-browser.js).
+ * v1.2.0: the Band Pages accordion is replaced by your favourite bands
+ * plus an "All bands" row that opens the Band Browser modal
+ * (band-browser.js). With no favourites yet, a placeholder below the
+ * "All bands" row explains the list fills once one is added.
  *
  * Exports:
  *   initModeSwitcher(currentUser, supabaseClient)
@@ -16,36 +17,77 @@
 import { supabase } from './supabase.js';
 import { escapeHtml } from './utils.js';
 
-const PINNED_BAND   = 'Weezer';   // always in the default (no favourites) short list
-const DEFAULT_COUNT = 3;          // default short list size
-const MAX_FAVS      = 4;          // max favourites shown in the switcher
+const MAX_FAVS = 4;   // max favourites shown in the switcher
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
 
-export async function initModeSwitcher(currentUser) {
-    if (!currentUser?.isAuthUser) return;
+let _dataPromise = null;
 
-    // Never let a failed fetch stop the logo handler below from attaching:
-    // without it the logo keeps its href and a tap reloads the whole app.
-    // NB: keep .order('rank') — the default short list is "top bands by rank".
-    // A–Z ordering lives in the Band Browser.
-    try {
-        const [bandsRes, favsRes] = await Promise.all([
-            supabase.from('bands').select('name, rank').order('rank'),
-            supabase.from('user_favourite_bands').select('band_name').order('created_at'),
-        ]);
-        window._switcherBands = bandsRes.data || [];
-        // If the favourites table isn't deployed yet this errors; fall back to no favourites.
-        window._switcherFavs  = favsRes.error ? [] : (favsRes.data || []).map(r => r.band_name);
-    } catch (err) {
-        console.warn('[switcher] could not load bands/favourites', err);
-        window._switcherBands = window._switcherBands || [];
-        window._switcherFavs  = window._switcherFavs  || [];
+// ─── EARLY TAP GUARD ──────────────────────────────────────────────────────────
+// app.js calls initModeSwitcher at the very end of boot, so for the first few
+// seconds the logo is still a plain <a href> and a tap reloads the whole app
+// (worse right after a deploy, when boot is slower). This guard runs as soon
+// as this module loads: it swallows early taps and, once the switcher is
+// wired, opens the panel for the person who tapped. If boot never finishes
+// (something threw), after BOOT_GRACE_MS the logo goes back to behaving like a
+// normal link, so it can't be left permanently dead.
+
+const BOOT_GRACE_MS = 20000;
+const _moduleLoadedAt = Date.now();
+let _settled     = false;   // initModeSwitcher has wired the logo (or decided not to)
+let _pendingOpen = false;   // user tapped the logo before it was wired
+
+document.addEventListener('click', (e) => {
+    const link = e.target.closest?.('#header-logo-link');
+    if (!link || _settled) return;
+    if (Date.now() - _moduleLoadedAt > BOOT_GRACE_MS) return;
+    e.preventDefault();
+    _pendingOpen = true;
+}, true);
+
+// Auth-less / no-logo case: nothing to wire. Replay a swallowed tap as a normal link.
+function _settleWithoutSwitcher(logoLink) {
+    _settled = true;
+    if (_pendingOpen) {
+        _pendingOpen = false;
+        const href = logoLink?.getAttribute('href');
+        if (href) window.location.href = href;
+    }
+}
+
+// Fetch the bands + favourites that feed the panel. Never throws.
+function _loadSwitcherData() {
+    return (async () => {
+        try {
+            const [bandsRes, favsRes] = await Promise.all([
+                supabase.from('bands').select('name, rank').order('name'),
+                supabase.from('user_favourite_bands').select('band_name').order('created_at'),
+            ]);
+            window._switcherBands = bandsRes.data || [];
+            // If the favourites table isn't deployed yet this errors; fall back to no favourites.
+            window._switcherFavs  = favsRes.error ? [] : (favsRes.data || []).map(r => r.band_name);
+        } catch (err) {
+            console.warn('[switcher] could not load bands/favourites', err);
+            window._switcherBands = window._switcherBands || [];
+            window._switcherFavs  = window._switcherFavs  || [];
+        }
+    })();
+}
+
+export async function initModeSwitcher(currentUser) {
+    const logoLink = document.getElementById('header-logo-link');
+    if (!currentUser?.isAuthUser || !logoLink) {
+        _settleWithoutSwitcher(logoLink);
+        return;
     }
 
-    const logoLink = document.getElementById('header-logo-link');
-    if (!logoLink) return;
+    // Guard against double init (duplicate listeners would open then instantly close the panel).
+    if (logoLink.dataset.switcherInit === '1') return;
+    logoLink.dataset.switcherInit = '1';
 
+    // Wire the logo FIRST, before any network work. Until this runs the logo is
+    // still a plain link, so a tap reloads the whole app. The data fetch below
+    // can be slow (or fail) without leaving that window open.
     logoLink.removeAttribute('href');
     logoLink.style.cursor = 'pointer';
     logoLink.setAttribute('role', 'button');
@@ -55,8 +97,11 @@ export async function initModeSwitcher(currentUser) {
 
     logoLink.querySelectorAll('*').forEach(el => el.style.pointerEvents = 'none');
 
-    logoLink.addEventListener('click', (e) => {
+    _dataPromise = _loadSwitcherData();
+
+    logoLink.addEventListener('click', async (e) => {
         e.preventDefault();
+        await _dataPromise;      // usually already resolved; only waits if data is still loading
         _toggleSwitcher();
     });
 
@@ -74,6 +119,16 @@ export async function initModeSwitcher(currentUser) {
         window._switcherFavs = e.detail || [];
         document.getElementById('mode-switcher-panel')?.remove();
     });
+
+    // Logo is wired: stop swallowing taps, and open the panel for anyone who
+    // tapped while the app was still booting.
+    _settled = true;
+    if (_pendingOpen) {
+        _pendingOpen = false;
+        _dataPromise.then(_toggleSwitcher);
+    }
+
+    await _dataPromise;
 }
 
 // ─── OPEN / CLOSE ─────────────────────────────────────────────────────────────
@@ -108,25 +163,13 @@ window._closeSwitcher = closeSwitcher;
 // ─── SHORT LIST ───────────────────────────────────────────────────────────────
 
 /**
- * Which bands appear directly in the switcher.
- *  - With favourites: up to MAX_FAVS of them, in the order they were favourited.
- *  - Without: the top DEFAULT_COUNT by rank, with PINNED_BAND guaranteed.
- * The band you're currently viewing is always included so you can see where you are.
- * Returns band names.
+ * Which bands appear directly in the switcher: up to MAX_FAVS favourites, in the
+ * order they were favourited. The band you're currently viewing is always
+ * included so you can see where you are. Returns band names (empty if none).
  */
 function _shortlist(bands, favs, currentBand) {
-    const known = new Set(bands.map(b => b.name));
-    let picked;
-
-    const validFavs = favs.filter(n => known.has(n));
-    if (validFavs.length) {
-        picked = validFavs.slice(0, MAX_FAVS);
-    } else {
-        picked = bands.slice(0, DEFAULT_COUNT).map(b => b.name);   // bands arrive ordered by rank
-        if (known.has(PINNED_BAND) && !picked.includes(PINNED_BAND) && picked.length) {
-            picked[picked.length - 1] = PINNED_BAND;
-        }
-    }
+    const known  = new Set(bands.map(b => b.name));
+    const picked = favs.filter(n => known.has(n)).slice(0, MAX_FAVS);
 
     if (currentBand && known.has(currentBand) && !picked.includes(currentBand)) {
         picked.push(currentBand);
@@ -166,7 +209,8 @@ function _buildSwitcherPanel() {
             </span>
         </button>`;
 
-    const favSet = new Set(favs);
+    const favSet     = new Set(favs);
+    const hasFavs    = favs.some(n => bands.some(b => b.name === n));
 
     panel.innerHTML = `
         ${row(window.authDisplayName || 'My Gig List',
@@ -197,6 +241,8 @@ function _buildSwitcherPanel() {
                     <span class="block text-[10px] text-slate-400 font-bold uppercase tracking-widest">${bands.length} band page${bands.length === 1 ? '' : 's'}</span>
                 </span>
             </button>` : ''}
+            ${bands.length && !hasFavs ? `
+            <p class="px-4 pb-3 pl-12 text-xs text-slate-400 font-bold">Your favourite bands will appear here once you add one.</p>` : ''}
         </div>
 
         <div class="border-t border-slate-100">

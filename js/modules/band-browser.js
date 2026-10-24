@@ -176,7 +176,18 @@ function _buildShell() {
     sortSelect.addEventListener('change', (e) => { _sort = e.target.value; _render(); });
 
     document.body.appendChild(overlay);
-    overlay.querySelector('#band-browser-search').focus({ preventScroll: true });
+
+    // Don't auto-focus search on touch devices: the on-screen keyboard would
+    // cover the band images. Focus the dialog itself instead (keeps Escape and
+    // the focus trap working); desktop users with a mouse still get search.
+    const panel = overlay.querySelector('#band-browser-panel');
+    panel.setAttribute('tabindex', '-1');
+    panel.classList.add('outline-none');
+    if (window.matchMedia('(hover: hover) and (pointer: fine)').matches) {
+        overlay.querySelector('#band-browser-search').focus({ preventScroll: true });
+    } else {
+        panel.focus({ preventScroll: true });
+    }
 }
 
 // ─── RENDER ───────────────────────────────────────────────────────────────────

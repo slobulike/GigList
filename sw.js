@@ -2,7 +2,7 @@
 // Gig List — Service Worker
 // ─────────────────────────────────────────────────────────────────────────────
 
-const CACHE_NAME = 'gig-list-v7';
+const CACHE_NAME = 'gig-list-v9';
 const APP_BASE   = '/GigList/';
 const APP_ROOT   = APP_BASE + 'vault.html';
 
@@ -17,9 +17,58 @@ const ASSETS = [
   './clashfinder.html',
   './css/style.css',
   './js/app.js',
+  './js/modules/achievements.js',
+  './js/modules/act-picker.js',
+  './js/modules/app-cache.js',
+  './js/modules/artist-enrichment.js',
+  './js/modules/artist-images.js',
+  './js/modules/artist-sync.js',
+  './js/modules/band-browser.js',
+  './js/modules/band-discography.js',
+  './js/modules/band.js',
+  './js/modules/buddies.js',
+  './js/modules/calendar.js',
+  './js/modules/capture.js',
+  './js/modules/charts.js',
   './js/modules/clashfinder-sync.js',
+  './js/modules/collection-charts.js',
+  './js/modules/collection-collage.js',
+  './js/modules/collection-editor.js',
+  './js/modules/collection-import.js',
+  './js/modules/collection.js',
+  './js/modules/data.js',
+  './js/modules/deep-link.js',
+  './js/modules/editor.js',
+  './js/modules/feed.js',
+  './js/modules/filters.js',
+  './js/modules/games.js',
+  './js/modules/idb-mailbox.js',
+  './js/modules/install-prompt.js',
+  './js/modules/mix-playlist.js',
+  './js/modules/modal-tips.js',
+  './js/modules/notifications.js',
+  './js/modules/onboarding.js',
+  './js/modules/photo-crop.js',
+  './js/modules/profile.js',
+  './js/modules/push.js',
+  './js/modules/puzzle.js',
+  './js/modules/quiz.js',
+  './js/modules/setlist-sync.js',
+  './js/modules/social.js',
+  './js/modules/spotify-auth.js',
+  './js/modules/spotify.js',
+  './js/modules/stats-share.js',
+  './js/modules/stats-switcher.js',
   './js/modules/supabase.js',
+  './js/modules/switcher.js',
+  './js/modules/tip-dots.js',
+  './js/modules/tip-nudges.js',
+  './js/modules/tips-hub.js',
+  './js/modules/tips-registry.js',
+  './js/modules/ui.js',
   './js/modules/utils.js',   // imported directly by index.html (escapeHtml)
+  './js/modules/weezer-wednesday.js',
+  './js/modules/wishlist.js',
   './manifest.json',
   './data/users.csv',
   './data/venues.csv',
@@ -73,11 +122,27 @@ async function writePendingDeepLink(intent) {
   });
 }
 
+// Third-party hosts whose static scripts/styles/fonts are cached too, so the UI
+// still renders with no signal. TRIM THIS to what vault.html / index.html
+// actually load. Never put API hosts here (Supabase, Workers): data must stay live.
+const CACHEABLE_CDN_HOSTS = [
+  'cdn.tailwindcss.com',
+  'cdn.jsdelivr.net',
+  'cdnjs.cloudflare.com',
+  'unpkg.com',
+  'fonts.googleapis.com',
+  'fonts.gstatic.com',
+];
+
 // ─── Install ──────────────────────────────────────────────────────────────────
+// Each asset is cached independently, so one 404 no longer aborts the whole
+// install (cache.addAll is all-or-nothing).
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
+    caches.open(CACHE_NAME).then((cache) =>
+      Promise.allSettled(ASSETS.map((url) => cache.add(url)))
+    )
   );
   self.skipWaiting();
 });
@@ -95,31 +160,58 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// ─── Fetch: network-first, cache fallback ─────────────────────────────────────
+// ─── Fetch: stale-while-revalidate ────────────────────────────────────────────
 //
-// Strategy:
-//   - Always try the network first.
-//   - On failure (offline), serve from cache if available.
-//   - Cross-origin requests (CDN, Supabase API) are never cached — let them
-//     fail naturally so the app's offline fallback logic can handle it.
+// Built for gigs and festivals where signal is patchy or absent:
+//   - If we have a cached copy, return it IMMEDIATELY, with no waiting on a
+//     slow or dead network.
+//   - In the background, fetch a fresh copy (revalidating with the server) and
+//     store it, so the NEXT load gets the latest version.
+//   - If there's no cached copy, go to the network and cache the result.
+//   - Offline navigations like vault.html?open=123 fall back to the cached
+//     vault.html (query string ignored), so notification deep links still open.
+//   - API traffic (Supabase, Workers, etc.) is never touched.
+//
+// Trade-off: after a deploy, the first load shows the previous version and the
+// update lands on the load after that.
+
+async function staleWhileRevalidate(event, req, sameOrigin) {
+  const cache  = await caches.open(CACHE_NAME);
+  const cached = await cache.match(req);
+
+  const refresh = fetch(req, sameOrigin ? { cache: 'no-cache' } : undefined)
+    .then((res) => {
+      if (res.ok || res.type === 'opaque') {
+        cache.put(req, res.clone()).catch(() => {});   // e.g. 206 partial content can't be cached
+      }
+      return res;
+    })
+    .catch(() => null);
+
+  if (cached) {
+    event.waitUntil(refresh);   // keep the worker alive until the background update finishes
+    return cached;
+  }
+
+  const res = await refresh;
+  if (res) return res;
+
+  if (req.mode === 'navigate') {
+    const fallback = await cache.match(req, { ignoreSearch: true });
+    if (fallback) return fallback;
+  }
+  return Response.error();
+}
 
 self.addEventListener('fetch', (event) => {
-  // Only handle same-origin GET requests
-  if (event.request.method !== 'GET') return;
-  if (!event.request.url.startsWith(self.location.origin)) return;
+  const req = event.request;
+  if (req.method !== 'GET') return;
 
-  event.respondWith(
-    fetch(event.request)
-      .then((response) => {
-        // Opportunistically update the cache for precached assets
-        if (response.ok) {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
-        }
-        return response;
-      })
-      .catch(() => caches.match(event.request))
-  );
+  const url        = new URL(req.url);
+  const sameOrigin = url.origin === self.location.origin;
+  if (!sameOrigin && !CACHEABLE_CDN_HOSTS.includes(url.hostname)) return;
+
+  event.respondWith(staleWhileRevalidate(event, req, sameOrigin));
 });
 
 // ─── Push display ─────────────────────────────────────────────────────────────
