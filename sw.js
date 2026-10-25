@@ -2,7 +2,7 @@
 // Gig List — Service Worker
 // ─────────────────────────────────────────────────────────────────────────────
 
-const CACHE_NAME = 'gig-list-v9';
+const CACHE_NAME = 'gig-list-v10';
 const APP_BASE   = '/GigList/';
 const APP_ROOT   = APP_BASE + 'vault.html';
 
@@ -160,20 +160,77 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// ─── Fetch: stale-while-revalidate ────────────────────────────────────────────
+// ─── Fetch ────────────────────────────────────────────────────────────────────
 //
-// Built for gigs and festivals where signal is patchy or absent:
-//   - If we have a cached copy, return it IMMEDIATELY, with no waiting on a
-//     slow or dead network.
-//   - In the background, fetch a fresh copy (revalidating with the server) and
-//     store it, so the NEXT load gets the latest version.
-//   - If there's no cached copy, go to the network and cache the result.
-//   - Offline navigations like vault.html?open=123 fall back to the cached
-//     vault.html (query string ignored), so notification deep links still open.
+// Built for gigs and festivals where signal is patchy or absent, without ever
+// mixing old and new versions of the app's code in one page load (an old
+// module imported by a new app.js can fail to load and blank the whole app):
+//
+//   - Pages: network first, but give up after NAV_TIMEOUT_MS and use the cached
+//     copy. Whichever way it went is remembered for that page (by client id).
+//   - Code/data (.js .css .json .csv) for a page that came from the network:
+//     network first (longer timeout), cached copy as the offline fallback.
+//   - Code/data for a page that came from the cache: cache only (network only
+//     for a file that was never cached), and nothing is written back, so the
+//     whole load is the one cached version and the cache never ends up half
+//     old, half new.
+//   - Images, fonts and the CDN hosts: stale-while-revalidate. Mixing versions
+//     of these is harmless.
+//   - Pages are cached by path (query string dropped), so vault.html?open=123
+//     doesn't create a new entry every time and deep links still open offline.
 //   - API traffic (Supabase, Workers, etc.) is never touched.
-//
-// Trade-off: after a deploy, the first load shows the previous version and the
-// update lands on the load after that.
+
+const NAV_TIMEOUT_MS  = 3000;
+const CODE_TIMEOUT_MS = 8000;
+const CODE_PATH       = /(?:\/|\.(?:html|js|mjs|css|json|csv))$/i;
+
+// Client ids of pages served from the cache. Lost if the browser stops the
+// worker mid-load — those requests then just go network-first, as normal.
+const _cachedPageClients = new Set();
+
+function _fetchWithTimeout(req, ms) {
+  const ctrl  = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  // no-cache: revalidate with the server instead of trusting the HTTP cache
+  return fetch(req, { cache: 'no-cache', signal: ctrl.signal }).finally(() => clearTimeout(timer));
+}
+
+// Network first; on timeout/offline, the cached copy. Returns { res, fromCache }.
+async function networkFirst(event, req, cacheKey, timeoutMs) {
+  const cache = await caches.open(CACHE_NAME);
+  try {
+    const res = await _fetchWithTimeout(req, timeoutMs);
+    if (res.ok && res.type === 'basic') {
+      event.waitUntil(cache.put(cacheKey, res.clone()).catch(() => {}));
+    }
+    return { res, fromCache: false };
+  } catch {
+    const cached = await cache.match(cacheKey, { ignoreSearch: req.mode === 'navigate' });
+    return { res: cached || Response.error(), fromCache: !!cached };
+  }
+}
+
+async function handlePage(event, req, url) {
+  const cacheKey = url.origin + url.pathname;
+  const { res, fromCache } = await networkFirst(event, req, cacheKey, NAV_TIMEOUT_MS);
+  const id = event.resultingClientId;
+  if (id) {
+    if (fromCache) _cachedPageClients.add(id);
+    else _cachedPageClients.delete(id);
+    // Keep the set small: drop the oldest entries
+    while (_cachedPageClients.size > 20) _cachedPageClients.delete(_cachedPageClients.values().next().value);
+  }
+  return res;
+}
+
+async function handleCode(event, req) {
+  if (event.clientId && _cachedPageClients.has(event.clientId)) {
+    const cached = await caches.match(req, { cacheName: CACHE_NAME });
+    if (cached) return cached;
+    try { return await fetch(req); } catch { return Response.error(); }
+  }
+  return (await networkFirst(event, req, req, CODE_TIMEOUT_MS)).res;
+}
 
 async function staleWhileRevalidate(event, req, sameOrigin) {
   const cache  = await caches.open(CACHE_NAME);
@@ -193,14 +250,7 @@ async function staleWhileRevalidate(event, req, sameOrigin) {
     return cached;
   }
 
-  const res = await refresh;
-  if (res) return res;
-
-  if (req.mode === 'navigate') {
-    const fallback = await cache.match(req, { ignoreSearch: true });
-    if (fallback) return fallback;
-  }
-  return Response.error();
+  return (await refresh) || Response.error();
 }
 
 self.addEventListener('fetch', (event) => {
@@ -211,7 +261,13 @@ self.addEventListener('fetch', (event) => {
   const sameOrigin = url.origin === self.location.origin;
   if (!sameOrigin && !CACHEABLE_CDN_HOSTS.includes(url.hostname)) return;
 
-  event.respondWith(staleWhileRevalidate(event, req, sameOrigin));
+  if (sameOrigin && req.mode === 'navigate') {
+    event.respondWith(handlePage(event, req, url));
+  } else if (sameOrigin && CODE_PATH.test(url.pathname)) {
+    event.respondWith(handleCode(event, req));
+  } else {
+    event.respondWith(staleWhileRevalidate(event, req, sameOrigin));
+  }
 });
 
 // ─── Push display ─────────────────────────────────────────────────────────────

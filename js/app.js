@@ -1,8 +1,8 @@
 /**
  * GigList Core Engine
- * v10.2.1 — 2026-10-24
+ * v10.2.2 — 2026-10-25
  * ------------------------------------------------------------------
- * ✅ Gated spotify playlist features to users with spotify oauth access
+ * ✅ Opus 5.5 review
  */
 
 import * as Data from './modules/data.js';
@@ -39,12 +39,12 @@ import { openPhotoCropModal } from './modules/photo-crop.js';
 import './modules/collection-charts.js';
 import './modules/stats-switcher.js';
 import { initMixPlaylistCard } from './modules/mix-playlist.js';
-import { syncPushSubscription } from './modules/push.js';
+import { syncPushSubscription, initPushUI } from './modules/push.js';
 
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "10.2.1";
+const APP_VERSION = "10.2.2";
 
 // Columns of profiles that the app is allowed to read (see the column grants
 // in Supabase). home_lat / home_lng / home_label are deliberately excluded:
@@ -564,8 +564,12 @@ export async function initApp() {
         if (cachedStart && earlyStatsPromise) await earlyStatsPromise;   // achievements read these
         await Promise.all([
             initBuddies(currentUser),
-            syncPushSubscription(supabase).then(() => initProfile(currentUser)),
+            initProfile(currentUser),
         ]);
+        // Push self-heal needs the network (VAPID key + DB), so it runs in the
+        // background rather than holding up the profile on a slow connection.
+        // If it rebuilt the subscription, redraw the toggle to match.
+        syncPushSubscription(supabase).then(healed => { if (healed) initPushUI(supabase); });
     }
 
     // App is fully ready — flush any queued deep-link intent

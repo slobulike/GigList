@@ -112,6 +112,17 @@ const resolveAudioContent = async (entry, gigIsPast, { allowGenericFallback = fa
     const playlistId = playlistIdFromUrl(existing?.playlist_url);
     if (playlistId) return { kind: 'embed', playlistId, entry, gigIsPast, allowGenericFallback };
 
+    // Nothing to generate a playlist from (or no way to generate one): offer
+    // the generic artist embed where the caller allows it, otherwise nothing.
+    const noCta = () => (allowGenericFallback && entry.SpotifyArtistId)
+        ? { kind: 'generic', entry, gigIsPast, allowGenericFallback }
+        : null;
+
+    // Generating needs the Spotify OAuth connection, limited to spotify_access
+    // users (Spotify dev-mode user cap). Playlists made before access was lost
+    // still embed above — only the generate CTA is withheld.
+    if (window.currentUser.spotify_access !== true) return noCta();
+
     // A past show with no usable setlist can never generate a Relive
     // playlist (Get Gig Ready doesn't need one — it pulls a live setlist.fm
     // lookup instead), so don't invite a tap that's guaranteed to fail.
@@ -120,12 +131,7 @@ const resolveAudioContent = async (entry, gigIsPast, { allowGenericFallback = fa
             p['Journal Key'] === entry['Journal Key'] &&
             (p.Artist || '').toLowerCase() === (entry.Band || '').toLowerCase()
         );
-        if (!hasUsableSetlist(performance?.Setlist)) {
-            if (allowGenericFallback && entry.SpotifyArtistId) {
-                return { kind: 'generic', entry, gigIsPast, allowGenericFallback };
-            }
-            return null;
-        }
+        if (!hasUsableSetlist(performance?.Setlist)) return noCta();
     }
 
     return { kind: 'cta', entry, gigIsPast, allowGenericFallback };
@@ -232,6 +238,7 @@ export const initModalAudioAction = async (journalKey, gigIsPast) => {
 };
 
 window.generateSlotPlaylist = async (slotId, journalKey, artistName, gigDate, venueName, gigIsPast, allowGenericFallback = false) => {
+    if (window.currentUser?.spotify_access !== true) return;   // CTA is never painted for these users; belt and braces
     const slot = document.getElementById(slotId);
     if (slot) {
         const theme = slotTheme(slotId);

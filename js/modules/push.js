@@ -85,9 +85,15 @@ export async function getPushState(supabase = null) {
 
 // ─── SELF-HEAL ────────────────────────────────────────────────────────────────
 
+// The in-flight sync, so a toggle tap made while it runs waits for it rather
+// than racing it (both would subscribe/unsubscribe the same browser).
+let _syncing = null;
+
 /**
- * Call once per app open (personal mode, signed in), BEFORE initPushUI so the
- * settings toggle reads the healed state. Never throws and never prompts.
+ * Call once per app open (personal mode, signed in). Runs in the background —
+ * it needs the network (VAPID key + DB) and must never hold up the UI. Returns
+ * true if it re-created the subscription, so the caller can re-run initPushUI
+ * to show the healed state. Never throws and never prompts.
  *
  * Recreates the subscription silently when the user has opted in but:
  *   - the browser has no subscription any more (opt-in flag still set),
@@ -95,20 +101,25 @@ export async function getPushState(supabase = null) {
  *   - the DB row is missing (e.g. the Worker pruned it after a 404/410).
  * Does nothing if notifications are off, denied, or already healthy.
  */
-export async function syncPushSubscription(supabase) {
+export function syncPushSubscription(supabase) {
+  _syncing = _syncPushSubscription(supabase).finally(() => { _syncing = null; });
+  return _syncing;
+}
+
+async function _syncPushSubscription(supabase) {
   try {
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return false;
     // Resubscribing without a prompt is only possible once permission is granted
-    if (Notification.permission !== 'granted') return;
+    if (Notification.permission !== 'granted') return false;
 
     const reg = await navigator.serviceWorker.ready;
     const existing = await reg.pushManager.getSubscription();
 
     // No subscription and no record that they opted in → they're off. Leave it.
-    if (!existing && !getOptIn()) return;
+    if (!existing && !getOptIn()) return false;
 
     const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return;
+    if (!session) return false;
     const userId = session.user.id;
 
     const vapidKey = await getVapidPublicKey();
@@ -122,7 +133,7 @@ export async function syncPushSubscription(supabase) {
 
       if (row) {
         setOptIn(true); // healthy — also migrates users who subscribed before the flag existed
-        return;
+        return false;
       }
       // Browser subscription is fine but its DB row is gone → fall through and recreate
     }
@@ -148,14 +159,17 @@ export async function syncPushSubscription(supabase) {
 
     setOptIn(true);
     console.log('[Push] Subscription re-created');
+    return true;
   } catch (err) {
     console.warn('[Push] Subscription sync failed:', err);
+    return false;
   }
 }
 
 // ─── SUBSCRIBE ────────────────────────────────────────────────────────────────
 
 export async function subscribeToPush(supabase) {
+  await _syncing;
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
     window.showToast('Push notifications aren\'t supported in this browser', 'warning');
     return false;
@@ -223,7 +237,9 @@ export async function subscribeToPush(supabase) {
 
 export async function unsubscribeFromPush(supabase) {
   try {
-    // Deliberate opt-out: clear first so sync never resurrects it
+    // Deliberate opt-out: let any in-flight sync finish (it may set the flag),
+    // then clear it so no later sync resurrects the subscription
+    await _syncing;
     setOptIn(false);
 
     const reg = await navigator.serviceWorker.ready;
