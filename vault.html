@@ -38,6 +38,61 @@
         /* Band headers land on dark colours: keep the title white whatever else sets its colour */
         body.band-mode #header-page-title { color: #fff !important; }
     </style>
+    <script>
+        // The mode (band / community / personal) is read from the URL before first
+        // paint, so moving between modes never flashes the wrong one. band.js and
+        // community.js remove their class when the real views take over; the
+        // timeouts are a safety net if boot never gets that far.
+        (function () {
+            var root = document.documentElement;
+            var p    = new URLSearchParams(location.search);
+            var band = (p.get('band') || '').trim();
+            if (band) {
+                root.classList.add('band-boot');
+                try {
+                    var c = localStorage.getItem('gl_brand:' + band.toLowerCase());
+                    if (c) root.style.setProperty('--band-boot-color', c);
+                } catch (e) {}
+                document.addEventListener('DOMContentLoaded', function () {
+                    var t = document.getElementById('header-page-title');
+                    if (t) t.textContent = band;
+                    document.body.classList.add('band-mode');
+                });
+                setTimeout(function () { root.classList.remove('band-boot'); }, 20000);
+            } else if (p.has('community')) {
+                root.classList.add('community-boot');
+                setTimeout(function () {
+                    if (!window.isCommunityMode) root.classList.remove('community-boot');
+                }, 20000);
+            }
+        })();
+    </script>
+    <style>
+        /* Community: show its shell, not the personal home */
+        .community-boot #view-home,
+        .community-boot #main-nav { display: none !important; }
+        .community-boot #view-community { display: block !important; }
+        .community-boot #community-nav { display: flex !important; }
+
+        /* Band page: band header + nav and a skeleton, not the personal home */
+        .band-boot header { background-color: var(--band-boot-color, #189BCC) !important; backdrop-filter: none !important; border-bottom-color: rgba(0,0,0,.1) !important; }
+        .band-boot #header-page-title { color: #fff !important; }
+        .band-boot #header-date-display { color: rgba(255,255,255,.7) !important; }
+        .band-boot #header-logo-icon { background-color: rgba(255,255,255,.2) !important; box-shadow: none !important; }
+        .band-boot #main-nav { display: none !important; }
+        .band-boot #band-nav { display: flex !important; }
+        .band-boot .view-section { display: none !important; }
+        #band-boot-skeleton { display: none; }
+        .band-boot #band-boot-skeleton { display: block; }
+        /* Once in band mode, remember the band's colour from last visit (band.js still overrides inline) */
+        body.band-mode header { background-color: var(--band-boot-color, #189BCC); }
+
+        /* One header across modes: colour changes ease instead of snapping, and
+           browsers with cross-document view transitions morph it between pages. */
+        header { transition: background-color .3s ease; }
+        @view-transition { navigation: auto; }
+        body > header { view-transition-name: app-header; }
+    </style>
     <link rel="stylesheet" href="css/style.css">
     <link rel="icon" type="image/png" href="assets/icon-512.png">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎸</text></svg>">
@@ -75,6 +130,15 @@
 <main class="pt-20 pb-32 px-4 max-w-md mx-auto">
     <!-- Band mode only: compact hero shown above every band tab (band.js) -->
     <div id="band-hero" class="band-only mb-4"></div>
+
+    <div id="band-boot-skeleton" aria-hidden="true">
+        <div class="animate-pulse space-y-4">
+            <div class="h-12 bg-slate-200 rounded-2xl"></div>
+            <div class="h-20 bg-slate-200 rounded-[2rem]"></div>
+            <div class="h-20 bg-slate-200 rounded-[2rem]"></div>
+            <div class="h-20 bg-slate-200 rounded-[2rem]"></div>
+        </div>
+    </div>
 
 
     <section id="view-home" class="view-section space-y-4" aria-hidden="false">
@@ -545,6 +609,26 @@
             <div class="animate-pulse space-y-4">
                 <div class="h-64 bg-slate-200 rounded-[2rem]"></div>
                 <div class="h-64 bg-slate-200 rounded-[2rem]"></div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ── COMMUNITY VIEW ─────────────────────────────────────────────── -->
+    <section id="view-community" class="view-section hidden space-y-4 pb-4" role="region" aria-label="Community" aria-hidden="true">
+        <div class="flex justify-between items-end mb-2">
+            <div>
+                <h2 class="font-display text-5xl italic tracking-tight text-slate-900">Community</h2>
+                <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-0.5">Everyone on GigList</p>
+            </div>
+            <button type="button" id="community-share-btn"
+                    class="w-10 h-10 rounded-full bg-white border border-slate-100 shadow-sm flex items-center justify-center text-slate-500 hover:text-indigo-600 active:scale-95 transition-all"
+                    aria-label="Share this page">
+                <i data-lucide="share-2" class="w-4 h-4" aria-hidden="true"></i>
+            </button>
+        </div>
+        <div id="community-body" class="space-y-4" aria-live="polite">
+            <div class="animate-pulse space-y-4">
+                <div class="h-40 bg-slate-200 rounded-[2rem]"></div>
             </div>
         </div>
     </section>
@@ -1505,7 +1589,7 @@
         <span class="text-[9px] font-black uppercase">Home</span>
     </button>
     <button onclick="switchView('data')" id="nav-data" class="nav-item text-slate-400 flex flex-col items-center gap-1 flex-1" aria-current="false" aria-label="Gigs">
-        <i data-lucide="database" class="w-6" aria-hidden="true"></i>
+        <i data-lucide="ticket" class="w-6" aria-hidden="true"></i>
         <span class="text-[9px] font-black uppercase">Gigs</span>
     </button>
     <button onclick="switchView('stats')" id="nav-stats" class="nav-item text-slate-400 flex flex-col items-center gap-1 flex-1" aria-current="false" aria-label="Stats">
@@ -1522,12 +1606,32 @@
     </button>
 </nav>
 
+<!-- Community nav — hidden unless Community is open -->
+<nav id="community-nav" class="hidden fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-2xl border-t border-slate-100 px-6 pt-3 pb-8 flex justify-between items-center z-50" aria-label="Community navigation">
+    <button type="button" id="community-nav-feed" data-community-tab="feed" class="nav-item text-slate-400 flex flex-col items-center gap-1 flex-1" aria-current="false" aria-label="Feed">
+        <i data-lucide="sparkles" class="w-6" aria-hidden="true"></i>
+        <span class="text-[9px] font-black uppercase">Feed</span>
+    </button>
+    <button type="button" id="community-nav-gigs" data-community-tab="gigs" class="nav-item text-slate-400 flex flex-col items-center gap-1 flex-1" aria-current="false" aria-label="Gigs">
+        <i data-lucide="ticket" class="w-6" aria-hidden="true"></i>
+        <span class="text-[9px] font-black uppercase">Gigs</span>
+    </button>
+    <button type="button" id="community-nav-stats" data-community-tab="stats" class="nav-item text-slate-400 flex flex-col items-center gap-1 flex-1" aria-current="false" aria-label="Stats">
+        <i data-lucide="bar-chart-2" class="w-6" aria-hidden="true"></i>
+        <span class="text-[9px] font-black uppercase">Stats</span>
+    </button>
+    <button type="button" id="community-nav-fans" data-community-tab="fans" class="nav-item text-slate-400 flex flex-col items-center gap-1 flex-1" aria-current="false" aria-label="Fans">
+        <i data-lucide="users" class="w-6" aria-hidden="true"></i>
+        <span class="text-[9px] font-black uppercase">Fans</span>
+    </button>
+</nav>
+
 <!-- Band mode nav — hidden by default, shown in band mode via JS -->
 <nav id="band-nav" class="hidden fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-2xl border-t border-slate-100 px-6 pt-3 pb-8 flex justify-between items-center z-50" aria-label="Band navigation">
     <button onclick="window.switchBandView('gigs')" id="band-nav-gigs"
             class="band-nav-item active text-[#189BCC] bg-white shadow-sm flex flex-col items-center gap-1 flex-1 rounded-xl py-1 transition-all"
             aria-current="page" aria-label="Gigs">
-        <i data-lucide="database" class="w-6" aria-hidden="true"></i>
+        <i data-lucide="ticket" class="w-6" aria-hidden="true"></i>
         <span class="text-[9px] font-black uppercase">Gigs</span>
     </button>
     <button onclick="window.switchBandView('stats')" id="band-nav-stats"

@@ -1,8 +1,9 @@
 /**
  * GigList Core Engine
- * v10.2.2 — 2026-10-25
+ * v10.3.0 — 2026-10-27
  * ------------------------------------------------------------------
- * ✅ Opus 5.5 review
+ * ✅ Community mode added
+ * ✅ Started refactor of mode management so avoid reloading full site when switching
  */
 
 import * as Data from './modules/data.js';
@@ -40,6 +41,11 @@ import './modules/collection-charts.js';
 import './modules/stats-switcher.js';
 import { initMixPlaylistCard } from './modules/mix-playlist.js';
 import { syncPushSubscription, initPushUI } from './modules/push.js';
+import './modules/community.js';
+import './modules/community-gigs.js';
+import './modules/community-stats.js';
+import './modules/community-feed.js';
+import './modules/community-fans.js';
 
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
@@ -178,39 +184,69 @@ export async function initApp() {
     let earlyStatsPromise   = null;
     let earlyProfilePromise = null;
     let cachedStart         = null;   // set when first paint comes from the local cache
+    let cachedBandStart     = null;   // same, for a band page
+    let bandFresh           = null;   // { rowPromise, dataPromise } revalidating a cached band page
+    let bandAuthProfilePromise = null; // signed-in viewer's profile, fetched alongside the band row
 
-    // TODO: Re-enable once Profile screens exist. Friend mode (persona-swap via ?friend= URL param)
-    // has been retired in favour of the buddy filter bar in the Data tab. Keep this block so it's
-    // easy to restore when we build profile pages — at that point ?friend= will navigate to a
-    // profile screen rather than loading someone else's journal data as your own.
-    //
-    // if (friendParam && session) {
-    //     currentUser = {
-    //         ...( (await supabase.from('profiles').select('*').eq('id', session.user.id).single()).data || {} ),
-    //         UserName:    decodeURIComponent(friendName),
-    //         Type:        'Friend',
-    //         friendId:    friendParam,
-    //         id:          session.user.id,
-    //         isAuthUser:  true
-    //     };
-    // } else if (bandParam) {
-    if (bandParam) {
-        const { data: bandRow } = await supabase            .from('bands')
-            .select('*')
-            .ilike('name', bandParam)
-            .single();
+     // TODO: Re-enable once Profile screens exist. Friend mode (persona-swap via ?friend= URL param)
+     // has been retired in favour of the buddy filter bar in the Data tab. Keep this block so it's
 
-        if (!bandRow) {
-            window.location.href = 'index.html';
-            return;
-        }
-        currentUser = {
-            UserName:    bandRow.name,
-            Type:        'Band',
-            Subject:     bandRow.subject || bandRow.name,
-            id:          session?.user?.id || null,
-            isAuthUser:  !!session
-        };
+     if (bandParam) {
+
+                // Band pages are cache-first, like personal mode: a repeat visit paints from
+                // IndexedDB and revalidates behind it. Anything that doesn't depend on the
+                // band row (the viewer's profile, the guessed data scope) starts in parallel
+                // with it, so a cold visit isn't four round trips in a row.
+                const bandUid = session?.user?.id || null;
+                bandAuthProfilePromise = bandUid
+                    ? Promise.resolve(supabase.from('profiles').select('username, is_admin, spotify_access').eq('id', bandUid).single())
+                    : null;
+
+                const cachedBand = await Data.loadCachedBand(bandParam);
+                if (cachedBand) {
+                    const bandRow = cachedBand.bandRow;
+                    currentUser = {
+                        UserName:    bandRow.name,
+                        Type:        'Band',
+                        Subject:     bandRow.subject || bandRow.name,
+                        id:          bandUid,
+                        isAuthUser:  !!session
+                    };
+                    cachedBandStart = { data: Data.buildAppDataFromRaw(currentUser, cachedBand.raw) };
+                    // Started after the cached build so the fresh build (which re-sets window.allVenues) lands last.
+                    bandFresh = {
+                        rowPromise:  Promise.resolve(supabase.from('bands').select('*').ilike('name', bandParam).single()),
+                        dataPromise: Data.loadAppData(currentUser, { skipPerformances: true }),
+                    };
+                    bandFresh.dataPromise.catch(() => {});
+                } else {
+                    const rowPromise = Promise.resolve(supabase.from('bands').select('*').ilike('name', bandParam).single());
+                    // Links carry the canonical band name, so the data scope can usually be guessed
+                    // from the URL and fetched alongside the row. If the row says otherwise the
+                    // guess is discarded (and never cached).
+                    const guessOk = rowPromise.then(({ data: r }) => !!r && r.name === bandParam && (r.subject || r.name) === bandParam);
+                    const guessData = Data.loadAppData(
+                        { Type: 'Band', UserName: bandParam, Subject: bandParam, id: bandUid, isAuthUser: !!session },
+                        { skipPerformances: true, cacheGate: guessOk }
+                    );
+                    guessData.catch(() => {});
+
+               const { data: bandRow } = await rowPromise;
+               if (!bandRow) {
+               window.location.href = 'index.html';
+               return;
+           }
+           Data.cacheBandRow(bandRow.name, bandRow);
+           currentUser = {
+               UserName:    bandRow.name,
+               Type:        'Band',
+               Subject:     bandRow.subject || bandRow.name,
+               id:          bandUid,
+               isAuthUser:  !!session
+           };
+           if (await guessOk) earlyDataPromise = guessData;
+         }
+
     } else if (!session) {
         window.location.href = 'index.html';
         return;
@@ -281,6 +317,11 @@ export async function initApp() {
         }
     }
 
+if (currentUser?.Type === 'Personal' && params.has('community')) {
+    window.currentUser = currentUser;
+    window.openCommunity?.();
+}
+
     document.addEventListener('filtersChanged', _applyFiltersAndRender);
 
     // 1. Load Data
@@ -292,7 +333,10 @@ export async function initApp() {
     // mode needs the band row first, so it starts here.
     const data = cachedStart
         ? cachedStart.data
-        : await (earlyDataPromise || Data.loadAppData(currentUser, { skipPerformances: true }));
+               : cachedBandStart
+                   ? cachedBandStart.data
+                   : await (earlyDataPromise || Data.loadAppData(currentUser, { skipPerformances: true }));
+
 
     // Achievement stats — personal mode only. Also started early, so on the
     // network path they've almost always finished by now. On a cached start we
@@ -373,11 +417,12 @@ export async function initApp() {
     let authDisplayName = 'User';
     if (currentUser.isAuthUser) {
         if (currentUser.Type === 'Band') {
-            const { data: authProfile, error: profileErr } = await supabase
-                .from('profiles')
+                        // Already in flight (started in the band branch above), so this rarely waits.
+                        const { data: authProfile, error: profileErr } = await (bandAuthProfilePromise || supabase
+                            .from('profiles')
                 .select('username, is_admin, spotify_access')
                 .eq('id', currentUser.id)
-                .single();
+                .single());
             if (profileErr) {
                 const { data: basicProfile } = await supabase
                     .from('profiles')
@@ -473,6 +518,16 @@ export async function initApp() {
             cachedKeys:      (cachedStart.data.journalData || []).map(g => g['Journal Key']).filter(Boolean),
         });
     }
+
+    // Band page painted from the cache: refresh behind it.
+    if (cachedBandStart && bandFresh) {
+        revalidateBandFromNetwork({
+            rowPromise:      bandFresh.rowPromise,
+            dataPromise:     bandFresh.dataPromise,
+            cachedSignature: cachedBandStart.data.signature,
+        });
+    }
+
 
     // After a save, rebuild the cache in the background so the next cached start
     // isn't missing what was just added.
@@ -683,6 +738,36 @@ async function revalidateFromNetwork({ uid, profilePromise, dataPromise, cachedS
         }
     } catch (err) {
         console.warn('app.js: background revalidation failed — staying on cached data', err);
+    }
+}
+
+/**
+ * Band-page counterpart of revalidateFromNetwork: the page was painted from the
+ * cache; this waits for the real row + data, refreshes the cached row, and swaps
+ * in the fresh rows (and re-renders) only if they differ from what was painted.
+ * Any failure leaves the cached view in place.
+ */
+async function revalidateBandFromNetwork({ rowPromise, dataPromise, cachedSignature }) {
+    try {
+        const [{ data: bandRow }, fresh] = await Promise.all([rowPromise, dataPromise]);
+        if (bandRow) Data.cacheBandRow(bandRow.name, bandRow);
+
+        if (fresh.signature !== cachedSignature) {
+            window.journalData     = fresh.journalData;
+            window.filteredResults = [...fresh.journalData];
+            // buildAppData replaced these lookups, so re-alias them
+            window.venueLookup = window.allVenues;
+            window.venuesData  = window.allVenues;
+            refreshUI();
+            // band.js keeps its own copy of the rows. If it hasn't initialised yet it
+            // picks them up from the slot; if it has, from the event.
+            window._bandFreshRows = fresh.journalData;
+            window.dispatchEvent(new CustomEvent('giglist:band-data-refreshed', { detail: fresh.journalData }));
+        } else {
+            Data.hydrateArtistImages(window.journalData);
+        }
+    } catch (err) {
+        console.warn('app.js: band revalidation failed — staying on cached data', err);
     }
 }
 

@@ -38,9 +38,13 @@ let _buddyStatus     = {};   // userId -> 'accepted' | 'pending' | null
 let _fanCount          = null;  // unique fans (distinct user_ids), set by _loadBandStats
 let _fanAttendance     = null;  // total attended show-instances, set by _loadBandStats
 let _performancesLoaded = false; // guard so we only fetch once
+let _lastHero = { imageUrl: null, spotify: null };   // so a data refresh can repaint the hero text without refetching the image
+let _dataRefreshBound = false;
 // ─── INIT ─────────────────────────────────────────────────────────────────────
 
 export async function initBandMode(currentUser, journalData, performanceData) {
+    // Cache-first start: if the fresh rows already arrived (app.js parks them here), use them.
+    if (window._bandFreshRows) { journalData = window._bandFreshRows; window._bandFreshRows = null; }
     _currentUser     = currentUser;
     _journalData     = journalData     || [];
     _performanceData = performanceData || [];
@@ -52,6 +56,7 @@ export async function initBandMode(currentUser, journalData, performanceData) {
         if (el) { el.value = val || ''; window.refreshUI?.(); }
     };
     window.isReadOnly = !_currentUser?.is_admin;
+    _bindDataRefresh();
 
     // Load buddy status for the authed viewer (non-blocking)
     if (_currentUser?.isAuthUser) {
@@ -77,6 +82,9 @@ export async function initBandMode(currentUser, journalData, performanceData) {
     // Show default tab (first paint happens before setlists load)
     switchBandView('gigs');
 
+    // Boot is over: vault.html's pre-paint band styling and skeleton hand over to the real views.
+    document.documentElement.classList.remove('band-boot');
+
     // Setlists feed the Songs tile, song search and Top Songs chart, so load
     // them in the background and re-render when they arrive.
     setTimeout(() => {
@@ -85,6 +93,23 @@ export async function initBandMode(currentUser, journalData, performanceData) {
             _renderBandStory();
         });
     }, 0);
+}
+
+// app.js swaps in fresh rows after a cache-first paint (giglist:band-data-refreshed);
+// keep this module's copy, and everything derived from it, in step.
+function _bindDataRefresh() {
+    if (_dataRefreshBound) return;
+    _dataRefreshBound = true;
+    window.addEventListener('giglist:band-data-refreshed', (e) => {
+        if (!Array.isArray(e.detail)) return;
+        window._bandFreshRows = null;
+        _journalData = e.detail;
+        _performancesLoaded = false;          // the set of shows may have changed
+        _renderBandStory();
+        const hero = document.getElementById('band-hero');
+        if (hero && window.currentArtist) _paintHero(hero, window.currentArtist, _lastHero.imageUrl, _lastHero.spotify);
+        _loadPerformancesIfNeeded().then(() => { window.refreshUI?.(); _renderBandStory(); });
+    });
 }
 
 function _applyBandCopy() {
@@ -174,6 +199,7 @@ async function _renderBandHero() {
     if (!container || !bandName) return;
 
     // Paint the placeholder straight away so there's no empty gap while images load
+    _lastHero = { imageUrl: null, spotify: null };
     _paintHero(container, bandName, null, null);
 
     const slug = bandName.toLowerCase().replace(/[^a-z0-9]/g, '-');
@@ -202,10 +228,13 @@ async function _renderBandHero() {
 
     if (color) {
         window.bandBrandColor = color;
+        // Remembered so vault.html can paint the header in this colour before JS runs next time
+        try { localStorage.setItem('gl_brand:' + bandName.trim().toLowerCase(), color); } catch (_) {}
         const header = document.querySelector('header');
         if (header) header.style.backgroundColor = color;
         document.documentElement.style.setProperty('--band-accent', color);
     }
+    _lastHero = { imageUrl, spotify };
     _paintHero(container, bandName, imageUrl, spotify);
 }
 

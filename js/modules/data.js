@@ -4,7 +4,7 @@
 import { parseDate, isFestivalRow, getOwnFestivalLineup, normalizeArtist, scopeFestivalPerformances } from './utils.js';
 import { supabase } from './supabase.js';
 import { loadArtistImages, artistImageCandidates } from './artist-images.js';
-import { cacheGet, cachePut, CACHE_VERSION } from './app-cache.js';
+import { cacheGet, cachePut, cacheDelete, CACHE_VERSION } from './app-cache.js';
 
 /**
  * Helper to determine show type based on keywords
@@ -453,14 +453,48 @@ const buildAppData = (user, raw) => {
 };
 
 // ── Cache-first startup ──────────────────────────────────────────────────────
-// Only the personal-mode home load is cached (band / friend views always hit the
-// network). What's stored is the RAW rows from fetchRawAppData, keyed per user,
-// so a cached start runs through exactly the same buildAppData as a network one.
+// Personal-mode home loads and band pages are cached (friend views always hit the
+// network). What's stored is the RAW rows from fetchRawAppData, keyed per user
+// (or per band), so a cached start runs through exactly the same buildAppData as
+// a network one.
 const MAX_CACHE_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const dataCacheKey    = (userId) => `data:${userId}`;
 const profileCacheKey = (userId) => `profile:${userId}`;
 const isCacheable = (user, skipPerformances) =>
     user?.Type === 'Personal' && !!user.id && skipPerformances;
+
+// ── Band pages ───────────────────────────────────────────────────────────────
+// A band page caches the same raw payload plus its `bands` row, keyed by the
+// lower-cased band name, so a repeat visit paints from IndexedDB with no network
+// wait. A small LRU keeps the store bounded (a big band is several MB of rows).
+const MAX_CACHED_BANDS = 6;
+const BAND_INDEX_KEY   = 'bandidx';
+const bandKey     = (name) => String(name || '').trim().toLowerCase();
+const bandRowKey  = (k) => `bandrow:${k}`;
+const bandDataKey = (k) => `banddata:${k}`;
+const isBandCacheable = (user, skipPerformances) =>
+    user?.Type === 'Band' && !!skipPerformances && !!bandKey(user.UserName);
+
+/** Marks a band as most-recently used and evicts the oldest beyond the cap. Best effort. */
+async function rememberBand(k) {
+    try {
+        const idx = ((await cacheGet(BAND_INDEX_KEY)) || []).filter(x => x !== k);
+        idx.push(k);
+        while (idx.length > MAX_CACHED_BANDS) {
+            const old = idx.shift();
+            await Promise.all([cacheDelete(bandRowKey(old)), cacheDelete(bandDataKey(old))]);
+        }
+        await cachePut(BAND_INDEX_KEY, idx);
+    } catch { /* best effort */ }
+}
+
+async function putBandData(name, raw) {
+    const k = bandKey(name);
+    // Never cache an empty result: it can be a wrong guess, and an empty band is cheap to refetch anyway.
+    if (!k || !raw?.journalRows?.length) return;
+    await cachePut(bandDataKey(k), { v: CACHE_VERSION, savedAt: Date.now(), raw });
+    rememberBand(k);
+}
 
 const _hash = (str) => {
     let h = 5381;
@@ -492,11 +526,15 @@ export const rawSignature = (raw) => {
  * Successful personal-mode loads also refresh the cache (fire-and-forget).
  * Result includes `signature` (see rawSignature).
  */
-export const loadAppData = async (user, { skipPerformances = false } = {}) => {
+export const loadAppData = async (user, { skipPerformances = false, cacheGate = true } = {}) => {
     const raw = await fetchRawAppData(user, { skipPerformances });
 
     if (isCacheable(user, skipPerformances)) {
         cachePut(dataCacheKey(user.id), { v: CACHE_VERSION, savedAt: Date.now(), raw });
+    } else if (isBandCacheable(user, skipPerformances)) {
+        // cacheGate lets a caller that started this load on a guess (before the
+        // band row arrived) say later whether the guess was right.
+        Promise.resolve(cacheGate).then(ok => { if (ok) putBandData(user.UserName, raw); }).catch(() => {});
     }
 
     const result = buildAppData(user, raw);
@@ -522,6 +560,50 @@ export const loadCachedStart = async (userId) => {
     if (p.v !== CACHE_VERSION || d.v !== CACHE_VERSION) return null;
     if (Date.now() - (d.savedAt || 0) > MAX_CACHE_AGE_MS) return null;
     return { profile: p.profile, home: p.home || null, raw: d.raw, savedAt: d.savedAt };
+};
+
+/**
+ * Cached band page: the `bands` row plus raw journal rows, or null if there is no
+ * usable cache. Resolves in a few ms; never rejects.
+ */
+export const loadCachedBand = async (name) => {
+    const k = bandKey(name);
+    if (!k) return null;
+    const [r, d] = await Promise.all([cacheGet(bandRowKey(k)), cacheGet(bandDataKey(k))]);
+    if (!r?.row || !d?.raw) return null;
+    if (r.v !== CACHE_VERSION || d.v !== CACHE_VERSION) return null;
+    if (Date.now() - (d.savedAt || 0) > MAX_CACHE_AGE_MS) return null;
+    return { bandRow: r.row, raw: d.raw, savedAt: d.savedAt };
+};
+
+/** Stores the `bands` row for a band page (name / subject). */
+export const cacheBandRow = (name, row) => {
+    const k = bandKey(name);
+    if (!k || !row) return;
+    cachePut(bandRowKey(k), { v: CACHE_VERSION, savedAt: Date.now(), row });
+    rememberBand(k);
+};
+
+/**
+ * Fills the band cache ahead of a visit (used for favourite bands, in idle time).
+ * Skips bands cached within maxAgeMs. Resolves true if it fetched, false if skipped.
+ * Never touches live app state.
+ */
+export const warmBandCache = async (name, { maxAgeMs = 12 * 60 * 60 * 1000 } = {}) => {
+    const k = bandKey(name);
+    if (!k) return false;
+    const [r, d] = await Promise.all([cacheGet(bandRowKey(k)), cacheGet(bandDataKey(k))]);
+    const fresh = r?.row && d?.raw && r.v === CACHE_VERSION && d.v === CACHE_VERSION
+        && Date.now() - (d.savedAt || 0) < maxAgeMs;
+    if (fresh) return false;
+
+    const { data: row } = await supabase.from('bands').select('*').ilike('name', name).single();
+    if (!row) return false;
+    const user = { Type: 'Band', UserName: row.name, Subject: row.subject || row.name };
+    const raw  = await fetchRawAppData(user, { skipPerformances: true });
+    cacheBandRow(row.name, row);
+    await putBandData(row.name, raw);
+    return true;
 };
 
 /** Builds app data from cached raw rows (same pipeline as a network load, minus the network). */

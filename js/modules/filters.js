@@ -1,6 +1,12 @@
 // filters.js — Data tab filter drawer
 // OR logic within dimensions, AND logic across dimensions.
 // Companion matching covers both gig_companions rows and legacy went_with text.
+//
+// The drawer is shared between modes. Personal and band mode filter
+// window.journalData client-side (applyFilters). Community can't — its data
+// lives server-side — so it borrows the drawer through attachFilterSource():
+// options come from the source, changes go to the source's onChange, and the
+// personal state is parked and restored on detach.
 
 import { escapeHtml, normalizeArtist, parseActList } from './utils.js';
 
@@ -20,6 +26,11 @@ const _state = {
   hasSetlist: 'all',         // 'all' | 'yes' | 'no'
 };
 
+// A view that borrows the drawer: { supports, years(), venues(), venueLabel?(value), onChange(state) }
+let _source = null;
+let _saved  = null;          // personal state, parked while a source is attached
+let _hiddenSections = [];    // sections we hid for the source (detach un-hides only these)
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -27,6 +38,63 @@ const _state = {
 export function initFilters() {
   _injectDrawerHTML();
   _bindEvents();
+}
+
+/**
+ * Lets another view (Community) use the drawer. The drawer is reset to defaults,
+ * sections the source doesn't list in `supports` are hidden, year/venue options
+ * come from source.years() / source.venues(), and changes call
+ * source.onChange(getFilterState()) instead of firing 'filtersChanged' (which
+ * would re-render the personal table). Returns a detach function; it only acts
+ * if this source is still the one attached, so a late dispose from an old pane
+ * can't take the drawer away from a new one.
+ */
+export function attachFilterSource(source) {
+  if (_source) _detach();
+  _saved = { ..._state, years: new Set(_state.years) };
+  _resetState();
+  _source = source;
+  _applySectionVisibility();
+  _syncDrawerUI();
+  _populateYearList();
+  _populateLookupSelects();
+  _syncToggleUI();
+  _updateClearButton();
+  return () => { if (_source === source) _detach(); };
+}
+
+function _detach() {
+  _source = null;
+  Object.assign(_state, _saved, { years: new Set(_saved.years), open: false });
+  _saved = null;
+  _hiddenSections.forEach(sec => sec.classList.remove('hidden'));
+  _hiddenSections = [];
+  _syncDrawerUI();
+  _populateYearList();
+  _populateLookupSelects();
+  _syncToggleUI();
+  _updateClearButton();
+  // No change event: nothing personal was touched while the source was attached.
+}
+
+/** Snapshot of the current filter state (years sorted newest first). */
+export function getFilterState() {
+  return {
+    years:      [..._state.years].sort((a, b) => b - a),
+    artist:     _state.artist,
+    venue:      _state.venue,
+    companion:  _state.companion,
+    festival:   _state.festival,
+    hasPhotos:  _state.hasPhotos,
+    hasReview:  _state.hasReview,
+    hasSetlist: _state.hasSetlist,
+  };
+}
+
+/** Re-reads the attached source's options (call after its facets load). */
+export function refreshFilterOptions() {
+  _populateYearList();
+  _populateLookupSelects();
 }
 
 /** Returns a filtered copy of window.journalData based on current state. */
@@ -159,7 +227,7 @@ export function setFilters(overrides = {}) {
 
   _syncDrawerUI();           // reset drawer visuals to defaults first...
   _populateYearList();       // ...then rebuild year chips so any selected year shows active
-  _syncFestivalToggleUI();   // ...re-apply the festival toggle syncDrawerUI just reset
+  _syncToggleUI();           // ...re-apply the toggles syncDrawerUI just reset
   _populateLookupSelects();  // ...and rebuild artist/venue/companion selects to reflect state
 
   _dispatchChange();
@@ -185,7 +253,7 @@ export function buildSummaryLine(resultCount, totalCount) {
   }
 
   if (_state.artist.trim()) parts.push(_state.artist.trim());
-  if (_state.venue.trim()) parts.push(_state.venue.trim());
+  if (_state.venue.trim()) parts.push(_source?.venueLabel?.(_state.venue) ?? _state.venue.trim());
   if (_state.companion.trim()) parts.push(`with ${_state.companion.trim()}`);
 
   if (_state.festival === 'festival') parts.push('festivals');
@@ -226,6 +294,12 @@ export function closeFilterDrawer() {
 }
 
 export function clearAllFilters() {
+  _resetState();
+  _syncDrawerUI();
+  _dispatchChange();
+}
+
+function _resetState() {
   _state.years.clear();
   _state.artist = '';
   _state.venue = '';
@@ -234,8 +308,17 @@ export function clearAllFilters() {
   _state.hasPhotos = 'all';
   _state.hasReview = 'all';
   _state.hasSetlist = 'all';
-  _syncDrawerUI();
-  _dispatchChange();
+}
+
+// Hides drawer sections the attached source doesn't support
+function _applySectionVisibility() {
+  const supports = _source?.supports;
+  if (!supports) return;
+  document.querySelectorAll('#filter-drawer [data-filter-section]').forEach(sec => {
+    if (supports.includes(sec.dataset.filterSection) || sec.classList.contains('hidden')) return;
+    sec.classList.add('hidden');
+    _hiddenSections.push(sec);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -278,7 +361,7 @@ function _injectDrawerHTML() {
       <div class="flex-1 overflow-y-auto px-4 py-4 space-y-6">
 
         <!-- Year -->
-        <div>
+        <div data-filter-section="years">
           <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Year</p>
           <div id="filter-year-list"
                class="grid grid-cols-4 gap-1.5 max-h-40 overflow-y-auto pr-1">
@@ -287,7 +370,7 @@ function _injectDrawerHTML() {
         </div>
 
         <!-- Artist -->
-        <div class="personal-only">
+        <div data-filter-section="artist" class="personal-only">
           <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Artist</p>
           <select id="filter-artist-input"
                   class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white
@@ -297,7 +380,7 @@ function _injectDrawerHTML() {
         </div>
 
         <!-- Venue -->
-        <div>
+        <div data-filter-section="venue">
           <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Venue</p>
           <select id="filter-venue-input"
                   class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white
@@ -307,7 +390,7 @@ function _injectDrawerHTML() {
         </div>
 
         <!-- Companion -->
-        <div class="personal-only">
+        <div data-filter-section="companion" class="personal-only">
           <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Went With</p>
           <select id="filter-companion-input"
                   class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white
@@ -317,7 +400,7 @@ function _injectDrawerHTML() {
         </div>
 
         <!-- Festival toggle -->
-        <div>
+        <div data-filter-section="festival">
           <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Show Type</p>
           <div class="flex rounded-lg overflow-hidden border border-gray-600">
             ${_triToggleBtn('filter-festival', 'all', 'All', true)}
@@ -327,7 +410,7 @@ function _injectDrawerHTML() {
         </div>
 
         <!-- Has photos -->
-        <div class="personal-only">
+        <div data-filter-section="photos" class="personal-only">
           <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Photo Album</p>
           <div class="flex rounded-lg overflow-hidden border border-gray-600">
             ${_triToggleBtn('filter-photos', 'all', 'All', true)}
@@ -337,7 +420,7 @@ function _injectDrawerHTML() {
         </div>
 
         <!-- Has review -->
-        <div class="personal-only">
+        <div data-filter-section="review" class="personal-only">
           <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Review URL</p>
           <div class="flex rounded-lg overflow-hidden border border-gray-600">
             ${_triToggleBtn('filter-review', 'all', 'All', true)}
@@ -347,7 +430,7 @@ function _injectDrawerHTML() {
         </div>
 
         <!-- Has setlist -->
-        <div>
+        <div data-filter-section="setlist">
           <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Setlist Data</p>
           <div class="flex rounded-lg overflow-hidden border border-gray-600">
             ${_triToggleBtn('filter-setlist', 'all', 'All', true)}
@@ -403,7 +486,8 @@ function _bindEvents() {
 
 function _bindSelectInput(id, stateKey) {
   const el = document.getElementById(id);
-  if (!el) return;
+  if (!el || el.dataset.bound) return;   // bind once — this used to stack a new listener on every drawer open
+  el.dataset.bound = '1';
   el.addEventListener('change', () => {
     _state[stateKey] = el.value;
     _dispatchChange();
@@ -441,8 +525,20 @@ function _handleToggle(group, value, btn) {
 // ---------------------------------------------------------------------------
 
 function _populateLookupSelects() {
+  if (_source) {
+    _fillSelect('filter-venue-input', _source.venues?.() || [], 'All venues', _state.venue);
+    _bindSelectInput('filter-venue-input', 'venue');
+    return;
+  }
+
   const data = window.journalData;
-  if (!data?.length) return;
+  if (!data?.length) {
+    // Nothing to offer (e.g. handing the drawer back with no personal data loaded)
+    _fillSelect('filter-artist-input', [], 'All artists', '');
+    _fillSelect('filter-venue-input', [], 'All venues', '');
+    _fillSelect('filter-companion-input', [], 'All companions', '');
+    return;
+  }
 
   // Artists — unique sorted list from headliner, festival lineup, and
   // notable support fields, so artists only ever seen supporting or at
@@ -476,21 +572,27 @@ function _populateLookupSelects() {
   _bindSelectInput('filter-companion-input', 'companion');
 }
 
+// options: strings, or { value, label } when the stored value differs from what's shown
 function _fillSelect(id, options, placeholder, currentValue) {
   const el = document.getElementById(id);
   if (!el) return;
   el.innerHTML = `<option value="">${escapeHtml(placeholder)}</option>` +
-    options.map(o => `<option value="${escapeHtml(o)}"${o === currentValue ? ' selected' : ''}>${escapeHtml(o)}</option>`).join('');
+    options.map(o => {
+      const { value, label } = typeof o === 'string' ? { value: o, label: o } : o;
+      return `<option value="${escapeHtml(value)}"${value === currentValue ? ' selected' : ''}>${escapeHtml(label)}</option>`;
+    }).join('');
 }
 
 
 function _populateYearList() {
   const container = document.getElementById('filter-year-list');
-  if (!container || !window.journalData?.length) return;
+  if (!container) return;
 
-  const years = [...new Set(
-    window.journalData.map(g => _parseYear(g.date)).filter(Boolean)
-  )].sort((a, b) => b - a);
+  const years = _source
+    ? (_source.years?.() || [])
+    : [...new Set(
+        (window.journalData || []).map(g => _parseYear(g.date)).filter(Boolean)
+      )].sort((a, b) => b - a);
 
   container.innerHTML = years.map(year => {
     const active = _state.years.has(year);
@@ -506,7 +608,7 @@ function _populateYearList() {
   }).join('');
 
   // Expose year handler
-  window._filtersModule._handleYearChip = _handleYearChip;
+  if (window._filtersModule) window._filtersModule._handleYearChip = _handleYearChip;
 }
 
 function _handleYearChip(year, btn) {
@@ -553,14 +655,23 @@ function _syncDrawerUI() {
   });
 }
 
-function _syncFestivalToggleUI() {
-  document.querySelectorAll('[data-filter-group="filter-festival"]').forEach(btn => {
-    const active = btn.dataset.filterValue === _state.festival;
-    btn.classList.toggle('bg-indigo-600', active);
-    btn.classList.toggle('text-white', active);
-    btn.classList.toggle('bg-gray-800', !active);
-    btn.classList.toggle('text-gray-400', !active);
-    btn.classList.toggle('hover:bg-gray-700', !active);
+// Paints every tri-state toggle group from _state
+function _syncToggleUI() {
+  const stateKey = {
+    'filter-festival': 'festival',
+    'filter-photos':   'hasPhotos',
+    'filter-review':   'hasReview',
+    'filter-setlist':  'hasSetlist',
+  };
+  Object.entries(stateKey).forEach(([group, key]) => {
+    document.querySelectorAll(`[data-filter-group="${group}"]`).forEach(btn => {
+      const active = btn.dataset.filterValue === _state[key];
+      btn.classList.toggle('bg-indigo-600', active);
+      btn.classList.toggle('text-white', active);
+      btn.classList.toggle('bg-gray-800', !active);
+      btn.classList.toggle('text-gray-400', !active);
+      btn.classList.toggle('hover:bg-gray-700', !active);
+    });
   });
 }
 
@@ -568,11 +679,23 @@ function _syncFestivalToggleUI() {
 // Change dispatch — triggers re-render in app.js
 // ---------------------------------------------------------------------------
 
-function _dispatchChange() {
+function _updateClearButton() {
   // Show/hide the drawer's own internal "Clear all" button
   const clearBtn = document.getElementById('filter-clear-all');
   if (clearBtn) {
     clearBtn.classList.toggle('hidden', !hasActiveFilters());
+  }
+}
+
+function _dispatchChange() {
+  _updateClearButton();
+
+  // A borrowed drawer (Community): tell the owner directly. The personal
+  // summary strips and the 'filtersChanged' listener in app.js work from
+  // window.journalData and must not react to someone else's filters.
+  if (_source) {
+    _source.onChange?.(getFilterState());
+    return;
   }
 
   // Filter-summary strip ("X of Y shows — Clear all") — driven from a
