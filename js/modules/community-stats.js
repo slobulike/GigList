@@ -20,6 +20,10 @@
  * comes from a SECURITY DEFINER RPC (get_community_gig_charts) and never touches
  * personal stores or window data globals.
  *
+ * Chart cards have an expand button (community-expand.js): the same chart in an
+ * overlay with larger type and share-of-total tooltips. The overlay lives outside
+ * the pane element, so dispose() closes it.
+ *
  * Options a pane can offer back to the page: if ctx.openGigs(search) exists,
  * list rows link through to Community → Gigs filtered to that artist.
  */
@@ -30,12 +34,21 @@ import {
     rpc, fmt, plural, ensureChart, filterBarHtml, createCommunityQuery,
 } from './community-shared.js';
 import { setYearFilter, setFilters } from './filters.js';
+import { openExpanded, expandButtonHtml } from './community-expand.js';
 
 // Same palette as the personal charts
 const COLORS = { year: '#6366f1', artists: '#1D3557', venues: '#8b5cf6', cities: '#06b6d4', months: '#10b981', weekdays: '#f59e0b' };
 
 const CARD = 'relative bg-white rounded-[2rem] p-6 border border-slate-100 shadow-sm';
+const CARD_TITLE_INNER = 'text-[10px] font-black uppercase tracking-widest text-slate-400';
 const CARD_TITLE = 'text-[10px] font-black uppercase tracking-widest text-slate-400 mb-4';
+
+// Card header with an expand button (charts only; the ranked lists have nothing more to show)
+const head = (id, title, key) => `
+            <div class="flex items-center justify-between mb-4">
+                <h3 id="${id}" class="${CARD_TITLE_INNER}">${title}</h3>
+                ${expandButtonHtml(key, title)}
+            </div>`;
 
 const SHELL = `
 <div class="space-y-4">
@@ -51,23 +64,23 @@ const SHELL = `
 
     <div data-role="cards" class="space-y-4">
         <section class="${CARD}" aria-labelledby="cs-years">
-            <h3 id="cs-years" class="${CARD_TITLE}">Gigs per year</h3>
+            ${head('cs-years', 'Gigs per year', 'years')}
             <div data-card="years" class="relative h-48"><canvas></canvas>${placeholder()}</div>
         </section>
 
         <div class="grid sm:grid-cols-2 gap-4">
             <section class="${CARD}" aria-labelledby="cs-months">
-                <h3 id="cs-months" class="${CARD_TITLE}">Gigs by month</h3>
+                ${head('cs-months', 'Gigs by month', 'months')}
                 <div data-card="months" class="relative h-44"><canvas></canvas>${placeholder()}</div>
             </section>
             <section class="${CARD}" aria-labelledby="cs-weekdays">
-                <h3 id="cs-weekdays" class="${CARD_TITLE}">Gigs by weekday</h3>
+                ${head('cs-weekdays', 'Gigs by weekday', 'weekdays')}
                 <div data-card="weekdays" class="relative h-44"><canvas></canvas>${placeholder()}</div>
             </section>
         </div>
 
         <section class="${CARD}" aria-labelledby="cs-artists">
-            <h3 id="cs-artists" class="${CARD_TITLE}">Top artists</h3>
+            ${head('cs-artists', 'Top artists', 'artists')}
             <div data-card="artists" class="relative h-72"><canvas></canvas>${placeholder()}</div>
         </section>
 
@@ -77,12 +90,12 @@ const SHELL = `
         </section>
 
         <section class="${CARD}" aria-labelledby="cs-venues">
-            <h3 id="cs-venues" class="${CARD_TITLE}">Busiest venues</h3>
+            ${head('cs-venues', 'Busiest venues', 'venues')}
             <div data-card="venues" class="relative h-72"><canvas></canvas>${placeholder()}</div>
         </section>
 
         <section class="${CARD}" aria-labelledby="cs-cities">
-            <h3 id="cs-cities" class="${CARD_TITLE}">Busiest cities</h3>
+            ${head('cs-cities', 'Busiest cities', 'cities')}
             <div data-card="cities" class="relative h-72"><canvas></canvas>${placeholder()}</div>
         </section>
 
@@ -120,11 +133,11 @@ export function renderStatsPane(el, ctx = {}) {
 
     const query = createCommunityQuery(el, { signal: ac.signal, onChange: load });
 
-    const publicUsers = ctx.summary?.public_users;
-    if (publicUsers) {
-        $('[data-role="foot"]').textContent =
-            `From ${plural(publicUsers, 'public profile', 'public profiles')}. Gigs up to today only. Festivals count towards years and venues, not artists.`;
-    }
+       const users = ctx.summary?.total_users;
+       if (users) {
+           $('[data-role="foot"]').textContent =
+               `From ${plural(users, 'GigList user', 'GigList users')}. Gigs up to today only.`;  // stats keeps its festivals sentence
+       }
 
     const emptyText = () => (query.hasSearch() || query.hasFilters())
         ? 'No gigs match your search'
@@ -139,6 +152,7 @@ export function renderStatsPane(el, ctx = {}) {
         }
         card(name).querySelector('canvas')?.classList.toggle('invisible', isEmpty);
         if (isEmpty && charts[name]) { charts[name].destroy(); delete charts[name]; }
+        if (isEmpty) delete expandable[name];
         return isEmpty;
     }
 
@@ -148,6 +162,18 @@ export function renderStatsPane(el, ctx = {}) {
     }
 
     // ── charts ───────────────────────────────────────────────────────────────
+    // Each chart is a config factory taking `big`: false for the card, true for
+    // the expanded overlay (larger type, share-of-total in tooltips, every row
+    // labelled). Same idea as the isModal flag in the personal charts.js.
+    const expandable = {};                   // name → (big) => Chart config
+    let expanded = null;                     // open overlay handle (community-expand.js)
+    let expandedChart = null;
+
+    const shareFooter = (values) => {
+        const total = values.reduce((a, b) => a + b, 0) || 1;
+        return (items) => `${Math.round((items[0].raw / total) * 100)}% of shown`;
+    };
+
     function renderYears(rows) {
         if (setEmpty('years', !rows.length)) return;
         // Fill the gaps between the first year and this year, like the personal chart
@@ -157,21 +183,24 @@ export function renderStatsPane(el, ctx = {}) {
         const labels = [], data = [];
         for (let y = start; y <= end; y++) { labels.push(String(y)); data.push(byYear.get(y) || 0); }
 
-        build('years', {
+        expandable.years = (big) => ({
             type: 'bar',
-            data: { labels, datasets: [{ label: 'Gigs', data, backgroundColor: COLORS.year, borderRadius: 4 }] },
+            data: { labels, datasets: [{ label: 'Gigs', data, backgroundColor: COLORS.year, borderRadius: big ? 8 : 4 }] },
             options: {
                 responsive: true, maintainAspectRatio: false,
-                plugins: { legend: { display: false }, tooltip: { enabled: true } },
+                plugins: { legend: { display: false }, tooltip: { enabled: true, callbacks: big ? { footer: shareFooter(data) } : {} } },
                 scales: {
                     y: { beginAtZero: true, ticks: { precision: 0 } },
-                    x: { grid: { display: false }, ticks: { font: { size: 8 } } },
+                    x: { grid: { display: false }, ticks: { font: { size: big ? 12 : 8 } } },
                 },
                 onClick: (_evt, els) => {
-                    if (els.length) setYearFilter(parseInt(labels[els[0].index], 10));
+                    if (!els.length) return;
+                    setYearFilter(parseInt(labels[els[0].index], 10));
+                    if (big) expanded?.close();
                 },
             },
         });
+        build('years', expandable.years(false));
     }
 
     // Draws the gig count at the end of each bar (scoped to the chart instance)
@@ -190,44 +219,53 @@ export function renderStatsPane(el, ctx = {}) {
         },
     });
 
-    function horizontalBar(name, labels, values, color, extra = {}) {
-        build(name, {
+    function horizontalBarConfig(labels, values, color, extra = {}, big = false) {
+        const callbacks = { ...(extra.tooltip?.callbacks || {}) };
+        if (big) callbacks.footer = shareFooter(values);
+        return {
             type: 'bar',
             data: { labels, datasets: [{ label: 'Gigs', data: values, backgroundColor: color, borderRadius: 4 }] },
             plugins: [countLabels(values)],
             options: {
                 indexAxis: 'y', responsive: true, maintainAspectRatio: false,
-                layout: { padding: { right: 28 } },
-                plugins: { legend: { display: false }, tooltip: { enabled: true, ...(extra.tooltip || {}) } },
+                layout: { padding: { right: 36 } },
+                plugins: { legend: { display: false }, tooltip: { enabled: true, callbacks } },
                 scales: {
                     x: { display: false },
                     y: {
                         grid: { display: false }, border: { display: false },
                         ticks: {
-                            crossAlign: 'far', color: '#64748b', font: { weight: '800', size: 12 },
-                            callback(v) { return truncate(this.getLabelForValue(v), 24); },
+                            autoSkip: false, crossAlign: 'far', color: '#64748b',
+                            font: { weight: '800', size: big ? 13 : 12 },
+                            callback(v) { return truncate(this.getLabelForValue(v), big ? 40 : 24); },
                         },
                     },
                 },
-                onClick: (_evt, els) => { if (els.length) extra.onClick?.(els[0].index); },
+                onClick: (_evt, els) => {
+                    if (!els.length) return;
+                    extra.onClick?.(els[0].index);
+                    if (big) expanded?.close();
+                },
             },
-        });
+        };
     }
 
     function renderArtists(rows) {
         if (setEmpty('artists', !rows.length)) return;
-        horizontalBar('artists', rows.map(r => r.band), rows.map(r => r.gigs), COLORS.artists, {
+        expandable.artists = (big) => horizontalBarConfig(rows.map(r => r.band), rows.map(r => r.gigs), COLORS.artists, {
             tooltip: { callbacks: { afterLabel: (i) => `${fmt(rows[i.dataIndex].attendees)} attendances` } },
             onClick: (i) => query.setSearch(rows[i].band),
-        });
+        }, big);
+        build('artists', expandable.artists(false));
     }
 
     function renderVenues(rows) {
         if (setEmpty('venues', !rows.length)) return;
-        horizontalBar('venues', rows.map(r => r.name), rows.map(r => r.gigs), COLORS.venues, {
+        expandable.venues = (big) => horizontalBarConfig(rows.map(r => r.name), rows.map(r => r.gigs), COLORS.venues, {
             tooltip: { callbacks: { afterLabel: (i) => rows[i.dataIndex].city || '' } },
             onClick: (i) => setFilters({ venue: rows[i].key }),
-        });
+        }, big);
+        build('venues', expandable.venues(false));
     }
 
     const MONTH_LABELS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -238,18 +276,19 @@ export function renderStatsPane(el, ctx = {}) {
     function fixedBars(name, labels, byIndex, color) {
         const data = labels.map((_, i) => byIndex.get(i + 1) || 0);
         if (setEmpty(name, data.every(n => n === 0))) return;
-        build(name, {
+        expandable[name] = (big) => ({
             type: 'bar',
-            data: { labels, datasets: [{ label: 'Gigs', data, backgroundColor: color, borderRadius: 4 }] },
+            data: { labels, datasets: [{ label: 'Gigs', data, backgroundColor: color, borderRadius: big ? 8 : 4 }] },
             options: {
                 responsive: true, maintainAspectRatio: false,
-                plugins: { legend: { display: false }, tooltip: { enabled: true } },
+                plugins: { legend: { display: false }, tooltip: { enabled: true, callbacks: big ? { footer: shareFooter(data) } : {} } },
                 scales: {
                     y: { beginAtZero: true, ticks: { precision: 0 } },
-                    x: { grid: { display: false }, ticks: { font: { size: 9 } } },
+                    x: { grid: { display: false }, ticks: { font: { size: big ? 12 : 9 } } },
                 },
             },
         });
+        build(name, expandable[name](false));
     }
 
     function renderMonths(rows)   { fixedBars('months',   MONTH_LABELS, new Map(rows.map(r => [Number(r.month), r.gigs])), COLORS.months); }
@@ -257,9 +296,38 @@ export function renderStatsPane(el, ctx = {}) {
 
     function renderCities(rows) {
         if (setEmpty('cities', !rows.length)) return;
-        horizontalBar('cities', rows.map(r => r.city), rows.map(r => r.gigs), COLORS.cities, {
+        expandable.cities = (big) => horizontalBarConfig(rows.map(r => r.city), rows.map(r => r.gigs), COLORS.cities, {
             tooltip: { callbacks: { afterLabel: (i) => rows[i.dataIndex].country || '' } },
             onClick: (i) => query.setSearch(rows[i].city),     // search already covers city
+        }, big);
+        build('cities', expandable.cities(false));
+    }
+
+    // ── expanded view ────────────────────────────────────────────────────────
+    const EXPAND_TITLES = {
+        years: 'Gigs per year', months: 'Gigs by month', weekdays: 'Gigs by weekday',
+        artists: 'Top artists', venues: 'Busiest venues', cities: 'Busiest cities',
+    };
+
+    function expandCard(name) {
+        const make = expandable[name];
+        if (!make) return;
+        expanded?.close();
+        expanded = openExpanded({
+            title: EXPAND_TITLES[name] || 'Community stats',
+            subtitle: (query.hasSearch() || query.hasFilters()) ? 'Filtered view' : 'All community gigs',
+            onOpen(body) {
+                const cfg = make(true);
+                const rows = cfg.data.labels.length;
+                const h = cfg.options.indexAxis === 'y' ? Math.max(360, rows * 32) : 420;
+                body.innerHTML = `<div class="relative" style="height:${h}px"><canvas></canvas></div>`;
+                expandedChart = new window.Chart(body.querySelector('canvas'), cfg);
+            },
+            onClose() {
+                try { expandedChart?.destroy(); } catch (_) { /* already gone */ }
+                expandedChart = null;
+                expanded = null;
+            },
         });
     }
 
@@ -335,6 +403,7 @@ export function renderStatsPane(el, ctx = {}) {
 
     // ── load ─────────────────────────────────────────────────────────────────
     async function load() {
+        expanded?.close();               // its data is about to be replaced
         const id = ++seq;
         const cards = $('[data-role="cards"]');
         cards.classList.add('opacity-50');
@@ -371,6 +440,9 @@ export function renderStatsPane(el, ctx = {}) {
     el.addEventListener('click', (e) => {
         if (e.target.closest('[data-retry]')) { load(); return; }
 
+        const ex = e.target.closest('[data-expand]');
+        if (ex) { expandCard(ex.dataset.expand); return; }
+
         const row = e.target.closest('[data-band]');
         if (row) {
             // Prefer jumping to the Gigs tab when the shell offers it; otherwise
@@ -385,6 +457,7 @@ export function renderStatsPane(el, ctx = {}) {
 
     return function dispose() {
         disposed = true;
+        expanded?.close();
         query.dispose();
         ac.abort();
         Object.values(charts).forEach(c => { try { c.destroy(); } catch (_) { /* already gone */ } });

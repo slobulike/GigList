@@ -3,8 +3,9 @@
  * Community mode shell: a nav (Feed / Gigs / Stats / Fans), a gate for low
  * data, and an empty state that invites people to share GigList.
  *
- * Only profiles with is_public = true feed the community views. Counts come
- * from the get_community_summary() RPC (see community-summary.sql).
+ * Community is anonymous, so every profile (public or not) feeds Feed, Gigs
+ * and Stats. Only Fans is limited to public profiles. Counts come from the
+ * get_community_summary() RPC (see community-summary.sql).
  *
  * Deep link: vault.html?community=<feed|gigs|stats|fans>. vault.html's <head>
  * adds the `community-boot` class before first paint so the personal home never
@@ -30,9 +31,9 @@ import { escapeHtml } from './utils.js';
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
 
-// Below this many public profiles the tabs show the invite state instead.
+// Below this many users the tabs show the invite state instead.
 // Admins always see the full shell so it can be built and tested.
-const MIN_PUBLIC_USERS = 5;
+const MIN_USERS = 5;
 
 const TABS = [
     { id: 'feed',  label: 'Feed',  icon: 'sparkles',
@@ -52,7 +53,7 @@ const CARD = 'bg-white rounded-[2rem] border border-slate-100 shadow-sm p-5';
 let _user       = null;
 let _active     = false;
 let _tab        = 'feed';
-let _summary    = null;        // { public_users, public_shows, public_venues }
+let _summary    = null;        // { total_users, total_shows, total_venues, public_users }
 let _deepLinkRead = false;
 let _origSwitchView = null;
 const _panes    = {};          // tab id → render fn
@@ -64,7 +65,7 @@ const _paneLoaders = {
     feed: () => import('./community-feed.js'),
     gigs: () => import('./community-gigs.js'),
     stats: () => import('./community-stats.js'),
-    feed: () => import('./community-feed.js'),
+    fans: () => import('./community-fans.js'),
 };
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
@@ -238,6 +239,14 @@ export async function showCommunityTab(tab) {
     _tab = tab;
     _syncUrl(tab);
 
+    // Another view (e.g. profile, opened from the avatar) may be covering
+    // Community while its nav is still showing. Bring the shell back first.
+    const section = document.getElementById('view-community');
+    if (_active && section?.classList.contains('hidden')) {
+        _showShell();
+        window.scrollTo(0, 0);
+    }
+
     // Same active-state classes switchView applies to the main nav.
     TABS.forEach(t => {
         const btn = document.getElementById(`community-nav-${t.id}`);
@@ -307,28 +316,29 @@ window.registerCommunityPane = registerCommunityPane;
 
 // ─── DATA GATE ────────────────────────────────────────────────────────────────
 
+const EMPTY_SUMMARY = { total_users: 0, total_shows: 0, total_venues: 0, public_users: 0 };
+
 async function _loadSummary() {
     try {
         const { data, error } = await supabase.rpc('get_community_summary');
         if (error) throw error;
-        _summary = data || { public_users: 0, public_shows: 0, public_venues: 0 };
+        _summary = data || { ...EMPTY_SUMMARY };
     } catch (err) {
         console.warn('community: summary failed', err);
-        _summary = { public_users: 0, public_shows: 0, public_venues: 0 };
+        _summary = { ...EMPTY_SUMMARY };
     }
 }
 
 function _hasEnoughData() {
     if (_user?.is_admin) return true;
-    return (_summary?.public_users || 0) >= MIN_PUBLIC_USERS;
+    return (_summary?.total_users || 0) >= MIN_USERS;
 }
 
 // ─── EMPTY / INVITE STATE ─────────────────────────────────────────────────────
 
 function _renderInviteState(el) {
-    const have = Math.min(_summary?.public_users || 0, MIN_PUBLIC_USERS);
-    const pct  = Math.round((have / MIN_PUBLIC_USERS) * 100);
-    const isPublic = !!_user?.is_public;
+    const have = Math.min(_summary?.total_users || 0, MIN_USERS);
+    const pct  = Math.round((have / MIN_USERS) * 100);
 
     el.innerHTML = `
         <div class="${CARD} space-y-4">
@@ -336,16 +346,16 @@ function _renderInviteState(el) {
                 <h3 class="text-base font-black text-slate-900">Community unlocks when more people join</h3>
                 <p class="text-sm text-slate-500 mt-1">
                     See where other GigList users go to shows and which bands they've seen.
-                    It fills in as people set their profiles to public, and it's better with your friends in it.
+                    It fills in as more people join and log shows, and it's better with your friends in it.
                 </p>
             </div>
             <div>
                 <div class="flex items-center justify-between text-xs font-bold text-slate-500 mb-1">
-                    <span>Public profiles</span>
-                    <span>${have} of ${MIN_PUBLIC_USERS}</span>
+                    <span>GigList users</span>
+                    <span>${have} of ${MIN_USERS}</span>
                 </div>
                 <div class="h-2 rounded-full bg-slate-100 overflow-hidden"
-                     role="progressbar" aria-valuemin="0" aria-valuemax="${MIN_PUBLIC_USERS}" aria-valuenow="${have}">
+                     role="progressbar" aria-valuemin="0" aria-valuemax="${MIN_USERS}" aria-valuenow="${have}">
                     <div class="h-full bg-indigo-600 rounded-full" style="width:${pct}%"></div>
                 </div>
             </div>
@@ -354,19 +364,10 @@ function _renderInviteState(el) {
                         class="bg-indigo-600 text-white text-xs font-black px-4 py-2 rounded-full hover:bg-indigo-700 active:scale-95 transition-all">
                     Invite friends to GigList
                 </button>
-                ${isPublic ? '' : `
-                <button type="button" id="community-public-btn"
-                        class="bg-slate-100 text-slate-700 text-xs font-black px-4 py-2 rounded-full hover:bg-slate-200 active:scale-95 transition-all">
-                    Make my profile public
-                </button>`}
             </div>
         </div>`;
 
     el.querySelector('#community-invite-btn')?.addEventListener('click', _shareInvite);
-    el.querySelector('#community-public-btn')?.addEventListener('click', () => {
-        _leave();
-        window.switchView?.('profile');
-    });
 }
 
 // ─── SHARING ──────────────────────────────────────────────────────────────────

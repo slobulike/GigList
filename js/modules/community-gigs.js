@@ -1,7 +1,7 @@
 /**
  * GigList — community-gigs.js
  * The Community → Gigs pane. Mirrors the personal Gigs tab (headline stats,
- * search, List / Calendar / Map) but over every public journal.
+ * search, List / Calendar / Map) but over every journal.
  *
  * Contract (see the mode-switch performance notes):
  *   - Registered with registerCommunityPane('gigs', fn); community.js loads this
@@ -25,6 +25,7 @@
 import { escapeHtml } from './utils.js';
 import { registerCommunityPane } from './community.js';
 import { rpc, clearCommunityCache, fmt, plural, filterBarHtml, createCommunityQuery } from './community-shared.js';
+import { openExpanded } from './community-expand.js';
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
 
@@ -106,8 +107,12 @@ const SHELL = `
     <div data-pane="list"></div>
     <div data-pane="calendar" class="hidden space-y-8"></div>
     <div data-pane="map" class="hidden">
-        <div class="w-full rounded-[2.5rem] overflow-hidden border-4 border-white shadow-2xl bg-white">
+        <div class="relative w-full rounded-[2.5rem] overflow-hidden border-4 border-white shadow-2xl bg-white">
             <div data-role="map-canvas" style="height: 450px; width: 100%; z-index: 1;"></div>
+            <button type="button" data-expand="map" aria-label="Expand map"
+                    class="absolute top-4 right-4 z-[500] w-10 h-10 inline-flex items-center justify-center rounded-full bg-white text-slate-500 shadow-lg hover:text-indigo-600 active:scale-95 transition-all">
+                <i data-lucide="maximize-2" class="w-4 h-4" aria-hidden="true"></i>
+            </button>
         </div>
         <p data-role="map-note" class="text-[10px] text-slate-400 text-center mt-3"></p>
     </div>
@@ -144,6 +149,10 @@ export function renderGigsPane(el, ctx = {}) {
     let map = null;
     let markerLayer = null;
     let mapBounds = [];
+    let lastVenues = [];
+    let lastUnmapped = 0;
+    let expandedMap = null;           // expanded-map overlay handle (community-expand.js)
+    let bigMap = null;                // its Leaflet instance
 
     const state = {
         view:   'list',
@@ -163,13 +172,13 @@ export function renderGigsPane(el, ctx = {}) {
 
     const emptyFor = () => (query.hasSearch() || query.hasFilters())
         ? emptyHtml('No gigs match', 'Try a different search, or clear the filters.')
-        : emptyHtml('No gigs yet', 'Gigs from public profiles will appear here.');
+        : emptyHtml('No gigs yet', 'Gigs from all profiles will appear here.');
 
-    const publicUsers = ctx.summary?.public_users;
-    if (publicUsers) {
-        $('[data-role="foot"]').textContent =
-            `From ${plural(publicUsers, 'public profile', 'public profiles')}. Gigs up to today only.`;
-    }
+       const users = ctx.summary?.total_users;
+       if (users) {
+           $('[data-role="foot"]').textContent =
+               `From ${plural(users, 'GigList user', 'GigList users')}. Gigs up to today only.`;  // stats keeps its festivals sentence
+       }
 
     // ── headline stats (follow search + filters, like every other view) ──────
     async function loadStats() {
@@ -474,9 +483,49 @@ export function renderGigsPane(el, ctx = {}) {
         }
     }
 
+    // One pin per venue, sized by gig count, popup of the latest gigs. The card map
+    // and the expanded map share this; `big` only widens the popup.
+    function plotVenues(layer, venues, big) {
+        const L = window.L;
+        layer.clearLayers();
+        const bounds = [];
+        venues.forEach(v => {
+            const lat = Number(v.lat), lng = Number(v.lng);
+            if (!isFinite(lat) || !isFinite(lng)) return;
+            const shown = v.recent || [];
+            const recent = shown.map(r => `
+                <div class="p-2 border-b border-slate-100 last:border-0 mb-1">
+                    <p class="text-[10px] font-black text-indigo-500 uppercase leading-none">${escapeHtml(r.date)}</p>
+                    <p class="text-[12px] font-bold text-slate-800 leading-tight">${escapeHtml(r.band || '')}</p>
+                </div>`).join('');
+            const more = v.gigs > shown.length
+                ? `<p class="text-[10px] text-slate-400 text-center">+ ${fmt(v.gigs - shown.length)} earlier</p>` : '';
+
+            L.circleMarker([lat, lng], {
+                radius: Math.min(5 + Math.sqrt(v.gigs || 1) * 2.2, 22),
+                fillColor: '#4f46e5', color: '#fff', weight: 2, fillOpacity: 0.9,
+            }).bindPopup(`
+                <div class="p-1 ${big ? 'max-h-64' : 'max-h-48'} overflow-y-auto min-w-[180px]">
+                    <h4 class="text-[10px] font-black uppercase text-slate-400 mb-2 tracking-widest border-b pb-1">
+                        ${escapeHtml(v.name || '')}${v.city ? ' · ' + escapeHtml(v.city) : ''}
+                    </h4>
+                    ${recent}${more}
+                    <div class="pt-2 text-center">
+                        <span class="bg-indigo-50 text-indigo-600 text-[10px] font-black px-2 py-0.5 rounded-full uppercase">
+                            ${plural(v.gigs, 'gig', 'gigs')}
+                        </span>
+                    </div>
+                </div>`, { maxWidth: big ? 320 : 250, className: 'gig-map-popup' }).addTo(layer);
+            bounds.push([lat, lng]);
+        });
+        return bounds;
+    }
+
     function drawMap(res) {
         const L = window.L;
         const venues = res.venues || [];
+        lastVenues = venues;
+        lastUnmapped = res.unmapped || 0;
 
         if (!map) {
             map = L.map($('[data-role="map-canvas"]'), {
@@ -487,37 +536,8 @@ export function renderGigsPane(el, ctx = {}) {
             }).addTo(map);
             markerLayer = L.layerGroup().addTo(map);
         }
-        markerLayer.clearLayers();
 
-        const bounds = [];
-        venues.forEach(v => {
-            const lat = Number(v.lat), lng = Number(v.lng);
-            if (!isFinite(lat) || !isFinite(lng)) return;
-            const recent = (v.recent || []).map(r => `
-                <div class="p-2 border-b border-slate-100 last:border-0 mb-1">
-                    <p class="text-[10px] font-black text-indigo-500 uppercase leading-none">${escapeHtml(r.date)}</p>
-                    <p class="text-[12px] font-bold text-slate-800 leading-tight">${escapeHtml(r.band || '')}</p>
-                </div>`).join('');
-            const more = v.gigs > (v.recent || []).length
-                ? `<p class="text-[10px] text-slate-400 text-center">+ ${fmt(v.gigs - v.recent.length)} earlier</p>` : '';
-
-            L.circleMarker([lat, lng], {
-                radius: Math.min(5 + Math.sqrt(v.gigs || 1) * 2.2, 22),
-                fillColor: '#4f46e5', color: '#fff', weight: 2, fillOpacity: 0.9,
-            }).bindPopup(`
-                <div class="p-1 max-h-48 overflow-y-auto min-w-[180px]">
-                    <h4 class="text-[10px] font-black uppercase text-slate-400 mb-2 tracking-widest border-b pb-1">
-                        ${escapeHtml(v.name || '')}${v.city ? ' · ' + escapeHtml(v.city) : ''}
-                    </h4>
-                    ${recent}${more}
-                    <div class="pt-2 text-center">
-                        <span class="bg-indigo-50 text-indigo-600 text-[10px] font-black px-2 py-0.5 rounded-full uppercase">
-                            ${plural(v.gigs, 'gig', 'gigs')}
-                        </span>
-                    </div>
-                </div>`, { maxWidth: 250, className: 'gig-map-popup' }).addTo(markerLayer);
-            bounds.push([lat, lng]);
-        });
+        const bounds = plotVenues(markerLayer, venues, false);
 
         mapBounds = bounds;
         map.invalidateSize();
@@ -527,6 +547,42 @@ export function renderGigsPane(el, ctx = {}) {
         setCount('map', plural(res.total || 0, 'venue', 'venues'));
         $('[data-role="map-note"]').textContent = res.unmapped
             ? `${plural(res.unmapped, 'venue has', 'venues have')} no map location yet.` : '';
+    }
+
+    // Expanded map: the same pins in a large overlay, like the personal Explorer
+    // (ui.js openMapModal). Its own Leaflet instance, removed when it closes.
+    function expandMap() {
+        if (!loaded.map || !window.L) return;
+        expandedMap?.close();
+        expandedMap = openExpanded({
+            title: 'Community map',
+            subtitle: plural(lastVenues.length, 'venue', 'venues')
+                + (lastUnmapped ? ` · ${plural(lastUnmapped, 'venue has', 'venues have')} no map location yet` : ''),
+            onOpen(body) {
+                const L = window.L;
+                body.innerHTML = '<div data-role="big-map" class="rounded-2xl overflow-hidden border border-slate-100" style="height:70vh; width:100%; position:relative; z-index:1;"></div>';
+                bigMap = L.map(body.querySelector('[data-role="big-map"]'), {
+                    zoomControl: false, minZoom: 1, worldCopyJump: true, preferCanvas: true,
+                });
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '© OpenStreetMap contributors', subdomains: 'abc',
+                }).addTo(bigMap);
+                const layer = L.layerGroup().addTo(bigMap);
+                const bounds = plotVenues(layer, lastVenues, true);
+                // Let the overlay lay out before measuring, then fit
+                setTimeout(() => {
+                    if (!bigMap) return;
+                    bigMap.invalidateSize();
+                    if (bounds.length) bigMap.fitBounds(bounds, { padding: [80, 80], maxZoom: 9 });
+                    else bigMap.setView([20, 0], 2);
+                }, 50);
+            },
+            onClose() {
+                try { bigMap?.remove(); } catch (_) { /* already gone */ }
+                bigMap = null;
+                expandedMap = null;
+            },
+        });
     }
 
     // ── view switching / search ──────────────────────────────────────────────
@@ -563,6 +619,7 @@ export function renderGigsPane(el, ctx = {}) {
     // already debounced and de-duplicated): drop every view's data, refresh the
     // stats and reload the visible view.
     function onQueryChange() {
+        expandedMap?.close();             // its pins are about to be stale
         loaded.list = loaded.calendar = loaded.map = false;
         counts.list = counts.calendar = counts.map = '';
         showCount();
@@ -575,6 +632,8 @@ export function renderGigsPane(el, ctx = {}) {
 
     el.addEventListener('click', (e) => {
         const t = e.target;
+
+        if (t.closest('[data-expand="map"]')) { expandMap(); return; }
 
         const viewBtn = t.closest('[data-view]');
         if (viewBtn) { setView(viewBtn.dataset.view); return; }
@@ -616,6 +675,7 @@ export function renderGigsPane(el, ctx = {}) {
 
     return function dispose() {
         disposed = true;
+        expandedMap?.close();             // overlay lives on <body>, outside this pane
         query.dispose();                  // closes the drawer and hands it back to personal mode
         ac.abort();                       // removes every listener, cancels in-flight RPCs
         if (map) {

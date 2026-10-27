@@ -1,9 +1,9 @@
 /**
  * GigList Core Engine
- * v10.3.0 — 2026-10-27
+ * v10.3.1 — 2026-10-27
  * ------------------------------------------------------------------
- * ✅ Community mode added
- * ✅ Started refactor of mode management so avoid reloading full site when switching
+ * ✅ Community mode extended to include non-public profiles anonymously
+ * ✅ Community feed reworked
  */
 
 import * as Data from './modules/data.js';
@@ -50,7 +50,7 @@ import './modules/community-fans.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "10.2.2";
+const APP_VERSION = "10.3.1";
 
 // Columns of profiles that the app is allowed to read (see the column grants
 // in Supabase). home_lat / home_lng / home_label are deliberately excluded:
