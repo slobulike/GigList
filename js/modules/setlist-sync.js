@@ -33,7 +33,9 @@
  *
  * ─── Transform helpers ────────────────────────────────────────────────────
  *   toUKDate(eventDate)
- *   parseSongs(sets)
+ *   parseSetlist(sets)   — structured sets/songs (tape, info, cover, with, encore)
+ *   parseSongs(sets)     — flat pipe-separated string of PERFORMED songs only
+ *   pickSetlist(list, venue) — choose the right setlist when a date has several
  *   groupByShow(setlists)
  *   buildJournalRow(userId, show)
  *   buildVenueRow(venueRaw)
@@ -175,23 +177,121 @@ export function toUKDate(eventDate) {
 
 
 /**
+ * Parse the nested sets structure into a compact structured form, keeping
+ * the per-song and per-set detail setlist.fm provides:
+ *
+ *   [{ name?, encore?, songs: [{ name, tape?, info?, cover?, with? }] }]
+ *
+ *   tape   — true when the track was played over the PA (setlist.fm's
+ *            cassette icon), NOT performed live
+ *   info   — free-text note, e.g. 'With "X" as intro'
+ *   cover  — { name, mbid } of the original artist
+ *   with   — { name, mbid } of a guest who joined for the song
+ *
+ * Optional keys are only present when set, to keep the stored JSON small.
+ * Stored in performances.setlist_data.
+ */
+export function parseSetlist(sets) {
+    const out = [];
+    for (const set of sets?.set || []) {
+        const songs = [];
+        for (const s of set?.song || []) {
+            if (!s?.name) continue;
+            const song = { name: s.name };
+            if (s.tape === true || s.tape === 'true') song.tape = true;
+            if (s.info)       song.info  = s.info;
+            if (s.cover?.name) song.cover = { name: s.cover.name, mbid: s.cover.mbid || null };
+            if (s.with?.name)  song.with  = { name: s.with.name,  mbid: s.with.mbid  || null };
+            songs.push(song);
+        }
+        if (!songs.length) continue;
+        const entry = { songs };
+        if (set.name)   entry.name   = set.name;
+        if (set.encore) entry.encore = set.encore;
+        out.push(entry);
+    }
+    return out;
+}
+
+
+/**
  * Parse songs from the nested sets structure into a pipe-separated string.
  * Matches the format used in performances.csv and sync_shared_data.py.
+ *
+ * Only songs that were actually PERFORMED are included: tape tracks (played
+ * over the PA — setlist.fm's cassette icon) are excluded, so this string
+ * stays safe to count, search and display as "the setlist". Tape tracks
+ * live in setlist_data (see parseSetlist).
  */
 export function parseSongs(sets) {
-    const songs = [];
-    for (const set of sets?.set || []) {
-        for (const song of set?.song || []) {
-            if (song.name) songs.push(song.name);
-        }
-    }
-    return songs.join(' | ');
+    return parseSetlist(sets)
+        .flatMap(set => set.songs.filter(s => !s.tape).map(s => s.name))
+        .join(' | ');
 }
 
 
 function isFestivalVenue(venueName) {
     const lower = venueName.toLowerCase();
     return FESTIVAL_KEYWORDS.some(kw => lower.includes(kw));
+}
+
+
+const _haversineKm = (lat1, lon1, lat2, lon2) => {
+    const rad = Math.PI / 180;
+    const dLat = (lat2 - lat1) * rad, dLon = (lon2 - lon1) * rad;
+    const a = Math.sin(dLat / 2) ** 2
+            + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLon / 2) ** 2;
+    return 6371 * 2 * Math.asin(Math.sqrt(a));
+};
+
+/**
+ * Chooses ONE setlist from the candidates setlist.fm returns for an
+ * artist + date. Usually there is exactly one, but an artist can play two
+ * shows in a day (a radio session and the arena show, a matinee and an
+ * evening, two festival stages), and the API order is arbitrary.
+ *
+ * Ranking, best first:
+ *   1. venue match   — setlist venue id === venue.place_id (setlist.fm id)
+ *   2. nearest city  — haversine distance from the journal venue's lat/long
+ *                      to the setlist's CITY coords (setlist.fm only gives
+ *                      city-level coords, so same-city candidates tie here)
+ *   3. most songs    — breaks same-city ties; a 2-song radio session loses
+ *                      to a full 21-song arena set
+ *
+ * Name matching is deliberately NOT used: venues get renamed ("Wembley
+ * Arena" vs "The SSE Arena, Wembley") and carry different setlist.fm ids.
+ *
+ * @param candidates  array of raw setlist.fm setlist objects
+ * @param venue       optional { place_id, latitude, longitude } of the
+ *                    journal's venue (a venues table row)
+ */
+export function pickSetlist(candidates, venue = null) {
+    const list = (candidates || []).filter(Boolean);
+    if (list.length <= 1) return list[0] || null;
+
+    const songCount = sl => parseSongs(sl.sets).split(' | ').filter(Boolean).length;
+    const rank = sl => {
+        const v = sl.venue || {};
+        if (venue?.place_id && v.id === venue.place_id) return { tier: 0, dist: 0 };
+        const c = v.city?.coords;
+        if (venue?.latitude != null && venue?.longitude != null
+            && c?.lat != null && c?.long != null) {
+            return { tier: 1, dist: _haversineKm(venue.latitude, venue.longitude, c.lat, c.long) };
+        }
+        return { tier: 2, dist: 0 };
+    };
+
+    const ranked = list
+        .map(sl => ({ sl, ...rank(sl), songs: songCount(sl) }))
+        .sort((a, b) => a.tier - b.tier
+                     || a.dist - b.dist
+                     || b.songs - a.songs);
+
+    if (list.length > 1) {
+        console.log('pickSetlist: %d candidates for one date, chose %s (%d songs)',
+            list.length, ranked[0].sl.venue?.name, ranked[0].songs);
+    }
+    return ranked[0].sl;
 }
 
 
@@ -210,8 +310,14 @@ export function groupByShow(setlists) {
         const key       = `${dateUK}${venueName}`;
         const [d, m, y] = dateUK.split('/');
 
-        const artist = sl.artist?.name || 'Unknown Artist';
-        const songs  = parseSongs(sl.sets);
+        const artist     = sl.artist?.name || 'Unknown Artist';
+        const songs      = parseSongs(sl.sets);
+        const structured = parseSetlist(sl.sets);
+        // Only store setlist_data when there's something beyond the flat
+        // string worth keeping (any sets, or a show-level note)
+        const setlistData = (structured.length || sl.info)
+            ? { info: sl.info || null, sets: structured }
+            : null;
 
         if (!grouped.has(key)) {
             grouped.set(key, {
@@ -232,6 +338,9 @@ export function groupByShow(setlists) {
             artist,
             role:           'Headline',     // refined below after grouping
             setlist:        songs || null,
+            setlist_data:   setlistData,
+            setlist_fm_id:  sl.id          || null,
+            setlist_version: sl.versionId  || null,
             tour:           sl.tour?.name  || null,
             setlist_url:    sl.url         || null,
             official_venue: venueName,
@@ -591,4 +700,3 @@ export function handleZeroSyncResult({ userNotFound = false } = {}) {
 
     showNoSetlistTip();
 }
-

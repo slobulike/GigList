@@ -10,7 +10,7 @@
 import { parseDate, escapeHtml } from './utils.js';
 import { supabase, authedFetch } from './supabase.js';
 import {
-    groupByShow, buildJournalRow, buildVenueRow,
+    groupByShow, buildJournalRow, buildVenueRow, pickSetlist,
     upsertVenues, upsertPerformances, upsertJournals,
 } from './setlist-sync.js';
 import { enrichNewArtist } from './artist-enrichment.js';
@@ -503,11 +503,12 @@ async function lookupMbid(artistName) {
 /**
  * Fetch the setlist for a specific MBID + date using the find-show endpoint,
  * which passes `date=DD-MM-YYYY` to setlist.fm's search/setlists API.
- * Returns the first matching setlist object, or null if not found.
+ * Returns the best matching setlist object (see pickSetlist — an act can
+ * play twice in a day), or null if not found.
  *
  * dateUK is DD/MM/YYYY (GigList format) — converted to DD-MM-YYYY for the API.
  */
-async function lookupSetlistsByDate(mbid, dateUK) {
+async function lookupSetlistsByDate(mbid, dateUK, venue = null) {
     const fmDate = dateUK.replace(/\//g, '-'); // DD/MM/YYYY → DD-MM-YYYY
 
     const url = `${WORKER_URL}/?endpoint=find-show&mbid=${encodeURIComponent(mbid)}&eventDate=${fmDate}`;
@@ -518,7 +519,7 @@ async function lookupSetlistsByDate(mbid, dateUK) {
     if (!res.ok) return null;
 
     const data = await res.json();
-    return (data.setlist || [])[0] || null;
+    return pickSetlist(data.setlist, venue);
 }
 
 /**
@@ -744,7 +745,7 @@ window.showSpinner?.('Saving show…');
     const writeUserId = isBandWrite ? null : session.user.id;
 
     // The venue the user picked, as a venues.id (null if it's a new / unmatched name)
-    const { id: venueId, known: venueIsKnown } = await _lookupVenue(venue);
+    const { id: venueId, known: venueIsKnown, row: venueRow } = await _lookupVenue(venue);
 
     const supabaseRow = {
         user_id: writeUserId,
@@ -957,14 +958,26 @@ window.showSpinner?.('Saving show…');
                                     if (!venueIsKnown) await _submitPendingVenue({ session, journalKey, band, dateStr, venue });
                                 } else if (setlistRes.ok) {
                                     const data = await setlistRes.json();
-                                    const matchingSetlist = (data.setlist || [])[0];
+                                    // An act can play twice in one day (e.g. a radio session
+                                    // and the arena show) — pick by venue, then by song count
+                                    const matchingSetlist = pickSetlist(data.setlist, venueRow);
 
                                     if (matchingSetlist) {
                                         const grouped = groupByShow([matchingSetlist]);
                                         const perfRows = [];
                                         const venueRows = [];
                                         for (const show of grouped.values()) {
-                                            perfRows.push(...show.performances.map(p => ({ ...p, artist_id: artistId })));
+                                            // Write under THIS journal's key and venue name, not
+                                            // setlist.fm's: data.js loads performances by exact
+                                            // journal_key, so when the journal names the venue
+                                            // differently ("Wembley Arena" vs "The SSE Arena,
+                                            // Wembley") a setlist.fm-keyed row is never seen.
+                                            perfRows.push(...show.performances.map(p => ({
+                                                ...p,
+                                                journal_key:    journalKey,
+                                                official_venue: venue,
+                                                artist_id:      artistId,
+                                            })));
                                             venueRows.push(buildVenueRow(show.venueRaw));
                                         }
                                         await Promise.all([upsertVenues(venueRows), upsertPerformances(perfRows)]);
@@ -1079,10 +1092,11 @@ async function _lookupVenue(venueName) {
     if (!venueName) return { id: null, known: false };
     try {
         const { data, error } = await supabase
-            .from('venues').select('id').eq('official_name', venueName).limit(2);
+            .from('venues').select('id, place_id, latitude, longitude').eq('official_name', venueName).limit(2);
         if (error) { console.warn('venue lookup failed:', error.message); return { id: null, known: false }; }
         const rows = data || [];
-        return { id: rows.length === 1 ? rows[0].id : null, known: rows.length > 0 };
+        // `row` (only when unambiguous) lets callers rank same-day setlists by venue
+        return { id: rows.length === 1 ? rows[0].id : null, known: rows.length > 0, row: rows.length === 1 ? rows[0] : null };
     } catch (err) {
         console.warn('venue lookup error:', err.message);
         return { id: null, known: false };

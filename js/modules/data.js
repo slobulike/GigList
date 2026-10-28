@@ -421,6 +421,7 @@ const buildAppData = (user, raw) => {
         Artist:         p.artist         || p.Artist         || '',
         Role:           p.role           || p.Role           || '',
         Setlist:        p.setlist        || p.Setlist        || '',
+        SetlistData:    p.setlist_data   || p.SetlistData    || null,
         OfficialVenue:  p.official_venue || p.OfficialVenue  || '',
         SetlistURL:     p.setlist_url    || p.SetlistURL      || '',
     }));
@@ -665,6 +666,7 @@ export const loadPerformances = async (journalKeys, venueLookup = {}) => {
         Artist:        p.artist         || p.Artist         || '',
         Role:          p.role           || p.Role           || '',
         Setlist:       p.setlist        || p.Setlist        || '',
+        SetlistData:   p.setlist_data   || p.SetlistData    || null,
         OfficialVenue: p.official_venue || p.OfficialVenue  || '',
         SetlistURL:    p.setlist_url    || p.SetlistURL      || '',
     }));

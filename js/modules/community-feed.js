@@ -422,8 +422,6 @@ async function renderFeedPane(el /*, ctx */) {
             spotlight = art.dataset.cfArtist;
             playing = false;
             repaintSpotlight();
-            const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-            el.querySelector('[data-cf-spotlight]')?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
             return;
         }
         if (e.target.closest('[data-cf-play]')) { playing = true;  repaintSpotlight(); return; }

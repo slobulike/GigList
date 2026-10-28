@@ -1,9 +1,9 @@
 /**
  * GigList Core Engine
- * v10.3.1 — 2026-10-27
+ * v10.3.2 — 2026-10-28
  * ------------------------------------------------------------------
- * ✅ Community mode extended to include non-public profiles anonymously
- * ✅ Community feed reworked
+ * ✅ Small bug fix to community feed scroll issue
+ * ✅ Updated setlist fm sync to have awareness of additional setlist info previously discarded like "tape = true"
  */
 
 import * as Data from './modules/data.js';
@@ -50,7 +50,7 @@ import './modules/community-fans.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "10.3.1";
+const APP_VERSION = "10.3.2";
 
 // Columns of profiles that the app is allowed to read (see the column grants
 // in Supabase). home_lat / home_lng / home_label are deliberately excluded:
