@@ -1,9 +1,9 @@
 /**
  * GigList Core Engine
- * v10.3.2 — 2026-10-28
+ * v10.3.3 — 2026-10-28
  * ------------------------------------------------------------------
- * ✅ Small bug fix to community feed scroll issue
- * ✅ Updated setlist fm sync to have awareness of additional setlist info previously discarded like "tape = true"
+ * ✅ Updated community feed to include user photos from each artist
+ * ✅ Clarified wording on public profile toggle
  */
 
 import * as Data from './modules/data.js';

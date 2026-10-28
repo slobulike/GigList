@@ -2,16 +2,24 @@
  * GigList — community-feed.js
  * Community > Feed pane (v2, visual).
  *
- * Still fully anonymous: the get_community_feed() RPC (v1, unchanged) returns
- * aggregates only. v2 adds ONE extra call, get_community_artist_media(), which
- * takes band names and returns shared artist facts (image + Spotify artist id)
- * from the `artists` table. No user data is involved in either call.
+ * The feed itself is anonymous: the get_community_feed() RPC (v1, unchanged)
+ * returns aggregates only, and get_community_artist_media() returns shared
+ * artist facts (image + Spotify artist id) from the `artists` table.
+ *
+ * ONE exception: the Spotlight hero can show fan photos. Those come from
+ * get_community_artist_photos(), which returns ONLY photos from users whose
+ * profile is public (is_public = true), plus that user's display name and
+ * avatar. Nothing from private profiles ever reaches this pane.
  *
  * What's new in v2:
  *   - Spotlight: a daily-rotating hero card (seeded by day, so it changes
  *     every visit-day) with a Spotify artist player that loads ON DEMAND
  *     (one iframe at a time, never on page load) and a "Watch live" link.
- *   - Tap any artist anywhere in the feed to swap them into the Spotlight.
+ *   - Tap any artist anywhere in the feed to swap them into the Spotlight
+ *     (the page does not scroll; only the hero changes).
+ *   - The Spotlight hero is swipable: slide 1 is the artist image, then up to
+ *     8 fan photos from public profiles, each captioned with its own show
+ *     (venue + date) and the fan's avatar. Photos load lazily per artist.
  *   - Hot list as a swipeable rail of artist-image tiles.
  *   - Trending as image rows with proportional fan bars.
  *   - Busy venues as gradient tiles; On this day as poster tiles.
@@ -37,6 +45,8 @@ import { registerCommunityPane } from './community.js';
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const MAX_MEDIA_NAMES = 50;                 // matches the cap inside the RPC
+const PHOTO_URL_TTL_S = 15 * 60;            // signed URL lifetime for fan photos
+const PHOTO_CACHE_MS = 10 * 60 * 1000;      // refetch well before those URLs expire
 const CARD = 'bg-white rounded-[2rem] border border-slate-100 shadow-sm p-5';
 const EYEBROW = 'text-[10px] font-black text-slate-400 uppercase tracking-widest';
 const H3 = 'text-xl font-black italic uppercase tracking-tighter text-slate-900 mb-3';
@@ -57,6 +67,7 @@ const GRADIENTS = [
 let _cache = null;                 // { at: number, data: object }
 const _media = new Map();          // lowercase band -> { image_url, spotify_artist_id }
 const _mediaAsked = new Set();     // lowercase bands already requested (hit or miss)
+const _photos = new Map();         // lowercase band -> { at: number, list: Array } (fan photos)
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 
@@ -131,6 +142,43 @@ function _pickSpotlight(data) {
     return from[_dayNumber() % from.length];
 }
 
+// ─── FAN PHOTOS (hero slides) ────────────────────────────────────────────────
+
+// Caption for one fan photo: the show it belongs to, never a relative "this week".
+function _photoCaption(p) {
+    const d = p.show_date ? new Date(`${p.show_date}T00:00:00`) : null;
+    const when = d && !isNaN(d)
+        ? d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+        : '';
+    return [p.venue, when].filter(Boolean).join(' · ');
+}
+
+// Slide 0 is the artist artwork; slides 1..n are fan photos.
+function _slideMeta(band, data, photos, i) {
+    const p = i > 0 ? photos[i - 1] : null;
+    return p
+        ? { eyebrow: 'Fan photo', line: _photoCaption(p) }
+        : { eyebrow: 'Spotlight', line: _reason(band, data) };
+}
+
+// Update the fixed overlay text + dots in place (no repaint, so no flicker).
+function _applySlide(host, band, data, photos, i) {
+    const m = _slideMeta(band, data, photos, i);
+    const eb = host.querySelector('[data-cf-eyebrow]');
+    const ln = host.querySelector('[data-cf-line]');
+    if (eb) eb.textContent = m.eyebrow;
+    if (ln) ln.textContent = m.line;
+    host.querySelectorAll('[data-cf-dot]').forEach((d, n) => {
+        d.classList.toggle('bg-white', n === i);
+        d.classList.toggle('bg-white/40', n !== i);
+    });
+}
+
+function _cachedPhotos(band) {
+    const hit = _photos.get(_key(band));
+    return hit && Date.now() - hit.at < PHOTO_CACHE_MS ? hit.list : [];
+}
+
 // ─── ARTWORK ──────────────────────────────────────────────────────────────────
 
 /**
@@ -153,7 +201,7 @@ function _art(band, cls = '') {
 
 // ─── SPOTLIGHT ────────────────────────────────────────────────────────────────
 
-function _spotlightSection(band, data, playing) {
+function _spotlightSection(band, data, playing, photos = [], slide = 0) {
     if (!band) return '<div data-cf-spotlight></div>';
     const sid = _spotifyId(band);
     const q = encodeURIComponent(band);
@@ -180,17 +228,59 @@ function _spotlightSection(band, data, playing) {
                <i data-lucide="music" class="w-4 h-4" aria-hidden="true"></i> Find on Spotify
            </a>`;
 
+    // Hero rail: artwork first, then one slide per fan photo.
+    const total = photos.length + 1;
+    const at = Math.min(Math.max(slide, 0), photos.length);
+    const meta = _slideMeta(band, data, photos, at);
+
+    const photoSlides = photos.map((p, i) => {
+        const name = String(p.display_name || 'A fan');
+        const av = safeUrl(p.avatar_url || '');
+        const photoUrl = safeUrl(p.url || '');
+        if (!photoUrl) return '';
+        return `
+            <div class="relative shrink-0 w-full h-full snap-center overflow-hidden bg-gradient-to-br ${_grad(band)}"
+                 role="group" aria-roledescription="slide" aria-label="${_attr(`Fan photo ${i + 1} of ${photos.length}`)}">
+                <img src="${_attr(photoUrl)}" alt="${_attr(`${band} at ${p.venue || 'a show'}, photo by ${name}`)}"
+                     loading="lazy" decoding="async" data-cf-photo
+                     class="absolute inset-0 w-full h-full object-cover">
+                <div class="absolute top-4 left-4 flex items-center gap-2 max-w-[70%] bg-slate-900/60 backdrop-blur-sm rounded-full pl-1 pr-3 py-1">
+                    <span class="relative shrink-0 w-7 h-7 rounded-full overflow-hidden bg-indigo-500 flex items-center justify-center text-[10px] font-black text-white">
+                        ${escapeHtml(_initials(name))}
+                        ${av ? `<img src="${_attr(av)}" alt="" data-cf-avatar class="absolute inset-0 w-full h-full object-cover">` : ''}
+                    </span>
+                    <span class="text-[11px] font-bold text-white truncate">${escapeHtml(name)}</span>
+                </div>
+            </div>`;
+    }).join('');
+
+    const swipable = photos.length > 0;
+    const railAttrs = swipable
+        ? `tabindex="0" role="region" aria-roledescription="carousel" aria-label="${_attr(`${band}: artist image and fan photos`)}"`
+        : '';
+    const dots = swipable ? `
+                <div class="absolute top-4 right-4 flex gap-1.5 pointer-events-none" aria-hidden="true">
+                    ${Array.from({ length: total }, (_, i) =>
+                        `<span data-cf-dot class="block w-1.5 h-1.5 rounded-full ${i === at ? 'bg-white' : 'bg-white/40'}"></span>`).join('')}
+                </div>` : '';
+
     return `
     <div data-cf-spotlight>
         <section class="overflow-hidden rounded-[2rem] bg-slate-900 shadow-sm" aria-labelledby="cf-spot">
             <div class="relative h-72">
-                ${_art(band, 'absolute inset-0')}
-                <div class="absolute inset-0 bg-gradient-to-t from-slate-900 via-slate-900/50 to-transparent"></div>
-                <div class="absolute inset-x-0 bottom-0 p-5">
-                    <p class="text-[10px] font-black uppercase tracking-widest text-white/70">Spotlight</p>
-                    <h3 id="cf-spot" class="text-3xl font-black italic uppercase tracking-tighter text-white leading-none mt-1">${escapeHtml(band)}</h3>
-                    <p class="text-sm font-bold text-white/80 mt-2">${escapeHtml(_reason(band, data))}</p>
+                <div data-cf-hero ${railAttrs}
+                     class="absolute inset-0 flex overflow-x-auto overscroll-x-contain snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                    <div class="relative shrink-0 w-full h-full snap-center">
+                        ${_art(band, 'absolute inset-0')}
+                    </div>
+                    ${photoSlides}
                 </div>
+                <div class="absolute inset-0 pointer-events-none bg-gradient-to-t from-slate-900 via-slate-900/50 to-transparent"></div>
+                <div class="absolute inset-x-0 bottom-0 p-5 pointer-events-none">
+                    <p data-cf-eyebrow class="text-[10px] font-black uppercase tracking-widest text-white/70">${escapeHtml(meta.eyebrow)}</p>
+                    <h3 id="cf-spot" class="text-3xl font-black italic uppercase tracking-tighter text-white leading-none mt-1">${escapeHtml(band)}</h3>
+                    <p data-cf-line aria-live="polite" class="text-sm font-bold text-white/80 mt-2 line-clamp-2">${escapeHtml(meta.line)}</p>
+                </div>${dots}
             </div>
             <div class="p-4 flex flex-wrap gap-2">
                 ${playBtn}
@@ -363,6 +453,42 @@ async function _loadMedia(data, signal) {
     }
 }
 
+/**
+ * Fan photos for one artist. The RPC only returns photos from public profiles;
+ * the signed URLs work because of the storage policy that lets authenticated
+ * users read gig-photos belonging to public profiles. Best-effort: any failure
+ * just means the hero stays artwork-only. Returns the cached array itself on a
+ * hit so callers can compare by reference.
+ */
+async function _loadPhotos(band, signal) {
+    const cached = _photos.get(_key(band));
+    if (cached && Date.now() - cached.at < PHOTO_CACHE_MS) return cached.list;
+    try {
+        const { data: rows, error } = await supabase
+            .rpc('get_community_artist_photos', { p_band: band })
+            .abortSignal(signal);
+        if (error) throw error;
+        let list = [];
+        if (rows?.length) {
+            const { data: signed, error: signErr } = await supabase.storage
+                .from('gig-photos')
+                .createSignedUrls(rows.map(r => r.photo_path), PHOTO_URL_TTL_S);
+            if (signErr) throw signErr;
+            const urls = new Map((signed || []).filter(x => x.signedUrl).map(x => [x.path, x.signedUrl]));
+            // Belt and braces: never show a photo dated in the future (the RPC filters too).
+            const today = new Date().toLocaleDateString('en-CA');   // YYYY-MM-DD, local time
+            list = rows
+                .filter(r => urls.has(r.photo_path) && (!r.show_date || r.show_date <= today))
+                .map(r => ({ ...r, url: urls.get(r.photo_path) }));
+        }
+        _photos.set(_key(band), { at: Date.now(), list });
+        return list;
+    } catch (err) {
+        if (!signal.aborted) console.warn('community-feed: fan photos failed', err);
+        return [];
+    }
+}
+
 // ─── PANE ─────────────────────────────────────────────────────────────────────
 
 async function renderFeedPane(el /*, ctx */) {
@@ -390,16 +516,31 @@ async function renderFeedPane(el /*, ctx */) {
     // View state lives in this closure; nothing leaks between tab visits.
     let spotlight = _pickSpotlight(data);
     let playing = false;
+    let photos = spotlight ? _cachedPhotos(spotlight) : [];   // fan photos for the current spotlight
+    let slide = 0;                                            // 0 = artwork, 1..n = fan photos
 
     const repaintSpotlight = () => {
         const host = el.querySelector('[data-cf-spotlight]');
         if (!host) return;
-        host.outerHTML = _spotlightSection(spotlight, data, playing);
+        host.outerHTML = _spotlightSection(spotlight, data, playing, photos, slide);
+        // Keep the swipe position across Listen / Close player repaints.
+        const rail = el.querySelector('[data-cf-hero]');
+        if (rail && slide > 0) rail.scrollLeft = slide * rail.clientWidth;
         if (window.lucide) lucide.createIcons();
     };
 
+    // Lazy: runs when the spotlight changes, never blocks the feed render.
+    const loadPhotosFor = async (band) => {
+        if (!band) return;
+        const list = await _loadPhotos(band, ctrl.signal);
+        if (disposed || band !== spotlight || list === photos) return;
+        photos = list;
+        // Don't repaint under a playing Spotify iframe; photos appear on the next repaint.
+        if (list.length && !playing) repaintSpotlight();
+    };
+
     const html = [
-        _spotlightSection(spotlight, data, false),
+        _spotlightSection(spotlight, data, false, photos, 0),
         _hotCard(data.hot),
         _trendingCard(data.trending),
         _venuesAheadCard(data.venues_ahead),
@@ -419,9 +560,13 @@ async function renderFeedPane(el /*, ctx */) {
 
         const art = e.target.closest('[data-cf-artist]');
         if (art) {
+            // Swap the hero in place. No scrolling: the page stays where it is.
             spotlight = art.dataset.cfArtist;
             playing = false;
+            slide = 0;
+            photos = _cachedPhotos(spotlight);
             repaintSpotlight();
+            loadPhotosFor(spotlight);
             return;
         }
         if (e.target.closest('[data-cf-play]')) { playing = true;  repaintSpotlight(); return; }
@@ -432,7 +577,10 @@ async function renderFeedPane(el /*, ctx */) {
     // Chain: Spotify image -> local stock photo -> remove (initials show through).
     const onImgError = (e) => {
         const img = e.target;
-        if (!(img instanceof HTMLImageElement) || !img.hasAttribute('data-cf-img')) return;
+        if (!(img instanceof HTMLImageElement)) return;
+        // Fan photo / avatar: just drop the broken image; gradient or initials show through.
+        if (img.hasAttribute('data-cf-photo') || img.hasAttribute('data-cf-avatar')) { img.remove(); return; }
+        if (!img.hasAttribute('data-cf-img')) return;
         if (img.dataset.stage === 'remote') {
             img.dataset.stage = 'local';
             img.src = _localArt(img.dataset.band);
@@ -441,15 +589,35 @@ async function renderFeedPane(el /*, ctx */) {
         }
     };
 
+    // Hero swipe: scroll events don't bubble, so capture. Updates the overlay
+    // caption and dots in place; throttled to one update per frame.
+    let raf = 0;
+    const onHeroScroll = (e) => {
+        const rail = e.target;
+        if (!(rail instanceof Element) || !rail.hasAttribute('data-cf-hero')) return;
+        cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(() => {
+            const i = Math.round(rail.scrollLeft / (rail.clientWidth || 1));
+            if (i === slide || i < 0 || i > photos.length) return;
+            slide = i;
+            const host = el.querySelector('[data-cf-spotlight]');
+            if (host) _applySlide(host, spotlight, data, photos, slide);
+        });
+    };
+
     el.addEventListener('click', onClick);
     el.addEventListener('error', onImgError, true);
+    el.addEventListener('scroll', onHeroScroll, true);
     const dispose = () => {
+        cancelAnimationFrame(raf);
         el.removeEventListener('click', onClick);
         el.removeEventListener('error', onImgError, true);
+        el.removeEventListener('scroll', onHeroScroll, true);
         disposer();
     };
 
     if (window.lucide) lucide.createIcons();
+    loadPhotosFor(spotlight);
     return dispose;
 }
 
