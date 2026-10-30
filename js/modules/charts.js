@@ -1101,6 +1101,236 @@ export const renderAverageMetricsChart = (journalData, venuesData = {}, homeLoca
 };
 
 /**
+ * 9. WHEN YOU GO — gigs by month of year and by weekday (Bar)
+ *
+ * The month drill-down inside the Year modal answers "what happened in 2019?";
+ * these answer "which months / days do I usually go?" across every show in
+ * scope. Same data scope as the other charts (the filtered rows), so the
+ * search and filter drawer apply. No click-through: filters.js has no month or
+ * weekday dimension to hand off to.
+ */
+const MONTH_LABELS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const WEEKDAY_LABELS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+
+// DD/MM/YYYY or YYYY-MM-DD → { y, m, d } or null (same formats the other charts accept)
+const parseYMD = (dateStr) => {
+    if (!dateStr) return null;
+    const parts = dateStr.includes('/') ? dateStr.split('/') : dateStr.split('-');
+    if (parts.length !== 3) return null;
+    const [y, m, d] = (parts[0].length === 4 ? parts : [parts[2], parts[1], parts[0]]).map(Number);
+    if (!(y >= 1000 && y <= 9999) || !(m >= 1 && m <= 12) || !(d >= 1 && d <= 31)) return null;
+    return { y, m, d };
+};
+
+const renderFixedBarChart = (data, canvasId, isModal, { containerId, labels, indexOf, color, emptyMessage }) => {
+    const ctx = document.getElementById(canvasId);
+    if (!ctx) return;
+
+    const existingChart = Chart.getChart(ctx);
+    if (existingChart) existingChart.destroy();
+
+    const counts = new Array(labels.length).fill(0);
+    data.forEach(g => {
+        const p = parseYMD(g.Date);
+        if (!p) return;
+        const i = indexOf(p);
+        if (i >= 0 && i < counts.length) counts[i]++;
+    });
+    const isEmpty = counts.every(n => n === 0);
+
+    if (!isModal) {
+        setChartEmptyState(containerId, isEmpty, {
+            emptyMessage,
+            filteredMessage: 'No shows match your search',
+            filtersActive:   window._filtersModule?.hasActiveFilters?.() ?? false,
+        });
+    }
+    if (isEmpty) return;
+
+    const total = counts.reduce((a, b) => a + b, 0) || 1;
+
+    const newChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels,
+            datasets: [{ label: 'Gigs', data: counts, backgroundColor: color, borderRadius: isModal ? 8 : 4 }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    enabled: true,
+                    callbacks: isModal ? { footer: (items) => `${Math.round((items[0].raw / total) * 100)}% of shows` } : {}
+                }
+            },
+            scales: {
+                y: { beginAtZero: true, display: isModal, ticks: { precision: 0 } },
+                x: { grid: { display: false }, ticks: { font: { size: isModal ? 12 : 9 } } }
+            }
+        }
+    });
+
+    if (isModal) modalChartInstance = newChart;
+    return newChart;
+};
+
+export const renderMonthChart = (data, canvasId, isModal = false) =>
+    renderFixedBarChart(data, canvasId, isModal, {
+        containerId: 'monthChartContainer',
+        labels: MONTH_LABELS,
+        indexOf: (p) => p.m - 1,
+        color: '#10b981',
+        emptyMessage: 'No shows added yet',
+    });
+
+export const renderWeekdayChart = (data, canvasId, isModal = false) =>
+    renderFixedBarChart(data, canvasId, isModal, {
+        containerId: 'weekdayChartContainer',
+        labels: WEEKDAY_LABELS,
+        // UTC avoids a timezone shift moving the date; getUTCDay is Sun=0, we want Mon=0
+        indexOf: (p) => (new Date(Date.UTC(p.y, p.m - 1, p.d)).getUTCDay() + 6) % 7,
+        color: '#f59e0b',
+        emptyMessage: 'No shows added yet',
+    });
+
+/**
+ * 10. BUSIEST VENUES / BUSIEST CITIES (Horizontal Bar)
+ *
+ * Most-visited, by number of shows. Venues group on window.venueKey (so two
+ * venues with the same name in different places stay separate, same as the band
+ * page stats); cities come from window.resolveVenue and are keyed city+country so
+ * Birmingham UK and Birmingham US don't merge. Shows with no resolvable venue or
+ * city are skipped rather than lumped under "Unknown".
+ */
+const renderRankedBarChart = (rows, canvasId, isModal, { containerId, color, emptyMessage, filteredMessage, onClick }) => {
+    const ctx = document.getElementById(canvasId);
+    if (!ctx) return;
+
+    const existingChart = Chart.getChart(ctx);
+    if (existingChart) existingChart.destroy();
+
+    const ranked = rows.sort((a, b) => b.count - a.count).slice(0, isModal ? 25 : 10);
+
+    if (!isModal) {
+        setChartEmptyState(containerId, ranked.length === 0, {
+            emptyMessage,
+            filteredMessage,
+            filtersActive: window._filtersModule?.hasActiveFilters?.() ?? false,
+        });
+    }
+    if (ranked.length === 0) return;
+
+    const labels = ranked.map(r => r.label);
+    const values = ranked.map(r => r.count);
+    const maxLen = isModal ? 40 : 24;
+    const trunc  = (s) => (s.length > maxLen ? s.slice(0, maxLen - 1) + '…' : s);
+
+    // Count at the end of each bar; scoped to this chart via the plugins array
+    const countPlugin = {
+        id: 'rankedCountLabel',
+        afterDatasetsDraw(chart) {
+            const { ctx: c } = chart;
+            const meta = chart.getDatasetMeta(0);
+            c.save();
+            c.font = '700 11px sans-serif';
+            c.fillStyle = '#475569';
+            c.textAlign = 'left';
+            c.textBaseline = 'middle';
+            values.forEach((v, i) => { const b = meta.data[i]; if (b) c.fillText(String(v), b.x + 6, b.y); });
+            c.restore();
+        }
+    };
+
+    const newChart = new Chart(ctx, {
+        type: 'bar',
+        data: { labels, datasets: [{ label: 'Gigs', data: values, backgroundColor: color, borderRadius: 4 }] },
+        plugins: [countPlugin],
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            layout: { padding: { right: 28 } },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    enabled: true,
+                    callbacks: { afterLabel: (item) => ranked[item.dataIndex].sub || '' }
+                }
+            },
+            scales: {
+                x: { display: false },
+                y: {
+                    grid: { display: false },
+                    border: { display: false },
+                    ticks: {
+                        autoSkip: false, crossAlign: 'far', color: '#64748b',
+                        font: { weight: '800', size: isModal ? 13 : 12 },
+                        callback(v) { return trunc(this.getLabelForValue(v)); }
+                    }
+                }
+            },
+            onClick: (evt, elements) => {
+                if (elements.length === 0) return;
+                onClick?.(ranked[elements[0].index]);
+                if (isModal && typeof window.closeChartModal === 'function') window.closeChartModal();
+            }
+        }
+    });
+
+    if (isModal) modalChartInstance = newChart;
+    return newChart;
+};
+
+export const renderBusiestVenuesChart = (data, canvasId, isModal = false) => {
+    const byKey = new Map();
+    data.forEach(g => {
+        const label = (g.OfficialVenue || g.Venue || '').trim();
+        if (!label) return;
+        const key = window.venueKey ? window.venueKey(g) : label;
+        if (!byKey.has(key)) {
+            const city = window.resolveVenue?.(g)?.city;
+            byKey.set(key, { label, count: 0, sub: city && city !== 'Unknown City' ? city : '' });
+        }
+        byKey.get(key).count++;
+    });
+
+    return renderRankedBarChart([...byKey.values()], canvasId, isModal, {
+        containerId: 'venuesChartContainer',
+        color: '#8b5cf6',
+        emptyMessage: 'No venues yet',
+        filteredMessage: 'No venues match your search',
+        onClick: (row) => window._filtersModule?.setFilters({ venue: row.label }),
+    });
+};
+
+export const renderBusiestCitiesChart = (data, canvasId, isModal = false) => {
+    const byKey = new Map();
+    data.forEach(g => {
+        const v = window.resolveVenue?.(g);
+        const city = (v?.city || '').trim();
+        if (!city || city === 'Unknown City') return;
+        const country = (v?.country || g.Country || '').trim();
+        const key = `${city.toLowerCase()}|${country.toLowerCase()}`;
+        if (!byKey.has(key)) byKey.set(key, { label: city, count: 0, sub: country });
+        byKey.get(key).count++;
+    });
+
+    return renderRankedBarChart([...byKey.values()], canvasId, isModal, {
+        containerId: 'citiesChartContainer',
+        color: '#06b6d4',
+        emptyMessage: 'No cities yet',
+        filteredMessage: 'No cities match your search',
+        // No city dimension in filters.js, so go through the search box like Top Songs does
+        onClick: (row) => {
+            const input = document.getElementById('searchInput');
+            if (input) { input.value = row.label; window.refreshUI?.(); }
+        },
+    });
+};
+
+/**
  * Modal Controller — called by HTML onclick="openChartModal('year')" etc.
  */
 window.openChartModal = async function(chartType) {
@@ -1158,7 +1388,18 @@ window.openChartModal = async function(chartType) {
         renderHotList(dataToUse, window.performanceData, 'modalChartListBody', true);
     } else if (chartType === 'averagemetrics') {
         if (titleEl) titleEl.innerText = "Averages Over Time";
-        renderAverageMetricsChart(dataToUse, window.venuesData, window.homeLocation, 'modalChartCanvas', true);
+        renderAverageMetricsChart(dataToUse, window.venuesData, window.homeLocation, 'modalChartCanvas', true);    } else if (chartType === 'months') {
+        if (titleEl) titleEl.innerText = "Gigs by Month";
+        renderMonthChart(dataToUse, 'modalChartCanvas', true);
+    } else if (chartType === 'weekdays') {
+        if (titleEl) titleEl.innerText = "Gigs by Weekday";
+        renderWeekdayChart(dataToUse, 'modalChartCanvas', true);
+    } else if (chartType === 'venues') {
+        if (titleEl) titleEl.innerText = "Busiest Venues";
+        renderBusiestVenuesChart(dataToUse, 'modalChartCanvas', true);
+    } else if (chartType === 'cities') {
+        if (titleEl) titleEl.innerText = "Busiest Cities";
+        renderBusiestCitiesChart(dataToUse, 'modalChartCanvas', true);
     }
 
     if (window.lucide) lucide.createIcons();
@@ -1212,6 +1453,10 @@ export const renderDashboardCharts = (results, performanceData) => {
     if (document.getElementById('averageMetricsChart')) {
         renderAverageMetricsChart(results, window.venuesData, window.homeLocation, 'averageMetricsChart');
     }
+    if (document.getElementById('monthChart'))    renderMonthChart(results, 'monthChart');
+    if (document.getElementById('weekdayChart'))  renderWeekdayChart(results, 'weekdayChart');
+    if (document.getElementById('venuesChart'))   renderBusiestVenuesChart(results, 'venuesChart');
+    if (document.getElementById('citiesChart'))   renderBusiestCitiesChart(results, 'citiesChart');
 };
 
 window.closeChartModal = function() {

@@ -978,6 +978,11 @@ async function ensureLeaflet() {
 
 const _BAND_PIN = { none: '#a5b4fc', fans: '#4f46e5', mine: '#059669' };
 
+// Weezer band mode only: a show with no logged GigList attendance gets Rivers'
+// blue-album avatar instead of a plain dot, because Rivers was obviously at every show.
+const _RIVERS_AVATAR = 'assets/rivers-avatar.webp';
+const _isWeezerBand = () => window.isBandMode && (window.currentArtist || '').toLowerCase() === 'weezer';
+
 function _bandPlaces(data, venuesLookup) {
     const att = window._bandAttendance;
     const places = new Map();
@@ -1071,6 +1076,13 @@ function _bandPlaceMarker(place) {
         const html = `<div style="position:relative;width:34px;height:34px;">
             <div style="width:34px;height:34px;border-radius:9999px;border:3px solid ${ring};background:#e0e7ff;overflow:hidden;box-shadow:0 2px 6px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;font-weight:900;font-size:11px;color:#4338ca;">${inner}</div>${extra}</div>`;
         marker = L.marker(latlng, { icon: L.divIcon({ html, className: '', iconSize: [34, 34], iconAnchor: [17, 17] }) });
+    } else if (_isWeezerBand() && place.mine === 0 && place.attendees === 0) {
+        // Same size scaling as the dot it replaces, with a floor so his face stays recognisable
+        const size = Math.max(28, Math.round(radius * 2));
+        const half = size / 2;
+        const html = `<div style="width:${size}px;height:${size}px;border-radius:9999px;border:2px solid #fff;outline:2px solid ${_BAND_PIN.none};background:#00a8e8 url('${_RIVERS_AVATAR}') center/cover no-repeat;box-shadow:0 2px 6px rgba(0,0,0,.35);"></div>`;
+        marker = L.marker(latlng, { icon: L.divIcon({ html, className: '', iconSize: [size, size], iconAnchor: [half, half] }) });
+        marker.options.title = 'Rivers was there';
     } else {
         const kind = place.mine > 0 ? 'mine' : place.attendees > 0 ? 'fans' : 'none';
         marker = L.circleMarker(latlng, {
@@ -1098,13 +1110,18 @@ function _renderBandPins(layer, data, venuesLookup, bounds) {
 }
 
 function _ensureBandLegend(map) {
-    if (map._bandLegend) return;
+    // The map instance is reused across bands, so rebuild if Weezer-ness changed
+    if (map._bandLegend && map._bandLegendWeezer === _isWeezerBand()) return;
+    if (map._bandLegend) { map._bandLegend.remove(); map._bandLegend = null; }
+    map._bandLegendWeezer = _isWeezerBand();
     const legend = L.control({ position: 'bottomleft' });
     legend.onAdd = () => {
         const el = L.DomUtil.create('div', 'gig-map-legend');
         el.style.cssText = 'background:rgba(255,255,255,.92);border-radius:12px;padding:6px 10px;font:700 10px/1.6 system-ui,sans-serif;color:#475569;box-shadow:0 1px 4px rgba(0,0,0,.2);';
         const dot = c => `<span style="display:inline-block;width:9px;height:9px;border-radius:9999px;background:${c};margin-right:6px;vertical-align:middle;"></span>`;
-        el.innerHTML = `${dot(_BAND_PIN.mine)}You were there<br>${dot(_BAND_PIN.fans)}GigList fans were there<br>${dot(_BAND_PIN.none)}No logged attendance`;
+        el.innerHTML = `${dot(_BAND_PIN.mine)}You were there<br>${dot(_BAND_PIN.fans)}GigList fans were there<br>${_isWeezerBand()
+            ? `<span style="display:inline-block;width:13px;height:13px;border-radius:9999px;background:#00a8e8 url('${_RIVERS_AVATAR}') center/cover;margin-right:4px;vertical-align:middle;"></span>Rivers was there`
+            : `${dot(_BAND_PIN.none)}No logged attendance`}`;
         return el;
     };
     legend.addTo(map);

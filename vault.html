@@ -471,6 +471,30 @@
                 </div>
             </div>
 
+            <div id="monthChartContainer" class="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm relative group h-64">
+                <div class="flex justify-between items-start mb-2">
+                    <p class="text-[10px] font-black uppercase text-slate-400">Gigs by Month</p>
+                    <button onclick="openChartModal('months')" class="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-slate-100 rounded-lg text-slate-400">
+                        <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i>
+                    </button>
+                </div>
+                <div class="h-40">
+                    <canvas id="monthChart"></canvas>
+                </div>
+            </div>
+
+            <div id="weekdayChartContainer" class="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm relative group h-64">
+                <div class="flex justify-between items-start mb-2">
+                    <p class="text-[10px] font-black uppercase text-slate-400">Gigs by Weekday</p>
+                    <button onclick="openChartModal('weekdays')" class="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-slate-100 rounded-lg text-slate-400">
+                        <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i>
+                    </button>
+                </div>
+                <div class="h-40">
+                    <canvas id="weekdayChart"></canvas>
+                </div>
+            </div>
+
             <div id="topBandsChartContainer" class="personal-only group bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 hidden relative transition-all hover:shadow-md">
                 <div class="flex justify-between items-start mb-4">
                     <div>
@@ -513,6 +537,30 @@
                     </div>
                 </div>
 
+            </div>
+
+            <div id="venuesChartContainer" class="group bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 relative transition-all hover:shadow-md">
+                <div class="flex justify-between items-start mb-4">
+                    <p class="text-[10px] font-black uppercase text-slate-400 tracking-widest">Busiest Venues</p>
+                    <button onclick="openChartModal('venues')" class="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-slate-50 rounded-lg text-slate-300 transition-all duration-200">
+                        <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i>
+                    </button>
+                </div>
+                <div class="h-[350px] relative">
+                    <canvas id="venuesChart"></canvas>
+                </div>
+            </div>
+
+            <div id="citiesChartContainer" class="group bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 relative transition-all hover:shadow-md">
+                <div class="flex justify-between items-start mb-4">
+                    <p class="text-[10px] font-black uppercase text-slate-400 tracking-widest">Busiest Cities</p>
+                    <button onclick="openChartModal('cities')" class="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-slate-50 rounded-lg text-slate-300 transition-all duration-200">
+                        <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i>
+                    </button>
+                </div>
+                <div class="h-[350px] relative">
+                    <canvas id="citiesChart"></canvas>
+                </div>
             </div>
 
             <!-- band frequency over time scatter plot -->

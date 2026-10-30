@@ -250,12 +250,19 @@ export function renderStatsPane(el, ctx = {}) {
         };
     }
 
-    function renderArtists(rows) {
-        if (setEmpty('artists', !rows.length)) return;
-        expandable.artists = (big) => horizontalBarConfig(rows.map(r => r.band), rows.map(r => r.gigs), COLORS.artists, {
-            tooltip: { callbacks: { afterLabel: (i) => `${fmt(rows[i.dataIndex].attendees)} attendances` } },
-            onClick: (i) => query.setSearch(rows[i].band),
-        }, big);
+    // Same split as the personal Top Bands chart: 10 on the card, 20 expanded.
+    // The RPC has to return the top 20 for the expanded view to have anything extra.
+    const ARTISTS_CARD = 10, ARTISTS_EXPANDED = 20;
+
+    function renderArtists(allRows) {
+        if (setEmpty('artists', !allRows.length)) return;
+        expandable.artists = (big) => {
+            const rows = allRows.slice(0, big ? ARTISTS_EXPANDED : ARTISTS_CARD);
+            return horizontalBarConfig(rows.map(r => r.band), rows.map(r => r.gigs), COLORS.artists, {
+                tooltip: { callbacks: { afterLabel: (i) => `${fmt(rows[i.dataIndex].attendees)} attendances` } },
+                onClick: (i) => query.setSearch(rows[i].band),
+            }, big);
+        };
         build('artists', expandable.artists(false));
     }
 
