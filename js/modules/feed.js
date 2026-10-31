@@ -48,6 +48,10 @@
  *   buddy_venue_echo    — you + buddy same venue, any month/year, different show
  *   buddy_collection_together   — buddy has collection items for a band you've seen live
  *
+ * Venue tiles (buddy_near_miss / buddy_venue_echo) read city / capacity from
+ * the `venues` table (by venue_id) and open a venue modal (Leaflet pin, facts,
+ * both of your nights). Rooms are grouped by venue_id, not by name.
+ *
  * ─── SCORING REFERENCE ────────────────────────────────────────────────────────
  *
  *   100  on_this_day (personal)
@@ -129,6 +133,19 @@ function gigDay(g)   { return Number(g.Date.split('/')[0]); }
 function gigMonth(g) { return Number(g.Date.split('/')[1]); }
 function gigYear(g)  { return Number(g.Date.split('/')[2]); }
 
+// Venue identity comes from data.js (window.venueKey / window.resolveVenue):
+// rows resolve by journals.venue_id, falling back to the venue's official name,
+// so an id-linked row and an unlinked row at the same venue share one key. Buddy
+// gigs carry the same `venue_id` field as the app's own journal rows. Official
+// names overlap ("The Garage"), which is why grouping never keys on name alone.
+function gigVenueId(g) {
+    return window.resolveVenue?.(g)?.id ?? g?.venue_id ?? null;
+}
+function gigVenueKey(g) {
+    const k = window.venueKey ? window.venueKey(g) : '';
+    return (!k || k === 'name:') ? '' : k;
+}
+
 // True for a festival gig, so wording can say "going" / "visits" instead of
 // "seeing them" / "shows". Handles both the raw Supabase shape (boolean
 // `festival`) and the normalised shape used elsewhere (`'Festival?': 'Y'/'N'`).
@@ -171,7 +188,7 @@ async function fetchBuddyJournals() {
     try {
         const { data, error } = await supabase
             .from('journals')
-            .select('id, user_id, journal_key, date, band, official_venue, photos')
+            .select('id, user_id, journal_key, date, band, official_venue, venue_id, photos')
             .in('user_id', buddyIds);
 
         if (error) {
@@ -190,6 +207,7 @@ async function fetchBuddyJournals() {
                 Date:          normaliseJournalDate(row.date),
                 Band:          row.band,
                 OfficialVenue: row.official_venue,
+                venue_id:       row.venue_id ?? null,
                 Photos:        row.photos,
             });
         }
@@ -507,9 +525,10 @@ function buildCards(journalData, performanceData) {
     // ── VENUE CHAPTER ─────────────────────────────────────────────────────────
     const showsByVenue = {};
     pastGigs.forEach(g => {
-        if (!g.OfficialVenue) return;
-        if (!showsByVenue[g.OfficialVenue]) showsByVenue[g.OfficialVenue] = [];
-        showsByVenue[g.OfficialVenue].push(g);
+        const vk = gigVenueKey(g);
+        if (!vk) return;
+        if (!showsByVenue[vk]) showsByVenue[vk] = [];
+        showsByVenue[vk].push(g);
     });
 
     const eligibleVenues = Object.entries(showsByVenue)
@@ -524,7 +543,8 @@ function buildCards(journalData, performanceData) {
 
     if (eligibleVenues.length > 0) {
         const venueIdx              = Math.floor(seededRng(todaySeed())() * Math.min(eligibleVenues.length, 5));
-        const [venueName, venueShows] = eligibleVenues[venueIdx];
+        const [, venueShows]        = eligibleVenues[venueIdx];
+        const venueName             = venueShows[0].OfficialVenue;
         const venueSorted           = [...venueShows].sort((a, b) =>
             (parseDate(a.Date) || 0) - (parseDate(b.Date) || 0)
         );
@@ -683,11 +703,12 @@ function buildBuddyCards(buddyJournalsByUser, myJournalData, buddyProfiles) {
     // Venue → my past gigs lookup for near-miss/echo matching
     const myVenueMap = {};
     myJournalData.forEach(g => {
-        if (!g.OfficialVenue) return;
+        const vk = gigVenueKey(g);
+        if (!vk) return;
         const d = parseDate(g.Date);
         if (!d || d >= today) return;
-        if (!myVenueMap[g.OfficialVenue]) myVenueMap[g.OfficialVenue] = [];
-        myVenueMap[g.OfficialVenue].push(g);
+        if (!myVenueMap[vk]) myVenueMap[vk] = [];
+        myVenueMap[vk].push(g);
     });
 
     const cards = [];
@@ -860,18 +881,23 @@ function buildBuddyCards(buddyJournalsByUser, myJournalData, buddyProfiles) {
         // literally the same show, i.e. buddy_together territory, not a miss.
         const buddyVenueGigsByVenue = {};
         buddyGigs.forEach(g => {
-            if (!g.OfficialVenue) return;
+            const vk = gigVenueKey(g);
+            if (!vk) return;
             if (recentKeys.has(g['Journal Key'])) return;   // owned by buddy_recent_show
             const d = parseDate(g.Date);
             if (!d || d >= today) return;
-            if (!buddyVenueGigsByVenue[g.OfficialVenue]) buddyVenueGigsByVenue[g.OfficialVenue] = [];
-            buddyVenueGigsByVenue[g.OfficialVenue].push(g);
+            if (!buddyVenueGigsByVenue[vk]) buddyVenueGigsByVenue[vk] = [];
+            buddyVenueGigsByVenue[vk].push(g);
         });
 
-        Object.entries(buddyVenueGigsByVenue).forEach(([venueName, buddyVenueGigsAll]) => {
-            const myVenueGigsAll = myVenueMap[venueName] || [];
+        Object.entries(buddyVenueGigsByVenue).forEach(([venueKey, buddyVenueGigsAll]) => {
+            const myVenueGigsAll = myVenueMap[venueKey] || [];
             if (!myVenueGigsAll.length) return;
-            if (venuesClaimed.has(venueName)) return; // feed-wide dedup across both types
+            if (venuesClaimed.has(venueKey)) return; // feed-wide dedup across both types
+            const venueName = window.resolveVenue?.(buddyVenueGigsAll[0])?.name || buddyVenueGigsAll[0].OfficialVenue || '';
+            if (!venueName) return;
+            const venueId   = gigVenueId(buddyVenueGigsAll[0]);
+            const venueSlug = `${venueName.replace(/[^a-z0-9]/gi, '_')}${venueId != null ? `_${venueId}` : ''}`;
 
             // Strip out any show that's actually shared between us (same
             // Journal Key = same date + venue = the same real-world show).
@@ -899,7 +925,7 @@ function buildBuddyCards(buddyJournalsByUser, myJournalData, buddyProfiles) {
             );
 
             if (nearMissGig) {
-                venuesClaimed.add(venueName);
+                venuesClaimed.add(venueKey);
                 const monthName = new Date(2000, gigMonth(nearMissGig) - 1, 1)
                     .toLocaleString('default', { month: 'long' });
 
@@ -908,14 +934,16 @@ function buildBuddyCards(buddyJournalsByUser, myJournalData, buddyProfiles) {
                     score:       68,
                     gig:         nearMissGig,
                     allGigs:     myGigsHere,
+                    buddyGigs:   buddyGigsHere,
                     buddy,
                     buddyName,
                     headline:    venueName,
+                    venueId,
                     subline:     `You and ${buddyName} · same venue, different night`,
                     eyebrow:     `${monthName} ${gigYear(nearMissGig)} · near miss`,
                     badge:       'Near Miss',
                     badgeColor:  'bg-cyan-600',
-                    journalKey:  `nearmiss_${buddy.id}_${venueName.replace(/[^a-z0-9]/gi, '_')}_${gigYear(nearMissGig)}_${gigMonth(nearMissGig)}`,
+                    journalKey:  `nearmiss_${buddy.id}_${venueSlug}_${gigYear(nearMissGig)}_${gigMonth(nearMissGig)}`,
                     // used only for ranking candidates below, stripped before render
                     _overlapCount: myGigsHere.length + buddyGigsHere.length,
                 });
@@ -923,7 +951,7 @@ function buildBuddyCards(buddyJournalsByUser, myJournalData, buddyProfiles) {
             }
 
             // VENUE ECHO — loose match: same venue, any month/year in history.
-            venuesClaimed.add(venueName);
+            venuesClaimed.add(venueKey);
             const heroGig = [...myGigsHere].sort((a, b) =>
                 (parseDate(b.Date) || 0) - (parseDate(a.Date) || 0)
             )[0];
@@ -933,14 +961,16 @@ function buildBuddyCards(buddyJournalsByUser, myJournalData, buddyProfiles) {
                 score:       55,
                 gig:         heroGig,
                 allGigs:     myGigsHere,
+                buddyGigs:   buddyGigsHere,
                 buddy,
                 buddyName,
                 headline:    venueName,
+                venueId,
                 subline:     `You and ${buddyName} · same room, different night`,
                 eyebrow:     'Somewhere you\u2019ve both been',
                 badge:       'Venue Echo',
                 badgeColor:  'bg-cyan-500',
-                journalKey:  `echo_${buddy.id}_${venueName.replace(/[^a-z0-9]/gi, '_')}`,
+                journalKey:  `echo_${buddy.id}_${venueSlug}`,
                 // used only for ranking candidates below, stripped before render
                 _overlapCount: myGigsHere.length + buddyGigsHere.length,
             });
@@ -1628,7 +1658,7 @@ window._feedOpenBuddyShow = async (key, idsCsv) => {
         try {
             const { data } = await supabase
                 .from('journals')
-                .select('id, journal_key, date, band, official_venue, photos')
+                .select('id, journal_key, date, band, official_venue, venue_id, photos')
                 .eq('user_id', ids[0])
                 .eq('journal_key', key)
                 .limit(1);
@@ -1640,6 +1670,7 @@ window._feedOpenBuddyShow = async (key, idsCsv) => {
                     Date:          normaliseJournalDate(row.date),
                     Band:          row.band,
                     OfficialVenue: row.official_venue,
+                    venue_id:       row.venue_id ?? null,
                     Photos:        row.photos,
                 };
             }
@@ -1705,6 +1736,7 @@ window._feedOpenBuddyShow = async (key, idsCsv) => {
         </div>`;
 
     modal.classList.remove('hidden');
+    modal.setAttribute('aria-hidden', 'false');   // #modal ships aria-hidden="true" but focus moves inside it
     document.body.style.overflow = 'hidden';
     if (window.lucide) lucide.createIcons();
     applyReactionState(content);
@@ -2041,6 +2073,237 @@ function _onFeedImgLoad(e) {
     img.classList.add('opacity-100');
 }
 
+// ─── VENUES ───────────────────────────────────────────────────────────────────
+// Rows from the `venues` table, keyed by a normalised official_name so small
+// differences in case / punctuation between journals.official_venue and
+// venues.official_name still match. A null entry means "looked, not found" so
+// we don't re-query for it. Failed fetches are NOT cached.
+
+const VENUE_COLS = 'id, official_name, place_id, district, city, country, latitude, longitude, capacity, alternative_names, setlistfm_id';
+const _venueCache = new Map();   // venue id (number) → row, or null if not found
+
+async function fetchVenues(ids) {
+    const wanted = [...new Set((ids || []).filter(id => id != null && id !== '').map(Number))]
+        .filter(id => Number.isFinite(id) && !_venueCache.has(id));
+    if (!wanted.length) return;
+    try {
+        const { data, error } = await supabase
+            .from('venues')
+            .select(VENUE_COLS)
+            .in('id', wanted);
+        if (error) throw error;
+        (data || []).forEach(v => _venueCache.set(Number(v.id), v));
+        wanted.forEach(id => { if (!_venueCache.has(id)) _venueCache.set(id, null); });
+    } catch (e) {
+        console.warn('[Feed] venues fetch failed:', e.message);   // not cached, so a later open retries
+    }
+}
+
+const getVenue = (id) => (id == null || id === '') ? null : (_venueCache.get(Number(id)) || null);
+
+// Same loader as community-gigs.js / ui.js (same URLs), so whichever module
+// gets there first wins and the others reuse window.L.
+let _leafletPromise = null;
+function ensureLeaflet() {
+    if (window.L) return Promise.resolve();
+    if (_leafletPromise) return _leafletPromise;
+    _leafletPromise = new Promise((resolve, reject) => {
+        const fail = () => reject(new Error('Leaflet failed to load'));
+        if (!document.querySelector('link[href*="leaflet.css"]')) {
+            const link = document.createElement('link');
+            link.rel  = 'stylesheet';
+            link.href = 'https://unpkg.com/leaflet/dist/leaflet.css';
+            document.head.appendChild(link);
+        }
+        const existing = document.querySelector('script[src*="leaflet"]');
+        const script = existing || Object.assign(document.createElement('script'), {
+            src: 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
+        });
+        script.addEventListener('load',  () => (window.L ? resolve() : fail()), { once: true });
+        script.addEventListener('error', fail, { once: true });
+        if (!existing) document.head.appendChild(script);
+    }).catch((err) => { _leafletPromise = null; throw err; });
+    return _leafletPromise;
+}
+
+let _venueMap = null;   // the modal's Leaflet instance; removed on the next open
+
+function venuePlace(v) {
+    return [v?.city, v?.country].filter(Boolean).join(', ');
+}
+
+// capacity is a text column ("2,000", "approx 2000", ...). Format clean numbers,
+// pass anything else through as written.
+function venueCapacity(v) {
+    const raw = String(v?.capacity ?? '').trim();
+    if (!raw) return '';
+    const n = Number(raw.replace(/,/g, ''));
+    return (Number.isFinite(n) && n > 0) ? n.toLocaleString('en-GB') : raw;
+}
+
+function venueCoords(v) {
+    if (v?.latitude == null || v?.longitude == null || v.latitude === '' || v.longitude === '') return null;
+    const lat = parseFloat(v.latitude), lng = parseFloat(v.longitude);
+    return (Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180)
+        ? { lat, lng } : null;
+}
+
+// Opens the real place in Google Maps (app on mobile). place_id gives the exact
+// listing; no API key needed for this URL form.
+function venueMapsUrl(v, name) {
+    const c = venueCoords(v);
+    const query = c ? `${c.lat},${c.lng}` : [name, v?.city, v?.country].filter(Boolean).join(', ');
+    let url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+    if (v?.place_id) url += `&query_place_id=${encodeURIComponent(v.place_id)}`;
+    return url;
+}
+
+function _venueNightsHtml(title, gigs, kind) {
+    if (!gigs?.length) return '';
+    const sorted = [...gigs].sort((a, b) => (parseDate(b.Date) || 0) - (parseDate(a.Date) || 0));
+    const shown  = sorted.slice(0, 6);
+    const more   = sorted.length - shown.length;
+    return `
+        <div>
+            <p class="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">${escapeHtml(title)}</p>
+            <ul class="space-y-1">
+                ${shown.map(g => `
+                    <li>
+                        <button type="button" data-venue-${kind}="${_attr(g['Journal Key'] || '')}"
+                                class="w-full flex items-baseline justify-between gap-3 text-left px-3 py-2 rounded-xl bg-slate-50 hover:bg-slate-100 transition-colors ${FOCUS}">
+                            <span class="text-sm font-black text-slate-800 truncate">${escapeHtml(g.Band || '')}</span>
+                            <span class="text-[11px] font-bold text-slate-500 whitespace-nowrap">${escapeHtml(g.Date || '')}</span>
+                        </button>
+                    </li>`).join('')}
+            </ul>
+            ${more > 0 ? `<p class="text-[11px] font-bold text-slate-400 mt-1 px-1">+${more} more</p>` : ''}
+        </div>`;
+}
+
+/**
+ * Venue modal for the "Rooms you share" tiles. Shows where the room is (map),
+ * the key facts from the venues table, and the nights you and the buddy each
+ * had there. Tapping a night opens that show.
+ */
+window._feedOpenVenue = async (name, buddyId, venueId) => {
+    const modal   = document.getElementById('modal');
+    const content = document.getElementById('modal-content');
+    if (!modal || !content || !name) return;
+
+    try { _venueMap?.remove(); } catch (_) { /* already gone */ }
+    _venueMap = null;
+
+    if (venueId && !_venueCache.has(Number(venueId))) await fetchVenues([venueId]);
+    const v     = getVenue(venueId);
+    const card  = (window._feedCards || []).find(c =>
+        VENUE_TILE_TYPES.has(c.type)
+        && String(c.venueId ?? '') === String(venueId || '')
+        && (venueId || c.headline === name)
+        && (!buddyId || c.buddy?.id === buddyId));
+    const buddyName = card?.buddyName || 'Your buddy';
+    const coords    = venueCoords(v);
+    const place     = venuePlace(v);
+    const capacity  = venueCapacity(v);
+    const alt       = String(v?.alternative_names || '').trim();
+
+    const facts = [
+        ['Location', [v?.district, v?.city].filter(Boolean).join(', ')],
+        ['Country',  v?.country],
+        ['Capacity', capacity],
+    ].filter(([, val]) => val);
+
+    const header = coords
+        ? `<div class="relative w-full bg-slate-200">
+               <div data-role="venue-map" style="height: 200px; width: 100%; position: relative; z-index: 1;"></div>`
+        : `<div class="relative h-32 w-full overflow-hidden bg-gradient-to-br ${_grad(name)}">
+               <span class="absolute inset-0 flex items-center px-6 text-5xl font-black italic uppercase tracking-tighter text-white/25 leading-none">${escapeHtml(v?.city || _initials(name))}</span>
+               ${v ? '<span class="absolute bottom-2 left-4 text-[10px] font-bold text-white/70">No map location yet</span>' : ''}`;
+
+    content.innerHTML = `
+        <div class="bg-white rounded-[2.5rem] overflow-hidden">
+            ${header}
+                <button onclick="window.closeModal()"
+                        aria-label="Close details"
+                        class="absolute top-4 right-4 z-10 bg-black/40 backdrop-blur-md text-white p-2 rounded-full hover:bg-black/60 transition-all focus:ring-2 focus:ring-white">
+                    <i data-lucide="x" class="w-5 h-5" aria-hidden="true"></i>
+                </button>
+            </div>
+            <div class="px-6 pt-4 pb-6 space-y-4">
+                <div>
+                    <span class="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-slate-400 mb-2">
+                        <i data-lucide="map-pin" class="w-3 h-3" aria-hidden="true"></i>
+                        A room you share with ${escapeHtml(buddyName)}
+                    </span>
+                    <h2 id="modal-title" tabindex="-1" class="text-2xl font-black italic uppercase tracking-tighter text-slate-900 leading-none mb-1">
+                        ${escapeHtml(name)}
+                    </h2>
+                    ${place ? `<p class="text-sm font-bold text-slate-500">${escapeHtml(place)}</p>` : ''}
+                    ${alt ? `<p class="text-[11px] font-bold text-slate-400 mt-1">Also known as ${escapeHtml(alt)}</p>` : ''}
+                </div>
+                ${facts.length ? `
+                <dl class="flex gap-2">
+                    ${facts.map(([k, val]) => `
+                        <div class="flex-1 min-w-0 rounded-2xl bg-slate-50 px-3 py-2">
+                            <dt class="text-[9px] font-black uppercase tracking-widest text-slate-400">${escapeHtml(k)}</dt>
+                            <dd class="text-sm font-black text-slate-800 leading-tight mt-0.5">${escapeHtml(String(val))}</dd>
+                        </div>`).join('')}
+                </dl>` : ''}
+                <a href="${escapeHtml(venueMapsUrl(v, name))}" target="_blank" rel="noopener"
+                   class="inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-widest text-indigo-600 hover:text-indigo-800">
+                    <i data-lucide="navigation" class="w-4 h-4" aria-hidden="true"></i>
+                    Open in Maps
+                </a>
+                ${_venueNightsHtml('Your nights here', card?.allGigs, 'mine')}
+                ${_venueNightsHtml(`${buddyName}\u2019s nights here`, card?.buddyGigs, 'buddy')}
+            </div>
+        </div>`;
+
+    modal.classList.remove('hidden');
+    modal.setAttribute('aria-hidden', 'false');   // #modal ships aria-hidden="true" but focus moves inside it
+    document.body.style.overflow = 'hidden';
+    if (window.lucide) lucide.createIcons();
+    setTimeout(() => document.getElementById('modal-title')?.focus(), 100);
+
+    // Wire the night rows first so they work whatever the map does.
+    content.querySelectorAll('[data-venue-mine]').forEach(btn =>
+        btn.addEventListener('click', () => window.viewGigDetails?.(btn.dataset.venueMine)));
+    content.querySelectorAll('[data-venue-buddy]').forEach(btn =>
+        btn.addEventListener('click', () => window._feedOpenBuddyShow(btn.dataset.venueBuddy, buddyId || card?.buddy?.id || '')));
+
+    console.info('[Feed] venue modal', { venueId, row: !!v, lat: v?.latitude, lng: v?.longitude, coords });
+    if (!coords) return;
+
+    // Same map treatment as the Community map: OSM tiles, one indigo circle pin.
+    const mapEl = content.querySelector('[data-role="venue-map"]');
+    try {
+        await ensureLeaflet();
+        // Let the modal finish laying out before Leaflet measures the container.
+        await new Promise(r => requestAnimationFrame(() => r()));
+        if (!mapEl?.isConnected) return;   // modal changed while Leaflet loaded
+        const L = window.L;
+        _venueMap = L.map(mapEl, {
+            zoomControl: false, minZoom: 1, scrollWheelZoom: false,
+            dragging: !L.Browser.mobile,   // one-finger drag would fight the modal's scroll
+            preferCanvas: true,
+        });
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors', subdomains: 'abc',
+        }).addTo(_venueMap);
+        L.circleMarker([coords.lat, coords.lng], {
+            radius: 9, fillColor: '#4f46e5', color: '#fff', weight: 2, fillOpacity: 0.9,
+        }).addTo(_venueMap);
+        _venueMap.setView([coords.lat, coords.lng], 15);
+        _venueMap.invalidateSize();
+        const map = _venueMap;
+        setTimeout(() => { if (map === _venueMap && mapEl.isConnected) map.invalidateSize(); }, 300);
+        console.info('[Feed] venue map size', mapEl.offsetWidth, mapEl.offsetHeight,
+            'css:', !!document.querySelector('link[href*="leaflet"]'));
+    } catch (err) {
+        console.warn('[Feed] venue map failed:', err);
+        if (mapEl?.isConnected) mapEl.innerHTML = '<p class="h-full flex items-center justify-center text-[11px] font-bold text-slate-400">Map unavailable</p>';
+    }
+};
+
 // ─── TAP TARGETS ──────────────────────────────────────────────────────────────
 // A tap target is a small descriptor, rendered into data-* attributes and
 // dispatched by the one delegated listener (_handleFeedClick). Journal keys and
@@ -2057,6 +2320,9 @@ function tapDesc(card, gig = card.gig) {
     if (BUDDY_COLLECTION_TYPES.has(card.type)) {
         return card.buddy?.id ? { k: 'bcol', id: card.buddy.id, name: card.buddyName || '' } : null;
     }
+    if (VENUE_TILE_TYPES.has(card.type)) {
+        return card.headline ? { k: 'venue', name: card.headline, buddy: card.buddy?.id || '', id: card.venueId ?? '' } : null;
+    }
     const key = gig?.['Journal Key'] || '';
     return key ? { k: 'gig', key } : null;
 }
@@ -2065,6 +2331,7 @@ function tapAttrs(d) {
     if (!d) return '';
     if (d.k === 'gig')   return `data-feed-gig-key="${_attr(d.key)}"`;
     if (d.k === 'bshow') return `data-feed-buddy-show-key="${_attr(d.key)}" data-feed-buddy-show-ids="${_attr(d.ids)}"`;
+    if (d.k === 'venue') return `data-feed-venue="${_attr(d.name)}" data-feed-venue-buddy="${_attr(d.buddy)}" data-feed-venue-id="${_attr(d.id)}"`;
     if (d.k === 'bcol')  return `data-feed-buddy-col-id="${_attr(d.id)}" data-feed-buddy-col-name="${_attr(d.name)}"`;
     return '';
 }
@@ -2073,6 +2340,7 @@ function runTap(d) {
     if (!d) return;
     if (d.k === 'gig')   { if (d.key) window.viewGigDetails?.(d.key); }
     if (d.k === 'bshow') window._feedOpenBuddyShow(d.key, d.ids);
+    if (d.k === 'venue') window._feedOpenVenue(d.name, d.buddy, d.id);
     if (d.k === 'bcol')  window._feedOpenBuddyCollection(d.id, d.name);
 }
 
@@ -2484,13 +2752,20 @@ function seasonSection(card) {
         </section>`;
 }
 
-// Room you and a buddy have both been to. Tap opens your show there.
+// Room you and a buddy have both been to. Tap opens the venue modal.
+// No venue photography yet, so the tile leans on the venues table instead: the
+// city as a big watermark, then place and capacity under the name.
 function venueTileHtml(card) {
+    const v        = getVenue(card.venueId);
+    const place    = venuePlace(v);
+    const capacity = venueCapacity(v);
+    const meta     = [place, capacity ? `${capacity} cap.` : ''].filter(Boolean).join(' · ');
     return `
         <button type="button" ${tapAttrs(tapDesc(card))}
-                aria-label="${_attr(`${card.headline}. ${card.subline}`)}"
-                class="relative shrink-0 snap-start w-52 h-40 rounded-3xl overflow-hidden text-left bg-gradient-to-br ${_grad(card.headline)} active:scale-[0.97] transition-transform ${FOCUS}">
-            <div class="absolute inset-0 bg-gradient-to-t from-slate-900/70 via-slate-900/10 to-transparent"></div>
+                aria-label="${_attr(`${card.headline}. ${meta ? meta + '. ' : ''}${card.subline}`)}"
+                class="relative shrink-0 snap-start w-56 h-44 rounded-3xl overflow-hidden text-left bg-gradient-to-br ${_grad(card.headline)} active:scale-[0.97] transition-transform ${FOCUS}">
+            ${v?.city ? `<span class="absolute inset-x-3 top-1/2 -translate-y-[60%] text-4xl font-black italic uppercase tracking-tighter text-white/20 leading-[0.9] line-clamp-2 pointer-events-none" aria-hidden="true">${escapeHtml(v.city)}</span>` : ''}
+            <div class="absolute inset-0 bg-gradient-to-t from-slate-900/75 via-slate-900/10 to-transparent"></div>
             <i data-lucide="map-pin" class="absolute top-3 right-3 w-5 h-5 text-white/70" aria-hidden="true"></i>
             <span class="absolute top-3 left-3 flex items-center max-w-[75%]">
                 ${buddyAvatarPill(card.buddy, { ring: 'ring-white' })}
@@ -2498,7 +2773,8 @@ function venueTileHtml(card) {
             </span>
             <span class="absolute inset-x-0 bottom-0 p-3">
                 <span class="block text-sm font-black text-white leading-tight line-clamp-2">${escapeHtml(card.headline)}</span>
-                <span class="block mt-1 text-[11px] font-bold text-white/85 line-clamp-1">${escapeHtml(card.eyebrow)}</span>
+                ${meta ? `<span class="block mt-1 text-[11px] font-bold text-white/90 line-clamp-1">${escapeHtml(meta)}</span>` : ''}
+                <span class="block mt-0.5 text-[10px] font-bold text-white/70 line-clamp-1">${escapeHtml(card.eyebrow)}</span>
             </span>
         </button>`;
 }
@@ -2662,7 +2938,7 @@ function composeFeed(scored, tipCards, journalData) {
 
 const FEED_TAP_SELECTOR = [
     '[data-feed-toggle]', '[data-feed-gig-key]', '[data-feed-buddy-col-id]',
-    '[data-feed-buddy-show-key]', '[data-feed-open]', '[data-feed-play]',
+    '[data-feed-buddy-show-key]', '[data-feed-venue]', '[data-feed-open]', '[data-feed-play]',
 ].join(', ');
 
 function _handleFeedClick(e) {
@@ -2674,6 +2950,7 @@ function _handleFeedClick(e) {
     else if (ds.feedOpen !== undefined)         _openHeroSlide();
     else if (ds.feedGigKey !== undefined)       { if (ds.feedGigKey) window.viewGigDetails(ds.feedGigKey); }
     else if (ds.feedBuddyShowKey !== undefined) window._feedOpenBuddyShow(ds.feedBuddyShowKey, ds.feedBuddyShowIds);
+    else if (ds.feedVenue !== undefined)        window._feedOpenVenue(ds.feedVenue, ds.feedVenueBuddy, ds.feedVenueId);
     else                                        window._feedOpenBuddyCollection(ds.feedBuddyColId, ds.feedBuddyColName);
 }
 
@@ -2862,6 +3139,17 @@ export async function init(journalData, performanceData, _ignored = []) {
         renderEmptyState(container);
         return;
     }
+
+    // Venue rows for the "Rooms you share" tiles (one small query; cached).
+    const venueTiles = scored.filter(c => VENUE_TILE_TYPES.has(c.type));
+    await fetchVenues(venueTiles.map(c => c.venueId));
+    venueTiles.forEach(c => {
+        if (c.venueId == null || c.venueId === '') {
+            console.warn(`[Feed] "${c.headline}" tile has no venueId — neither journals.venue_id nor a name match in window.allVenues resolved it`);
+        } else if (!getVenue(c.venueId)) {
+            console.warn(`[Feed] "${c.headline}" tile: no venues row for id ${c.venueId}`);
+        }
+    });
 
     // Debug aid — full card payload + a type-count breakdown, inspectable in
     // devtools via window._feedCards. Cheap and handy for spot-checking

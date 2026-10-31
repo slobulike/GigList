@@ -1,8 +1,8 @@
 /**
  * GigList Core Engine
- * v10.3.5 — 2026-10-31
+ * v10.3.6 — 2026-10-31
  * ------------------------------------------------------------------
- * ✅ Enhanced personal feed to include best elements of community feed
+ * ✅ Added venue details card to personal feed
  */
 
 import * as Data from './modules/data.js';
