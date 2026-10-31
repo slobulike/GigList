@@ -1,10 +1,15 @@
 /**
  * GigList - Feed Module
- * v2.1.0 — May 2026
+ * v3.0.0 — Oct 2026
  *
  * Contextual feed engine. Evaluates card triggers against the user's journal
  * each time the Feed tab is activated, picks the top cards by score, and
  * renders them inline.
+ *
+ * v3 changes the PRESENTATION only. Card builders, scoring and selection are
+ * unchanged. The top card becomes a swipable Spotlight hero; the rest are
+ * grouped into image rows, a poster rail, venue tiles and an item rail, using
+ * the same components as community-feed.js. See RENDERING below.
  *
  * ─── CARD TYPES ───────────────────────────────────────────────────────────────
  *
@@ -74,22 +79,6 @@
 import { parseDate, slugify, slugifyArtist, escapeHtml, safeUrl } from './utils.js';
 import { supabase } from './supabase.js';
 
-// Bump this on every deploy that touches card-selection or card-building
-// logic (selectCards, buildCards, buildCollectionCards, buildBuddyCards,
-// buildBuddyCollectionCards). The sessionStorage cache key includes it, so a
-// bump forces every open tab to rebuild instead of serving whatever was
-// cached under the old logic for the rest of the day. Bumping unnecessarily
-// just costs one extra rebuild per user per day — cheap insurance, so when
-// in doubt, bump it.
-// v3: card fields are now HTML-escaped at render time and taps use data-*
-// attributes + a delegated listener — bumped so any previously cached,
-// unescaped feed HTML is discarded rather than replayed via innerHTML.
-// v4: added buddy_recent_show cards + buddy-owned hero photo resolution.
-// v5: added buddy_recent_collection cards.
-// v6: reaction pills on buddy cards (markup changed).
-// v7: reactions collapsed into one compact footer button with a tray.
-// v8: "Let's do this again" reaction on buddy_together cards.
-const FEED_LOGIC_VERSION = 8;
 const RECENT_SHOW_WINDOW_DAYS = 30;   // how long a buddy's show stays in the feed
 const MAX_RECENT_SHOW_CARDS   = 6;    // feed-wide cap on buddy_recent_show candidates
 const RECENT_COLLECTION_WINDOW_DAYS = 30;   // how long a buddy's new collection item stays in the feed
@@ -1183,6 +1172,39 @@ function selectCards(gigCards, colCards, buddyCards) {
 }
 
 // ─── IMAGE RESOLUTION ─────────────────────────────────────────────────────────
+// The feed's artwork pipeline (the `_art` / `hydrateArt` helpers) lives in the
+// RENDERING section. This section holds the storage lookups it builds on, plus
+// resolveHeroImage(), which the buddy show view still uses.
+
+const PHOTO_INDEX_TTL_MS = 3 * 60 * 1000;   // a photo uploaded mid-session shows up within minutes
+const _photoIndex      = new Map();         // ownerId -> { at, names: Promise<Set<fileName>> }
+const _signedPhotoUrls = new Map();         // `${ownerId}/${fileName}` -> { url, exp }
+
+// One listing per owner folder (cached), instead of one list() call per image.
+// The feed now shows many small tiles, so per-image lookups would fan out.
+function _gigPhotoNames(ownerId) {
+    const hit = _photoIndex.get(ownerId);
+    if (hit && Date.now() - hit.at < PHOTO_INDEX_TTL_MS) return hit.names;
+    const names = (async () => {
+        const out = new Set();
+        try {
+            for (let page = 0; page < 5; page++) {
+                const { data, error } = await supabase.storage
+                    .from('gig-photos')
+                    .list(ownerId, { limit: 1000, offset: page * 1000 });
+                if (error || !data?.length) break;
+                data.forEach(f => out.add(f.name));
+                if (data.length < 1000) break;
+            }
+        } catch (e) { /* treat as no photos */ }
+        return out;
+    })();
+    _photoIndex.set(ownerId, { at: Date.now(), names });
+    return names;
+}
+
+// Call after uploading or deleting a show photo so the feed sees it straight away.
+window._feedInvalidatePhotos = () => { _photoIndex.clear(); _signedPhotoUrls.clear(); };
 
 /**
  * Looks for a user-uploaded photo of a show in the `gig-photos` bucket, where
@@ -1197,26 +1219,20 @@ async function findGigPhotoUrl(ownerIds, fileName) {
     for (const ownerId of ownerIds) {
         if (!ownerId) continue;
         try {
-            const { data: listed } = await supabase.storage
-                .from('gig-photos')
-                .list(ownerId, { search: fileName });
-            if (!listed?.some(f => f.name === fileName)) continue;
+            if (!(await _gigPhotoNames(ownerId)).has(fileName)) continue;
+            const path   = `${ownerId}/${fileName}`;
+            const cached = _signedPhotoUrls.get(path);
+            if (cached && cached.exp > Date.now()) return cached.url;
             const { data, error } = await supabase.storage
                 .from('gig-photos')
-                .createSignedUrl(`${ownerId}/${fileName}`, 3600);
-            if (!error && data?.signedUrl) return data.signedUrl;
+                .createSignedUrl(path, 3600);
+            if (!error && data?.signedUrl) {
+                _signedPhotoUrls.set(path, { url: data.signedUrl, exp: Date.now() + 50 * 60 * 1000 });
+                return data.signedUrl;
+            }
         } catch (e) { /* try next owner */ }
     }
     return null;
-}
-
-// Whose uploaded photo should be this card's hero? Default is the signed-in
-// user; buddy_recent_show cards use the buddies who were at the show.
-function photoOwnerIds(card) {
-    if (card.type === 'buddy_recent_show') {
-        return (card.buddies || [card.buddy]).filter(Boolean).map(b => b.id);
-    }
-    return undefined;
 }
 
 async function resolveHeroImage(gig, imgEl, cardIndex, ownerIds) {
@@ -1252,29 +1268,6 @@ async function resolveHeroImage(gig, imgEl, cardIndex, ownerIds) {
     tryLocal();
 }
 
-async function resolveCollectionHeroImage(item, imgEl, cardIndex) {
-    const fallback = DEFAULT_IMAGES[cardIndex % DEFAULT_IMAGES.length];
-
-    if (item?.photos?.length > 0) {
-        try {
-            const { data, error } = await supabase.storage
-                .from('collection-photos')
-                .createSignedUrl(item.photos[0], 3600);
-            if (!error && data?.signedUrl) { imgEl.src = data.signedUrl; return; }
-        } catch (e) { /* fall through */ }
-    }
-
-    if (item?.band_name) {
-        const artistPath = `assets/artists/${item.band_name.toLowerCase().replace(/ /g, '_')}_stock_photo.jpg`;
-        const probe = new Image();
-        probe.onload  = () => { imgEl.src = artistPath; };
-        probe.onerror = () => { imgEl.src = fallback; };
-        probe.src = artistPath;
-        return;
-    }
-
-    imgEl.src = fallback;
-}
 
 // ─── BUDDY AVATAR PILL ────────────────────────────────────────────────────────
 
@@ -1286,18 +1279,20 @@ async function resolveCollectionHeroImage(item, imgEl, cardIndex) {
  * with multiple attendees) — arrays render as a stacked, overlapping group
  * capped at 3 visible avatars plus a "+N" overflow badge.
  */
-function buddyAvatarPill(buddyOrBuddies) {
+function buddyAvatarPill(buddyOrBuddies, opts = {}) {
     const buddies = (Array.isArray(buddyOrBuddies) ? buddyOrBuddies : [buddyOrBuddies]).filter(Boolean);
     if (!buddies.length) return '';
 
     const visible  = buddies.slice(0, 3);
     const overflow = buddies.length - visible.length;
     const stacked   = buddies.length > 1;
+    const ring      = opts.ring || 'ring-slate-900';          // ring colour to match the surface behind
+    const spacing   = opts.spacing ?? 'mr-1.5';
 
     const avatarHtml = visible.map((buddy, i) => {
         const name     = buddy.display_name || buddy.username || '';
         const initials = name.slice(0, 2).toUpperCase();
-        const ringClass = stacked ? 'ring-2 ring-slate-900' : '';
+        const ringClass = (stacked || opts.ring) ? `ring-2 ${ring}` : '';
         const avatarSrc = safeUrl(buddy.avatar_url);
         const imgTag   = avatarSrc
             ? `<img src="${escapeHtml(avatarSrc)}"
@@ -1313,10 +1308,10 @@ function buddyAvatarPill(buddyOrBuddies) {
 
     const overflowHtml = overflow > 0
         ? `<span class="w-5 h-5 rounded-full bg-slate-700 text-white text-[8px] font-black
-                   flex items-center justify-center flex-shrink-0 ring-2 ring-slate-900 -ml-2">+${overflow}</span>`
+                   flex items-center justify-center flex-shrink-0 ring-2 ${ring} -ml-2">+${overflow}</span>`
         : '';
 
-    return `<span class="inline-flex items-center mr-1.5">${avatarHtml}${overflowHtml}</span>`;
+    return `<span class="inline-flex items-center ${spacing}">${avatarHtml}${overflowHtml}</span>`;
 }
 
 // ─── BUDDY COLLECTION NAVIGATION ──────────────────────────────────────────────
@@ -1439,8 +1434,9 @@ async function _loadMyReactions() {
  * kind (collection) skip the tray: the button IS the reaction.
  *
  * targets: [{ type: 'journal' | 'collection_item', id }] — one per underlying row
+ * align:   which edge the tray hangs from — 'right' for buttons at the right of a row
  */
-function renderReactionRow(targets, theme = 'dark', variant = '') {
+function renderReactionRow(targets, theme = 'dark', variant = '', align = 'left') {
     if (window._reactionsAvailable !== true || !targets?.length) return '';
     const type  = targets[0].type;
     const kinds = REACTION_KINDS_FOR[variant ? `${type}_${variant}` : type] || [];
@@ -1467,7 +1463,7 @@ function renderReactionRow(targets, theme = 'dark', variant = '') {
                     aria-label="React to this show" title="React"
                     class="${REACT_BTN_BASE} ${st.idle}">${kinds.map(icon).join('')}</button>
             <div data-react-tray role="group" aria-label="React"
-                 class="hidden absolute left-0 ${st.pos} z-20 min-w-[12rem] rounded-2xl p-1.5 shadow-xl ${st.tray}">
+                 class="hidden absolute ${align === 'right' ? 'right-0' : 'left-0'} ${st.pos} z-20 min-w-[12rem] rounded-2xl p-1.5 shadow-xl ${st.tray}">
                 ${kinds.map(k => `
                 <button type="button" data-react-kind="${k}" aria-pressed="false" class="${REACT_OPT_BASE} ${st.optIdle}">
                     <i data-lucide="${REACTION_KINDS[k].icon}" class="w-4 h-4" aria-hidden="true"></i>${escapeHtml(REACTION_KINDS[k].label)}
@@ -1749,36 +1745,90 @@ window._feedOpenBuddyShow = async (key, idsCsv) => {
 };
 
 // ─── RENDERING ────────────────────────────────────────────────────────────────
+// v3 layout. The feed is no longer a stack of identical dark cards. It reuses
+// the component vocabulary of the Community feed:
+//
+//   Spotlight hero  → the day's strongest card. Swipe through the shows behind
+//                     it (your photo of each, or the artist artwork).
+//   Image rows      → buddy updates (with reactions) and artist / room stories
+//                     (with a bar showing how many shows sit behind them).
+//   Poster rail     → "your May in music": big year numerals over show photos.
+//   Venue tiles     → rooms you and a buddy have both been to.
+//   Item rail       → collection items, as photos.
+//
+// Card builders and scoring are unchanged: they still hold RAW text, and
+// everything is escaped here at render time.
+//
+// Image chain for a show:   your photo → scrapbook → Spotify artist image →
+//                           local stock photo → gradient + initials.
+// The gradient + initials sit underneath every image, so a miss never leaves
+// a hole. Names for these components match community-feed.js so the two
+// modules can be merged later.
 
-function renderEmptyState(container) {
-    container.innerHTML = `
-        <div class="flex flex-col items-center justify-center py-16 text-center space-y-4">
-            <div class="w-16 h-16 bg-slate-100 rounded-[1.5rem] flex items-center justify-center">
-                <i data-lucide="music-2" class="w-8 h-8 text-slate-300" aria-hidden="true"></i>
-            </div>
-            <div class="space-y-1">
-                <p class="font-black text-slate-700 text-lg uppercase italic tracking-tight">Nothing yet</p>
-                <p class="text-slate-400 text-sm font-medium">
-                    Add some shows and come back — your feed will fill up fast.
-                </p>
-            </div>
-        </div>
-        ${renderEmptyStateTips([
-            'feed_on_this_day',
-            'push_notifications',
-            'feed_band_deep_cut',
-        ])}`;
-    if (window.lucide) lucide.createIcons();
-}
+const CARD  = 'bg-white rounded-[2rem] border border-slate-100 shadow-sm p-5';
+const H3    = 'text-xl font-black italic uppercase tracking-tighter text-slate-900';
+const RAIL  = 'flex gap-3 overflow-x-auto snap-x snap-mandatory scroll-px-5 -mx-5 px-5 pb-1 ' +
+              '[scrollbar-width:none] [&::-webkit-scrollbar]:hidden';
+const FOCUS      = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500';
+const FOCUS_DARK = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white';
+const HERO_BTN   = 'inline-flex items-center justify-center gap-2 min-h-[44px] rounded-full ' +
+                   'text-[11px] font-black uppercase tracking-widest transition-all active:scale-95 ' + FOCUS_DARK;
 
-// Card types that expand in-place to show a list of shows
-const EXPANDABLE_TYPES = new Set([
-    'artist_story', 'artist_first', 'artist_milestone', 'artist_cities',
-    'artist_era', 'first_last', 'season_flashback', 'venue_chapter',
-    'collection_band_story', 'collection_this_month',
+// Literal class strings so Tailwind's scanner picks them up.
+const GRADIENTS = [
+    'from-indigo-500 to-violet-600',
+    'from-emerald-500 to-teal-600',
+    'from-rose-500 to-orange-500',
+    'from-sky-500 to-indigo-600',
+    'from-fuchsia-500 to-purple-600',
+    'from-amber-500 to-red-500',
+];
+
+// The builders pick a saturated badge colour for dark photo cards. On white
+// rows that fails contrast with white text, so map each to a tinted pill.
+const PILL_TINT = {
+    'bg-rose-500':    'bg-rose-50 text-rose-700',
+    'bg-rose-400':    'bg-rose-50 text-rose-700',
+    'bg-indigo-500':  'bg-indigo-50 text-indigo-700',
+    'bg-indigo-400':  'bg-indigo-50 text-indigo-700',
+    'bg-emerald-500': 'bg-emerald-50 text-emerald-700',
+    'bg-violet-500':  'bg-violet-50 text-violet-700',
+    'bg-sky-500':     'bg-sky-50 text-sky-700',
+    'bg-cyan-600':    'bg-cyan-50 text-cyan-800',
+    'bg-cyan-500':    'bg-cyan-50 text-cyan-800',
+    'bg-orange-500':  'bg-orange-50 text-orange-700',
+    'bg-amber-500':   'bg-amber-50 text-amber-800',
+    'bg-amber-400':   'bg-amber-50 text-amber-800',
+    'bg-teal-500':    'bg-teal-50 text-teal-700',
+    'bg-slate-500':   'bg-slate-100 text-slate-700',
+};
+const _pill = (badgeColor) => PILL_TINT[badgeColor] || 'bg-slate-100 text-slate-700';
+
+// Card type → section
+const BUDDY_ROW_TYPES = new Set([
+    'buddy_recent_show', 'buddy_recent_collection', 'buddy_together', 'buddy_on_this_day',
+    'buddy_collection_this_month', 'buddy_collection_together',
 ]);
+const VENUE_TILE_TYPES   = new Set(['buddy_near_miss', 'buddy_venue_echo']);
+const HISTORY_ROW_TYPES  = new Set([
+    'artist_story', 'artist_first', 'artist_milestone', 'artist_cities', 'artist_era',
+    'first_last', 'venue_chapter', 'on_this_day',
+]);
+// Card types whose detail is a list of shows (opened from a toggle)
+const LIST_TYPES = new Set([
+    'artist_story', 'artist_first', 'artist_milestone', 'artist_cities', 'artist_era',
+    'first_last', 'season_flashback', 'venue_chapter',
+]);
+const NUMBERED_TYPES = new Set([
+    'artist_story', 'artist_first', 'artist_milestone', 'artist_cities', 'artist_era', 'first_last',
+]);
+// Hero types that swipe through more than their anchor show
+const MULTI_SLIDE_TYPES = new Set([
+    'on_this_day', 'artist_story', 'artist_cities', 'artist_era', 'venue_chapter', 'season_flashback',
+]);
+const MAX_HERO_SLIDES = 8;
 
-// Social card types — rendered with a coloured top border + buddy avatar
+// Social card types — carry a buddy avatar
 const SOCIAL_TYPES = new Set([
     'buddy_recent_show', 'buddy_together', 'buddy_on_this_day', 'buddy_near_miss', 'buddy_venue_echo',
     'buddy_recent_collection', 'buddy_collection_together', 'buddy_collection_this_month',
@@ -1790,299 +1840,712 @@ const BUDDY_COLLECTION_TYPES = new Set([
     'buddy_recent_collection', 'buddy_collection_together', 'buddy_collection_this_month',
 ]);
 
-// ─── CARD TEMPLATE ────────────────────────────────────────────────────────────
-// Card builders hold RAW text in eyebrow/headline/subline/badge (buddy names,
-// band/venue names, collection titles). renderCard() is the single escaping
-// layer — do not pre-escape in the builders.
+// ─── RENDER HELPERS ───────────────────────────────────────────────────────────
+
+const _key    = (s) => String(s ?? '').trim().toLowerCase();
+const _plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+// Safe for text AND quoted attributes, whatever escapeHtml does with quotes.
+const _attr   = (s) => escapeHtml(String(s ?? '')).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+function _hash(str) {
+    let h = 0;
+    for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) | 0;
+    return Math.abs(h);
+}
+const _grad = (name) => GRADIENTS[_hash(_key(name)) % GRADIENTS.length];
+
+function _initials(name) {
+    const parts = String(name ?? '').replace(/[^\p{L}\p{N}\s]/gu, '').trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) return '♪';
+    return (parts[0][0] + (parts[1]?.[0] || '')).toUpperCase();
+}
+
+// Same convention the rest of the app uses for local stock artist photos.
+const _localArt = (band) => `assets/artists/${String(band ?? '').toLowerCase().replace(/ /g, '_')}_stock_photo.jpg`;
+
+const _cardKey = (card) => String(card.journalKey || card.type).replace(/[^a-z0-9]/gi, '_');
+const _watchUrl = (band) => `https://www.youtube.com/results?search_query=${encodeURIComponent(band + ' live')}`;
+
+function _showLine(g) {
+    return [g.OfficialVenue, g.Date].filter(Boolean).join(' · ');
+}
+
+// Evenly spaced sample that always keeps the first and last item.
+function _spread(arr, n) {
+    if (arr.length <= n) return arr;
+    const out = [];
+    for (let i = 0; i < n; i++) out.push(arr[Math.round(i * (arr.length - 1) / (n - 1))]);
+    return [...new Set(out)];
+}
+
+// ─── ARTIST MEDIA (Spotify image + player id) ─────────────────────────────────
+// Same shared-artist-facts RPC the Community feed uses: image + Spotify artist
+// id from the `artists` table. Nothing user-specific. Best-effort: a failure
+// just means local photos / gradients instead.
+
+const MAX_MEDIA_NAMES = 50;
+const _media      = new Map();   // lowercase band -> { image_url, spotify_artist_id }
+const _mediaAsked = new Set();   // lowercase bands already requested (hit or miss)
+let _mediaPending = Promise.resolve();
+
+const _spotifyId = (band) => {
+    const id = _media.get(_key(band))?.spotify_artist_id;
+    return /^[A-Za-z0-9]{22}$/.test(id || '') ? id : null;
+};
+
+async function loadArtistMedia(bands) {
+    const missing = [...new Set(bands.filter(Boolean))]
+        .filter(b => !_mediaAsked.has(_key(b)))
+        .slice(0, MAX_MEDIA_NAMES);
+    if (!missing.length) return;
+    try {
+        const { data: rows, error } = await supabase.rpc('get_community_artist_media', { p_names: missing });
+        if (error) throw error;
+        missing.forEach(b => _mediaAsked.add(_key(b)));
+        for (const r of rows || []) {
+            const k    = _key(r.name);
+            const prev = _media.get(k);
+            // Duplicate artist rows can exist; keep whichever has an image.
+            if (!prev || (!prev.image_url && r.image_url)) {
+                _media.set(k, { image_url: r.image_url || null, spotify_artist_id: r.spotify_artist_id || null });
+            }
+        }
+    } catch (err) {
+        console.warn('[Feed] artist media failed', err);
+    }
+}
+
+function _bandsForMedia(cards) {
+    const out = [];
+    for (const c of cards) {
+        if (c.gig?.Band) out.push(c.gig.Band);
+        (c.allGigs || []).slice(0, MAX_HERO_SLIDES).forEach(g => g?.Band && out.push(g.Band));
+        if (c.collectionItem?.band_name) out.push(c.collectionItem.band_name);
+        (c.allItems || []).slice(0, 10).forEach(i => i?.band_name && out.push(i.band_name));
+    }
+    return out;
+}
+
+// ─── ARTWORK ──────────────────────────────────────────────────────────────────
+// _art() renders gradient + initials with an empty <img> on top and registers a
+// job for it. After render, hydrateArt() resolves each job (4 at a time, hero
+// first because it is first in the DOM) and sets src. The <img> fades in once
+// it has loaded. `cls` must supply positioning ("relative", "absolute inset-0")
+// and size.
 //
-// Taps are wired via data-* attributes + one delegated listener on the feed
-// container (_handleFeedClick / _wireFeedClicks) rather than inline onclick,
-// because journal keys and buddy names are user-controlled text.
+// job: { kind: 'show' | 'item', gig?, item?, owners?, band }
 
-function _handleFeedClick(e) {
-    const el = e.target.closest('[data-feed-toggle], [data-feed-gig-key], [data-feed-buddy-col-id], [data-feed-buddy-show-key]');
-    if (!el || !e.currentTarget.contains(el)) return;
-    const ds = el.dataset;
-    if (ds.feedToggle !== undefined)      window._feedToggleDetail(ds.feedToggle, ds.feedType);
-    else if (ds.feedGigKey !== undefined) window.viewGigDetails(ds.feedGigKey);
-    else if (ds.feedBuddyShowKey !== undefined) window._feedOpenBuddyShow(ds.feedBuddyShowKey, ds.feedBuddyShowIds);
-    else                                  window._feedOpenBuddyCollection(ds.feedBuddyColId, ds.feedBuddyColName);
+let _artSeq = 0;
+let _artJobs = new Map();
+const _probeCache = new Map();
+
+function _probe(url) {
+    if (!_probeCache.has(url)) {
+        _probeCache.set(url, new Promise(resolve => {
+            const im = new Image();
+            im.onload  = () => resolve(true);
+            im.onerror = () => resolve(false);
+            im.src = url;
+        }));
+    }
+    return _probeCache.get(url);
 }
 
-function _wireFeedClicks(container) {
-    if (!container || container._feedClickWired) return;
-    container._feedClickWired = true;
-    container.addEventListener('click', _handleFeedClick);
+function _gigFile(gig) {
+    if (!gig?.Date || !gig?.OfficialVenue) return null;
+    const [d, m, y] = gig.Date.split('/');
+    const venue = gig.OfficialVenue.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-');
+    return `${y}-${m}-${d}-${venue}.jpg`;
 }
 
-function renderCard(card, index) {
-    // tip_discovery cards have their own renderer
-    if (card.type === 'tip_discovery') return renderTipDiscoveryCard(card);
-
-    const safeKey   = (card.journalKey || `card-${index}`).replace(/[^a-z0-9]/gi, '_');
-    const hasDetail = EXPANDABLE_TYPES.has(card.type);
-    const isSocial  = SOCIAL_TYPES.has(card.type);
-
-    // Social cards get the buddy avatar woven into the eyebrow
-    const eyebrowHtml = isSocial && (card.buddies?.length || card.buddy)
-        ? `<span class="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-white/60 mb-2">
-               ${buddyAvatarPill(card.buddies || card.buddy)}${escapeHtml(card.eyebrow)}
-           </span>`
-        : `<span class="text-[9px] font-black uppercase tracking-widest text-white/60 mb-2 block">
-               ${escapeHtml(card.eyebrow)}
-           </span>`;
-
-    // Top accent stripe colour for social cards
-    const socialStripeClass =
-        card.type === 'buddy_recent_show'           ? 'bg-emerald-500' :
-        card.type === 'buddy_near_miss'             ? 'bg-cyan-600'  :
-        card.type === 'buddy_venue_echo'            ? 'bg-cyan-500'  :
-        card.type === 'buddy_recent_collection'     ? 'bg-orange-500' :
-        card.type === 'buddy_collection_together'   ? 'bg-indigo-400' :
-        card.type === 'buddy_collection_this_month' ? 'bg-amber-400'  :
-                                                        'bg-rose-500';
-
-    // Primary tap action (data-* attributes, dispatched by _handleFeedClick)
-    const primaryAction = hasDetail
-        ? `data-feed-toggle="${escapeHtml(safeKey)}" data-feed-type="${escapeHtml(card.type)}"`
-        : `data-feed-gig-key="${escapeHtml(card.journalKey || '')}"`;
-
-    // For gig-based social cards the tap opens the gig modal (read-only for buddy cards).
-    // Buddy collection cards have no gig — they open the buddy's Collection tab instead.
-    const socialAction = `data-feed-gig-key="${escapeHtml(card.gig?.['Journal Key'] || '')}"`;
-    const buddyCollectionAction = `data-feed-buddy-col-id="${escapeHtml(card.buddy?.id || '')}" data-feed-buddy-col-name="${escapeHtml(card.buddyName || '')}"`;
-
-    // buddy_recent_show opens the read-only buddy show view (the gig modal only
-    // knows the signed-in user's own journal).
-    const buddyShowAction = `data-feed-buddy-show-key="${escapeHtml(card.gig?.['Journal Key'] || '')}" data-feed-buddy-show-ids="${escapeHtml((card.buddies || [card.buddy]).filter(Boolean).map(b => b.id).join(','))}"`;
-
-    const tapAction = card.type === 'buddy_recent_show'
-        ? buddyShowAction
-        : BUDDY_COLLECTION_TYPES.has(card.type)
-            ? buddyCollectionAction
-            : (isSocial ? socialAction : primaryAction);
-
-    // CTA label
-    const ctaLabel = (() => {
-        if (card.type === 'buddy_recent_show') return card.buddies?.length > 1 ? 'See the show' : `See ${card.buddyName}'s show`;
-        if (card.type === 'buddy_together')    return 'View your show';
-        if (card.type === 'buddy_on_this_day') return `See ${card.buddyName}'s show`;
-        if (card.type === 'buddy_near_miss')   return 'View your show';
-        if (card.type === 'buddy_venue_echo')  return 'View your show';
-        if (card.type === 'buddy_recent_collection')     return `See ${card.buddyName}'s collection`;
-        if (card.type === 'buddy_collection_together')   return `See ${card.buddyName}'s collection`;
-        if (card.type === 'buddy_collection_this_month') return `See ${card.buddyName}'s collection`;
-        if (card.type === 'season_flashback')  return `See all ${card.allGigs?.length} shows`;
-        if (card.type === 'venue_chapter')     return `See all ${card.allGigs?.length} visits`;
-        if (card.type === 'collection_band_story') return `See ${card.allItems?.length} item${card.allItems?.length !== 1 ? 's' : ''}`;
-        if (card.type === 'collection_this_month') return card.allItems?.length > 1 ? `See ${card.allItems.length} items` : '';
-        if (card.allGigs?.length > 1)          return `See all ${card.allGigs.length} shows`;
-        return '';
-    })();
-
-    const ctaIcon     = (hasDetail && !isSocial) ? 'chevron-down' : 'arrow-right';
-    const chevronAttr = (hasDetail && !isSocial) ? `id="feed-chevron-${safeKey}"` : '';
-
+function _art(name, cls, job = {}) {
+    const id = `fa${++_artSeq}`;
+    _artJobs.set(id, { band: name, ...job });
     return `
-        <div class="relative overflow-hidden rounded-[2rem] bg-slate-900 shadow-xl min-h-[260px] flex flex-col"
-             role="article"
-             data-card-type="${escapeHtml(card.type)}">
-
-            <!-- Hero image -->
-            <img id="feed-img-${safeKey}"
-                 src=""
-                 class="absolute inset-0 w-full h-full object-cover ${isSocial && card.type !== 'buddy_recent_show' && card.type !== 'buddy_recent_collection' ? 'opacity-35' : 'opacity-50'}"
-                 alt=""
-                 aria-hidden="true">
-
-            <!-- Gradient overlay -->
-            <div class="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-900/50 to-transparent"></div>
-
-            <!-- Social accent stripe -->
-            ${isSocial ? `<div class="absolute top-0 inset-x-0 h-1 ${socialStripeClass} opacity-70"></div>` : ''}
-
-            <!-- Content -->
-            <div class="relative z-10 flex flex-col justify-end flex-1 p-6">
-
-                ${eyebrowHtml}
-
-                <div ${tapAction} class="cursor-pointer">
-                    <h3 class="text-3xl font-black italic uppercase tracking-tighter text-white leading-none mb-1">
-                        ${escapeHtml(card.headline)}
-                    </h3>
-                    <p class="text-sm font-bold text-white/60">${escapeHtml(card.subline)}</p>
-                </div>
-
-                <div class="flex items-center justify-between gap-2 mt-4">
-                    <div class="flex items-center gap-2">
-                        <span class="${card.badgeColor} text-white text-[9px] font-black uppercase tracking-widest px-3 py-1 rounded-full">
-                            ${escapeHtml(card.badge)}
-                        </span>
-                        ${renderReactionRow(card.reactTargets, 'dark', card.reactVariant)}
-                    </div>
-                    ${ctaLabel ? `
-                    <button ${tapAction}
-                            class="text-[10px] font-black text-white/50 hover:text-white uppercase tracking-widest transition-colors flex items-center gap-1">
-                        ${escapeHtml(ctaLabel)}
-                        <i data-lucide="${ctaIcon}" class="w-3.5 h-3.5" ${chevronAttr} aria-hidden="true"></i>
-                    </button>` : ''}
-                </div>
-
-                <!-- Expandable detail panel (personal cards only) -->
-                ${hasDetail ? `<div id="feed-detail-${safeKey}" class="hidden"></div>` : ''}
-            </div>
+        <div class="overflow-hidden bg-gradient-to-br ${_grad(name)} ${cls}">
+            <span class="absolute inset-0 flex items-center justify-center text-2xl font-black italic text-white/80" aria-hidden="true">${escapeHtml(_initials(name))}</span>
+            <img data-feed-art="${id}" alt="" decoding="async"
+                 class="absolute inset-0 w-full h-full object-cover opacity-0 transition-opacity duration-300 motion-reduce:transition-none">
         </div>`;
 }
 
-// ─── TOGGLE HANDLER ───────────────────────────────────────────────────────────
-
-window._feedToggleDetail = (safeKey, cardType) => {
-    const detailEl  = document.getElementById(`feed-detail-${safeKey}`);
-    const chevronEl = document.getElementById(`feed-chevron-${safeKey}`);
-    if (!detailEl) return;
-
-    const isHidden = detailEl.classList.contains('hidden');
-
-    if (isHidden) {
-        const cardEl = detailEl.closest('[role="article"]');
-
-        // ── Artist cards ──────────────────────────────────────────────────────
-        const ARTIST_TYPES = new Set([
-            'artist_story', 'artist_first', 'artist_milestone',
-            'artist_cities', 'artist_era', 'first_last',
-        ]);
-
-        if (ARTIST_TYPES.has(cardType)) {
-            const headline = cardEl?.querySelector('h3')?.textContent?.trim();
-            if (headline) {
-                const today = new Date(); today.setHours(0, 0, 0, 0);
-                const shows = (window.journalData || [])
-                    .filter(g => { const d = parseDate(g.Date); return g.Band === headline && d && d < today; })
-                    .sort((a, b) => (parseDate(a.Date) || 0) - (parseDate(b.Date) || 0));
-
-                detailEl.innerHTML = `
-                    <div class="mt-4 pt-4 border-t border-white/20 space-y-2">
-                        ${shows.map((g, i) => `
-                        <div data-feed-gig-key="${escapeHtml(g['Journal Key'] || '')}"
-                             class="flex items-center gap-3 cursor-pointer hover:bg-white/10 rounded-xl px-2 py-1.5 transition-colors">
-                            <span class="text-[9px] font-black text-white/50 w-8 text-right">${gigYear(g)}</span>
-                            <div class="w-1.5 h-1.5 rounded-full bg-indigo-400 flex-shrink-0"></div>
-                            <div class="flex-1 min-w-0">
-                                <p class="text-xs font-bold text-white truncate">${escapeHtml(g.OfficialVenue)}</p>
-                            </div>
-                            <span class="text-[9px] text-white/40 font-bold">#${i + 1}</span>
-                        </div>`).join('')}
-                    </div>`;
-            }
-        }
-
-        // ── Venue chapter ─────────────────────────────────────────────────────
-        else if (cardType === 'venue_chapter') {
-            const venueName = cardEl?.querySelector('h3')?.textContent?.trim();
-            if (venueName) {
-                const today = new Date(); today.setHours(0, 0, 0, 0);
-                const shows = (window.journalData || [])
-                    .filter(g => { const d = parseDate(g.Date); return g.OfficialVenue === venueName && d && d < today; })
-                    .sort((a, b) => (parseDate(a.Date) || 0) - (parseDate(b.Date) || 0));
-
-                detailEl.innerHTML = `
-                    <div class="mt-4 pt-4 border-t border-white/20 space-y-2">
-                        ${shows.map(g => `
-                        <div data-feed-gig-key="${escapeHtml(g['Journal Key'] || '')}"
-                             class="flex items-center gap-3 cursor-pointer hover:bg-white/10 rounded-xl px-2 py-1.5 transition-colors">
-                            <span class="text-[9px] font-black text-white/50 w-8 text-right">${gigYear(g)}</span>
-                            <div class="w-1.5 h-1.5 rounded-full bg-teal-400 flex-shrink-0"></div>
-                            <div class="flex-1 min-w-0">
-                                <p class="text-xs font-bold text-white truncate">${escapeHtml(g.Band)}</p>
-                            </div>
-                        </div>`).join('')}
-                    </div>`;
-            }
-        }
-
-        // ── Season flashback ──────────────────────────────────────────────────
-        else if (cardType === 'season_flashback') {
-            const today     = new Date(); today.setHours(0, 0, 0, 0);
-            const thisMonth = today.getMonth() + 1;
-            const thisYear  = today.getFullYear();
-            const todayDay  = today.getDate();
-
-            const seasonGigs = (window.journalData || []).filter(g => {
-                if (g.Date.split('/').length !== 3) return false;
-                const d = parseDate(g.Date);
-                return gigMonth(g) === thisMonth && gigYear(g) < thisYear &&
-                       d && d < today && !(gigDay(g) === todayDay && gigMonth(g) === thisMonth);
-            }).sort((a, b) => (parseDate(b.Date) || 0) - (parseDate(a.Date) || 0));
-
-            detailEl.innerHTML = `
-                <div class="mt-4 pt-4 border-t border-white/20 space-y-2">
-                    ${seasonGigs.slice(0, 8).map(g => `
-                    <div data-feed-gig-key="${escapeHtml(g['Journal Key'] || '')}"
-                         class="flex items-center gap-3 cursor-pointer hover:bg-white/10 rounded-xl px-2 py-1.5 transition-colors">
-                        <span class="text-[9px] font-black text-white/50 w-8 text-right">${gigYear(g)}</span>
-                        <div class="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0"></div>
-                        <div class="flex-1 min-w-0">
-                            <p class="text-xs font-bold text-white truncate">${escapeHtml(g.Band)}</p>
-                            <p class="text-[10px] text-white/50 truncate">${escapeHtml(g.OfficialVenue)}</p>
-                        </div>
-                    </div>`).join('')}
-                    ${seasonGigs.length > 8
-                        ? `<p class="text-[10px] text-white/40 text-center pt-1">+${seasonGigs.length - 8} more</p>`
-                        : ''}
-                </div>`;
-        }
-
-        // ── Collection cards ──────────────────────────────────────────────────
-        else if (cardType === 'collection_band_story' || cardType === 'collection_this_month') {
-            const allItems  = window._collectionItems || [];
-            const today     = new Date();
-            const thisMonth = today.getMonth() + 1;
-            const thisYear  = today.getFullYear();
-            let items;
-
-            if (cardType === 'collection_band_story') {
-                const bandName = cardEl?.querySelector('h3')?.textContent?.trim() || '';
-                items = allItems.filter(i =>
-                    (i.band_name || '').toLowerCase() === bandName.toLowerCase()
-                );
-            } else {
-                items = allItems.filter(item => {
-                    if (!item.acquired_date) return false;
-                    const parts = item.acquired_date.split('-');
-                    return parseInt(parts[1] || '0', 10) === thisMonth &&
-                           parseInt(parts[0], 10) < thisYear;
-                }).sort((a, b) => (b.acquired_date || '').localeCompare(a.acquired_date || ''));
-            }
-
-            detailEl.innerHTML = `
-                <div class="mt-4 pt-4 border-t border-white/20 space-y-2">
-                    ${items.slice(0, 8).map(item => `
-                    <div class="flex items-center gap-3 px-2 py-1.5">
-                        <div class="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0"></div>
-                        <div class="flex-1 min-w-0">
-                            <p class="text-xs font-bold text-white truncate">${escapeHtml(item.title)}</p>
-                            ${item.acquired_date
-                                ? `<p class="text-[10px] text-white/50">${escapeHtml(_formatAcquiredDate(item.acquired_date))}</p>`
-                                : ''}
-                        </div>
-                        <span class="text-[9px] text-white/40 font-bold uppercase">${escapeHtml(item.subtype || '')}</span>
-                    </div>`).join('')}
-                    ${items.length > 8
-                        ? `<p class="text-[10px] text-white/40 text-center pt-1">+${items.length - 8} more</p>`
-                        : ''}
-                </div>`;
-        }
-
-        if (window.lucide) lucide.createIcons();
+async function resolveArtUrl(job) {
+    if (job.kind === 'item' && job.item?.photos?.length) {
+        try {
+            const { data, error } = await supabase.storage
+                .from('collection-photos')
+                .createSignedUrl(job.item.photos[0], 3600);
+            if (!error && data?.signedUrl) return data.signedUrl;
+        } catch (e) { /* fall through */ }
     }
 
-    detailEl.classList.toggle('hidden');
-    if (chevronEl) chevronEl.style.transform = isHidden ? 'rotate(180deg)' : '';
-};
+    if (job.kind === 'show') {
+        const file = _gigFile(job.gig);
+        if (file) {
+            const owners = job.owners?.length ? job.owners : [window.currentUser?.id];
+            const own = await findGigPhotoUrl(owners, file);
+            if (own) return own;
+            const scrapbook = `assets/scrapbook/${file}`;
+            if (await _probe(scrapbook)) return scrapbook;
+        }
+    }
 
-// ─── GAME CARD ────────────────────────────────────────────────────────────────
+    await _mediaPending;
+    const spotify = safeUrl(job.gig?.SpotifyImageUrl || '') || safeUrl(_media.get(_key(job.band))?.image_url || '');
+    if (spotify) return spotify;
 
-function renderGameCard(container, journalData) {
+    if (job.band) {
+        const local = _localArt(job.band);
+        if (await _probe(local)) return local;
+    }
+    return null;
+}
+
+function hydrateArt(root) {
+    const imgs = [...root.querySelectorAll('img[data-feed-art]:not([data-art-started])')];
+    let next = 0;
+    const worker = async () => {
+        while (next < imgs.length) {
+            const img = imgs[next++];
+            img.setAttribute('data-art-started', '');
+            const job = _artJobs.get(img.dataset.feedArt);
+            if (!job) continue;
+            try {
+                const url = await resolveArtUrl(job);
+                if (!url || !img.isConnected) continue;
+                // A remote image that errors steps down to the local stock photo.
+                if (!url.startsWith('assets/') && job.band) img.dataset.fallback = _localArt(job.band);
+                img.src = url;
+            } catch (e) { /* initials stay */ }
+        }
+    };
+    for (let i = 0; i < Math.min(4, imgs.length); i++) worker();
+}
+
+// <img> error/load events don't bubble, so these are wired in the capture phase.
+function _onFeedImgError(e) {
+    const img = e.target;
+    if (!(img instanceof HTMLImageElement) || img.dataset.feedArt === undefined) return;
+    if (img.dataset.fallback) {
+        const fb = img.dataset.fallback;
+        delete img.dataset.fallback;
+        img.src = fb;
+    } else {
+        img.remove();   // gradient + initials show through
+    }
+}
+function _onFeedImgLoad(e) {
+    const img = e.target;
+    if (!(img instanceof HTMLImageElement) || img.dataset.feedArt === undefined) return;
+    img.classList.remove('opacity-0');
+    img.classList.add('opacity-100');
+}
+
+// ─── TAP TARGETS ──────────────────────────────────────────────────────────────
+// A tap target is a small descriptor, rendered into data-* attributes and
+// dispatched by the one delegated listener (_handleFeedClick). Journal keys and
+// buddy names are user-controlled text, so nothing goes into inline handlers.
+
+function tapDesc(card, gig = card.gig) {
+    if (card.type === 'buddy_recent_show') {
+        return {
+            k: 'bshow',
+            key: gig?.['Journal Key'] || '',
+            ids: (card.buddies || [card.buddy]).filter(Boolean).map(b => b.id).join(','),
+        };
+    }
+    if (BUDDY_COLLECTION_TYPES.has(card.type)) {
+        return card.buddy?.id ? { k: 'bcol', id: card.buddy.id, name: card.buddyName || '' } : null;
+    }
+    const key = gig?.['Journal Key'] || '';
+    return key ? { k: 'gig', key } : null;
+}
+
+function tapAttrs(d) {
+    if (!d) return '';
+    if (d.k === 'gig')   return `data-feed-gig-key="${_attr(d.key)}"`;
+    if (d.k === 'bshow') return `data-feed-buddy-show-key="${_attr(d.key)}" data-feed-buddy-show-ids="${_attr(d.ids)}"`;
+    if (d.k === 'bcol')  return `data-feed-buddy-col-id="${_attr(d.id)}" data-feed-buddy-col-name="${_attr(d.name)}"`;
+    return '';
+}
+
+function runTap(d) {
+    if (!d) return;
+    if (d.k === 'gig')   { if (d.key) window.viewGigDetails?.(d.key); }
+    if (d.k === 'bshow') window._feedOpenBuddyShow(d.key, d.ids);
+    if (d.k === 'bcol')  window._feedOpenBuddyCollection(d.id, d.name);
+}
+
+// Whose uploaded photo should be this card's image? Default is the signed-in
+// user. Buddy cards look in the buddy's folder; a show you both attended
+// checks yours first, then theirs.
+function photoOwnerIds(card) {
+    if (card.type === 'buddy_recent_show') {
+        return (card.buddies || [card.buddy]).filter(Boolean).map(b => b.id);
+    }
+    if (card.type === 'buddy_together') {
+        return [window.currentUser?.id, ...(card.buddies || [card.buddy]).filter(Boolean).map(b => b.id)];
+    }
+    if (card.type === 'buddy_on_this_day' && card.buddy?.id) return [card.buddy.id];
+    return undefined;
+}
+
+function artJob(card) {
+    const isItem = !!card.collectionItem && !card.gig;
+    return {
+        kind:   isItem ? 'item' : 'show',
+        gig:    card.gig,
+        item:   card.collectionItem,
+        owners: photoOwnerIds(card),
+        band:   card.gig?.Band || card.collectionItem?.band_name || card.headline,
+    };
+}
+
+// ─── SECTION SHELL ────────────────────────────────────────────────────────────
+
+function _head(id, title, sub = '') {
+    return `
+        <h3 id="${id}" class="${H3} ${sub ? 'mb-1' : 'mb-3'}">${escapeHtml(title)}</h3>
+        ${sub ? `<p class="text-sm font-medium text-slate-500 mb-4">${escapeHtml(sub)}</p>` : ''}`;
+}
+
+// ─── SHOW LIST (expanded detail) ──────────────────────────────────────────────
+
+function showListHtml(card, theme) {
+    const dark    = theme === 'dark';
+    const gigs    = card.allGigs || [];
+    const byBand  = card.type === 'venue_chapter' || card.type === 'season_flashback' || card.type === 'on_this_day';
+    const numbered = NUMBERED_TYPES.has(card.type);
+    const hover   = dark ? 'hover:bg-white/10' : 'hover:bg-slate-50';
+    const year    = dark ? 'text-white/60' : 'text-slate-500';
+    const main    = dark ? 'text-white' : 'text-slate-800';
+    const muted   = dark ? 'text-white/60' : 'text-slate-500';
+
+    return `
+        <div class="mt-4 pt-3 border-t ${dark ? 'border-white/20' : 'border-slate-100'} max-h-64 overflow-y-auto space-y-0.5">
+            ${gigs.map((g, i) => `
+            <button type="button" data-feed-gig-key="${_attr(g['Journal Key'] || '')}"
+                    class="w-full flex items-center gap-3 rounded-xl px-2 py-1.5 text-left transition-colors ${hover} ${dark ? FOCUS_DARK : FOCUS}">
+                <span class="w-9 shrink-0 text-right text-[11px] font-black ${year}">${escapeHtml(String(gigYear(g)))}</span>
+                <span class="w-1.5 h-1.5 rounded-full shrink-0 bg-indigo-400" aria-hidden="true"></span>
+                <span class="flex-1 min-w-0 text-xs font-bold truncate ${main}">
+                    ${escapeHtml(byBand ? g.Band : g.OfficialVenue)}${card.type === 'season_flashback'
+                        ? ` <span class="font-medium ${muted}">· ${escapeHtml(g.OfficialVenue || '')}</span>` : ''}
+                </span>
+                ${numbered ? `<span class="text-[11px] font-bold ${muted}">#${i + 1}</span>` : ''}
+            </button>`).join('')}
+        </div>`;
+}
+
+// ─── SPOTLIGHT HERO ───────────────────────────────────────────────────────────
+// The strongest card of the day. Slide 0 is the card's own anchor show; for
+// cards with more shows behind them (an anniversary run, an artist's story, a
+// room's history) the next slides are those shows, newest first.
+
+let _hero = null;   // { card, slides, idx, playing, playBand }
+
+function buildSlides(card) {
+    const social    = SOCIAL_TYPES.has(card.type);
+    const name      = card.buddyName || '';
+    const openLabel =
+        card.type === 'buddy_recent_show'   ? (card.buddies?.length > 1 ? 'See the show' : `See ${name}\u2019s show`) :
+        BUDDY_COLLECTION_TYPES.has(card.type) ? `See ${name}\u2019s collection` :
+        social                               ? 'View your show' :
+                                               'Open show';
+
+    // Collection cards: slides are the items.
+    if (!card.gig) {
+        const items = (card.allItems || [card.collectionItem]).filter(Boolean);
+        const list  = social ? items.slice(0, 1) : items.slice(0, MAX_HERO_SLIDES);
+        const isBand = card.type === 'collection_band_story';
+        return list.map((it, i) => ({
+            kind: 'item', item: it, band: it.band_name || '',
+            title:   (social || isBand) ? card.headline : it.title,
+            eyebrow: card.eyebrow,
+            line:    social ? card.subline
+                   : isBand ? [it.title, _formatAcquiredDate(it.acquired_date)].filter(Boolean).join(' · ')
+                            : [it.band_name, _formatAcquiredDate(it.acquired_date)].filter(Boolean).join(' · '),
+            tap:     i === 0 ? tapDesc(card) : null,
+            openLabel,
+        }));
+    }
+
+    const gig = card.gig;
+    const anchor = {
+        kind: 'show', gig, band: gig.Band || '',
+        title: card.headline, eyebrow: card.eyebrow, line: card.subline,
+        tap: tapDesc(card), owners: photoOwnerIds(card), openLabel,
+    };
+    const slides = [anchor];
+    if (!MULTI_SLIDE_TYPES.has(card.type)) return slides;
+
+    const all      = card.allGigs || [];
+    const noun     = isFestival(all[0] || gig) ? 'Visit' : 'Show';
+    const thisYear = new Date().getFullYear();
+    const monthName = new Date().toLocaleString('default', { month: 'long' });
+    const byBandTitle = card.type === 'on_this_day' || card.type === 'season_flashback';
+
+    const others = all.filter(g => g['Journal Key'] !== gig['Journal Key']);
+    _spread(others, MAX_HERO_SLIDES - 1)
+        .sort((a, b) => (parseDate(b.Date) || 0) - (parseDate(a.Date) || 0))
+        .forEach(g => {
+            const idx = all.indexOf(g);
+            const yrs = thisYear - gigYear(g);
+            slides.push({
+                kind: 'show', gig: g, band: g.Band || '',
+                title:   byBandTitle ? g.Band : card.headline,
+                eyebrow: card.type === 'on_this_day'     ? `${_plural(yrs, 'year', 'years')} ago today`
+                       : card.type === 'season_flashback' ? `${monthName} ${gigYear(g)}`
+                       :                                    `${noun} ${idx + 1} of ${all.length}`,
+                line:    card.type === 'venue_chapter' ? [g.Band, g.Date].filter(Boolean).join(' · ') : _showLine(g),
+                tap:     tapDesc(card, g),
+                openLabel,
+            });
+        });
+    return slides;
+}
+
+function heroSection(card) {
+    const slides = buildSlides(card);
+    const key    = _cardKey(card);
+    _hero = { card, slides, idx: 0, playing: false, playBand: null };
+
+    const s0     = slides[0];
+    const n      = slides.length;
+    const multi  = n > 1;
+    const buddies = SOCIAL_TYPES.has(card.type) ? (card.buddies || (card.buddy ? [card.buddy] : [])) : [];
+    const listCount = card.allGigs?.length || 0;
+    const hasList = LIST_TYPES.has(card.type) && listCount > 1;
+
+    const slideHtml = slides.map((s, i) => `
+        <div class="relative shrink-0 w-full h-full snap-center ${s.tap ? 'cursor-pointer' : ''}" ${tapAttrs(s.tap)}
+             ${multi ? `role="group" aria-roledescription="slide" aria-label="${_attr(`${i + 1} of ${n}`)}"` : ''}>
+            ${_art(s.band || s.title, 'absolute inset-0',
+                   { kind: s.kind, gig: s.gig, item: s.item, owners: s.owners, band: s.band })}
+        </div>`).join('');
+
+    const railAttrs = multi
+        ? `tabindex="0" role="region" aria-roledescription="carousel" aria-label="${_attr(`${s0.title}: ${n} slides`)}"`
+        : '';
+
+    const chip = buddies.length ? `
+        <div class="absolute top-4 left-4 flex items-center max-w-[70%] bg-slate-900/60 backdrop-blur-sm rounded-full pl-1 pr-3 py-1 pointer-events-none">
+            ${buddyAvatarPill(buddies)}
+            <span class="text-[11px] font-bold text-white truncate">${escapeHtml(card.buddyName || '')}</span>
+        </div>` : '';
+
+    const dots = multi ? `
+        <div class="absolute top-4 right-4 flex gap-1.5 pointer-events-none" aria-hidden="true">
+            ${slides.map((_, i) => `<span data-feed-dot class="block w-1.5 h-1.5 rounded-full ${i === 0 ? 'bg-white' : 'bg-white/40'}"></span>`).join('')}
+        </div>` : '';
+
+    return `
+    <section data-feed-hero data-card-type="${_attr(card.type)}" class="overflow-hidden rounded-[2rem] bg-slate-900 shadow-sm" aria-labelledby="feed-spot">
+        <div class="relative h-72">
+            <div data-feed-rail ${railAttrs}
+                 class="absolute inset-0 flex overflow-x-auto overscroll-x-contain snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                ${slideHtml}
+            </div>
+            <div class="absolute inset-0 pointer-events-none bg-gradient-to-t from-slate-900 via-slate-900/50 to-transparent"></div>
+            ${chip}
+            <div class="absolute inset-x-0 bottom-0 p-5 pointer-events-none">
+                <p data-feed-eyebrow class="text-[10px] font-black uppercase tracking-widest text-white/70">${escapeHtml(s0.eyebrow)}</p>
+                <h3 id="feed-spot" data-feed-title class="text-3xl font-black italic uppercase tracking-tighter text-white leading-none mt-1">${escapeHtml(s0.title)}</h3>
+                <p data-feed-line aria-live="polite" class="text-sm font-bold text-white/80 mt-2 line-clamp-2">${escapeHtml(s0.line)}</p>
+            </div>
+            ${dots}
+        </div>
+
+        <div class="p-4 flex flex-wrap items-center gap-2">
+            <button type="button" data-feed-open class="${HERO_BTN} px-5 bg-white text-slate-900 ${s0.tap ? '' : 'hidden'}">
+                <span data-feed-open-label>${escapeHtml(s0.openLabel)}</span>
+            </button>
+            <button type="button" data-feed-play aria-pressed="false" class="${HERO_BTN} px-4 bg-white/10 text-white ${s0.band ? '' : 'hidden'}">
+                <span data-feed-ico-play><i data-lucide="play" class="w-4 h-4" aria-hidden="true"></i></span>
+                <span data-feed-ico-stop class="hidden"><i data-lucide="x" class="w-4 h-4" aria-hidden="true"></i></span>
+                <span data-feed-play-label>Listen</span>
+            </button>
+            <a data-feed-watch href="${_attr(s0.band ? _watchUrl(s0.band) : '#')}" target="_blank" rel="noopener noreferrer"
+               aria-label="Watch live videos" title="Watch live videos"
+               class="${HERO_BTN} w-11 bg-white/10 text-white ${s0.band ? '' : 'hidden'}">
+                <i data-lucide="video" class="w-4 h-4" aria-hidden="true"></i>
+            </a>
+            ${hasList ? `
+            <button type="button" data-feed-toggle="${_attr(key)}" data-feed-type="${_attr(card.type)}"
+                    aria-expanded="false" aria-controls="feed-detail-${_attr(key)}"
+                    aria-label="${_attr(`All ${listCount} shows`)}" title="${_attr(`All ${listCount} shows`)}"
+                    class="${HERO_BTN} px-4 bg-white/10 text-white">
+                <i data-lucide="list" class="w-4 h-4" aria-hidden="true"></i>${listCount}
+            </button>` : ''}
+            <div class="ml-auto">${renderReactionRow(card.reactTargets, 'dark', card.reactVariant, 'right')}</div>
+        </div>
+
+        <div data-feed-player></div>
+        <div id="feed-detail-${_attr(key)}" data-theme="dark" class="hidden px-5 pb-5"></div>
+    </section>`;
+}
+
+// ── Hero behaviour (module-level: one hero per feed) ─────────────────────────
+
+const _heroHost = () => document.querySelector('[data-feed-hero]');
+
+function applyHeroSlide(host, i) {
+    const s = _hero?.slides[i];
+    if (!s) return;
+    _hero.idx = i;
+    const set = (sel, v) => { const el = host.querySelector(sel); if (el) el.textContent = v; };
+    set('[data-feed-eyebrow]', s.eyebrow);
+    set('[data-feed-title]',   s.title);
+    set('[data-feed-line]',    s.line);
+    host.querySelectorAll('[data-feed-dot]').forEach((d, n) => {
+        d.classList.toggle('bg-white',    n === i);
+        d.classList.toggle('bg-white/40', n !== i);
+    });
+    const open = host.querySelector('[data-feed-open]');
+    if (open) { open.classList.toggle('hidden', !s.tap); set('[data-feed-open-label]', s.openLabel); }
+    host.querySelector('[data-feed-play]')?.classList.toggle('hidden', !s.band);
+    const watch = host.querySelector('[data-feed-watch]');
+    if (watch) { watch.classList.toggle('hidden', !s.band); if (s.band) watch.href = _watchUrl(s.band); }
+    if (_hero.playing && _hero.playBand !== s.band) _closePlayer(host);
+}
+
+function _setPlayUi(host, on) {
+    host.querySelector('[data-feed-ico-play]')?.classList.toggle('hidden', on);
+    host.querySelector('[data-feed-ico-stop]')?.classList.toggle('hidden', !on);
+    const label = host.querySelector('[data-feed-play-label]');
+    if (label) label.textContent = on ? 'Close player' : 'Listen';
+    host.querySelector('[data-feed-play]')?.setAttribute('aria-pressed', String(on));
+}
+
+function _closePlayer(host) {
+    const slot = host.querySelector('[data-feed-player]');
+    if (slot) slot.innerHTML = '';
+    if (_hero) { _hero.playing = false; _hero.playBand = null; }
+    _setPlayUi(host, false);
+}
+
+// One Spotify iframe at a time, loaded on demand, never on page load.
+function _toggleHeroPlayer() {
+    const host = _heroHost();
+    if (!host || !_hero) return;
+    if (_hero.playing) { _closePlayer(host); return; }
+    const s = _hero.slides[_hero.idx];
+    if (!s?.band) return;
+    const sid = _spotifyId(s.band);
+    if (!sid) {
+        window.open(`https://open.spotify.com/search/${encodeURIComponent(s.band)}`, '_blank', 'noopener,noreferrer');
+        return;
+    }
+    const slot = host.querySelector('[data-feed-player]');
+    if (!slot) return;
+    slot.innerHTML = `
+        <div class="px-4 pb-4">
+            <iframe title="${_attr(`Spotify player for ${s.band}`)}"
+                    src="https://open.spotify.com/embed/artist/${sid}?utm_source=generator&theme=0"
+                    width="100%" height="152" frameborder="0" loading="lazy"
+                    allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+                    class="rounded-2xl block"></iframe>
+        </div>`;
+    _hero.playing = true;
+    _hero.playBand = s.band;
+    _setPlayUi(host, true);
+}
+
+function _openHeroSlide() {
+    if (_hero) runTap(_hero.slides[_hero.idx]?.tap);
+}
+
+// Swipe: update caption, dots and buttons in place (no repaint, no flicker).
+let _heroRaf = 0;
+function _onFeedScroll(e) {
+    const rail = e.target;
+    if (!(rail instanceof Element) || !rail.hasAttribute('data-feed-rail') || !_hero) return;
+    cancelAnimationFrame(_heroRaf);
+    _heroRaf = requestAnimationFrame(() => {
+        const i = Math.round(rail.scrollLeft / (rail.clientWidth || 1));
+        if (i === _hero.idx || i < 0 || i >= _hero.slides.length) return;
+        const host = _heroHost();
+        if (host) applyHeroSlide(host, i);
+    });
+}
+
+// ─── ROWS ─────────────────────────────────────────────────────────────────────
+
+// Buddy update: thumbnail with the buddy's avatar on its corner, what happened,
+// and the reaction button on the right.
+function buddyRowHtml(card) {
+    const buddies = card.buddies || (card.buddy ? [card.buddy] : []);
+    const attrs   = tapAttrs(tapDesc(card));
+    return `
+        <li class="flex items-center gap-3">
+            <button type="button" ${attrs}
+                    class="flex-1 min-w-0 flex items-center gap-3 text-left rounded-2xl active:scale-[0.99] transition-transform ${FOCUS}">
+                <span class="relative shrink-0">
+                    ${_art(card.headline, 'relative block w-14 h-14 rounded-2xl', artJob(card))}
+                    ${buddies.length ? `<span class="absolute -bottom-1 -right-1 flex">${buddyAvatarPill(buddies.slice(0, 1), { ring: 'ring-white', spacing: 'mr-0' })}</span>` : ''}
+                </span>
+                <span class="flex-1 min-w-0">
+                    <span class="block text-sm font-bold text-slate-800 truncate">${escapeHtml(card.headline)}</span>
+                    <span class="block text-xs font-semibold text-slate-600 truncate">${escapeHtml(card.eyebrow)}</span>
+                    <span class="block text-xs text-slate-500 truncate">${escapeHtml(card.subline)}</span>
+                </span>
+            </button>
+            ${renderReactionRow(card.reactTargets, 'light', card.reactVariant, 'right')}
+        </li>`;
+}
+
+function buddySection(cards) {
+    return `
+        <section class="${CARD}" aria-labelledby="feed-buddies">
+            ${_head('feed-buddies', 'Buddy updates')}
+            <ul class="space-y-4">${cards.map(buddyRowHtml).join('')}</ul>
+        </section>`;
+}
+
+// Artist / room story: thumbnail, the story in one line, a bar for how many
+// shows sit behind it, and a pill naming the kind of story. Tap to open the list.
+function historyRowHtml(card, max) {
+    const key     = _cardKey(card);
+    const n       = card.allGigs?.length || 1;
+    const isVenue = card.type === 'venue_chapter';
+    const hasList = LIST_TYPES.has(card.type) && n > 1;
+    const thumb   = isVenue
+        ? `<span class="relative shrink-0 w-14 h-14 rounded-2xl bg-gradient-to-br ${_grad(card.headline)} flex items-center justify-center">
+               <i data-lucide="map-pin" class="w-6 h-6 text-white/80" aria-hidden="true"></i>
+           </span>`
+        : _art(card.headline, 'relative shrink-0 w-14 h-14 rounded-2xl', artJob(card));
+    const tap     = hasList
+        ? `data-feed-toggle="${_attr(key)}" data-feed-type="${_attr(card.type)}" aria-expanded="false" aria-controls="feed-detail-${_attr(key)}"`
+        : tapAttrs(tapDesc(card));
+
+    return `
+        <li>
+            <button type="button" ${tap}
+                    class="w-full flex items-center gap-3 text-left rounded-2xl active:scale-[0.99] transition-transform ${FOCUS}">
+                ${thumb}
+                <span class="flex-1 min-w-0">
+                    <span class="block text-sm font-bold text-slate-800 truncate">${escapeHtml(card.headline)}</span>
+                    <span class="block text-xs font-medium text-slate-500 line-clamp-2">${escapeHtml(card.eyebrow)}</span>
+                    <span class="block mt-1.5 h-1.5 rounded-full bg-slate-100 overflow-hidden" aria-hidden="true">
+                        <span class="block h-full rounded-full bg-indigo-500" style="width:${Math.max(8, Math.round((n / max) * 100))}%"></span>
+                    </span>
+                </span>
+                <span class="text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full whitespace-nowrap ${_pill(card.badgeColor)}">${escapeHtml(card.badge)}</span>
+                ${hasList ? '<i data-feed-chevron data-lucide="chevron-down" class="w-4 h-4 shrink-0 text-slate-400 transition-transform" aria-hidden="true"></i>' : ''}
+            </button>
+            ${hasList ? `<div id="feed-detail-${_attr(key)}" data-theme="light" class="hidden ml-[4.25rem]"></div>` : ''}
+        </li>`;
+}
+
+function historySection(allCards) {
+    // The same artist can qualify for several stories at once (first show,
+    // milestone, cities...). One row each: keep the highest-scoring story.
+    const best = new Map();
+    for (const c of allCards) {
+        const k = `${c.type === 'venue_chapter' ? 'v' : 'a'}:${_key(c.headline)}`;
+        if (!best.has(k) || c.score > best.get(k).score) best.set(k, c);
+    }
+    const cards = [...best.values()].sort((a, b) => b.score - a.score);
+    const max = Math.max(...cards.map(c => c.allGigs?.length || 1), 1);
+    return `
+        <section class="${CARD}" aria-labelledby="feed-history">
+            ${_head('feed-history', 'From your journal')}
+            <ul class="space-y-4">${cards.map(c => historyRowHtml(c, max)).join('')}</ul>
+        </section>`;
+}
+
+// ─── RAILS & TILES ────────────────────────────────────────────────────────────
+
+// Poster tile: the year is the headline. Tap opens the show.
+function posterTileHtml(g) {
+    return `
+        <button type="button" data-feed-gig-key="${_attr(g['Journal Key'] || '')}"
+                aria-label="${_attr(`${g.Band}, ${_showLine(g)}`)}"
+                class="relative shrink-0 snap-start w-36 h-48 rounded-3xl overflow-hidden text-left active:scale-[0.97] transition-transform ${FOCUS}">
+            ${_art(g.Band, 'absolute inset-0', { kind: 'show', gig: g, band: g.Band })}
+            <div class="absolute inset-0 bg-gradient-to-t from-slate-900/90 via-slate-900/30 to-slate-900/40"></div>
+            <span class="absolute top-3 left-3 text-3xl font-black italic tracking-tighter text-white leading-none">${escapeHtml(String(gigYear(g)))}</span>
+            <span class="absolute inset-x-0 bottom-0 p-3">
+                <span class="block text-sm font-black text-white leading-tight line-clamp-2">${escapeHtml(g.Band)}</span>
+                <span class="block mt-1 text-[11px] font-bold text-white/80 line-clamp-1">${escapeHtml(g.OfficialVenue || '')}</span>
+            </span>
+        </button>`;
+}
+
+function seasonSection(card) {
+    const gigs = (card.allGigs || []).slice(0, 12);
+    const more = (card.allGigs?.length || 0) - gigs.length;
+    return `
+        <section class="${CARD}" aria-labelledby="feed-season">
+            ${_head('feed-season', card.eyebrow, `${_plural(card.allGigs.length, 'show', 'shows')} from past years${more > 0 ? `, ${more} more in your journal` : ''}`)}
+            <ul class="${RAIL}" role="list">
+                ${gigs.map(g => `<li class="shrink-0 snap-start">${posterTileHtml(g)}</li>`).join('')}
+            </ul>
+        </section>`;
+}
+
+// Room you and a buddy have both been to. Tap opens your show there.
+function venueTileHtml(card) {
+    return `
+        <button type="button" ${tapAttrs(tapDesc(card))}
+                aria-label="${_attr(`${card.headline}. ${card.subline}`)}"
+                class="relative shrink-0 snap-start w-52 h-40 rounded-3xl overflow-hidden text-left bg-gradient-to-br ${_grad(card.headline)} active:scale-[0.97] transition-transform ${FOCUS}">
+            <div class="absolute inset-0 bg-gradient-to-t from-slate-900/70 via-slate-900/10 to-transparent"></div>
+            <i data-lucide="map-pin" class="absolute top-3 right-3 w-5 h-5 text-white/70" aria-hidden="true"></i>
+            <span class="absolute top-3 left-3 flex items-center max-w-[75%]">
+                ${buddyAvatarPill(card.buddy, { ring: 'ring-white' })}
+                <span class="text-[11px] font-bold text-white truncate">${escapeHtml(card.buddyName || '')}</span>
+            </span>
+            <span class="absolute inset-x-0 bottom-0 p-3">
+                <span class="block text-sm font-black text-white leading-tight line-clamp-2">${escapeHtml(card.headline)}</span>
+                <span class="block mt-1 text-[11px] font-bold text-white/85 line-clamp-1">${escapeHtml(card.eyebrow)}</span>
+            </span>
+        </button>`;
+}
+
+function venueSection(cards) {
+    return `
+        <section class="${CARD}" aria-labelledby="feed-rooms">
+            ${_head('feed-rooms', 'Rooms you share', 'Places you and your buddies have both been')}
+            <div class="${RAIL}">${cards.map(venueTileHtml).join('')}</div>
+        </section>`;
+}
+
+// Collection items as photo tiles. Not interactive: the old cards only listed
+// items too, and there is no single-item viewer to open.
+function itemTileHtml(item, showYear) {
+    const year = showYear ? String(item.acquired_date || '').split('-')[0] : '';
+    const kind = item.subtype || item.type || '';
+    return `
+        <li class="relative shrink-0 snap-start w-32 h-44 rounded-3xl overflow-hidden">
+            ${_art(item.title, 'absolute inset-0', { kind: 'item', item, band: item.band_name })}
+            <div class="absolute inset-0 bg-gradient-to-t from-slate-900/90 via-slate-900/30 to-slate-900/40"></div>
+            ${year
+                ? `<span class="absolute top-3 left-3 text-3xl font-black italic tracking-tighter text-white leading-none">${escapeHtml(year)}</span>`
+                : (kind ? `<span class="absolute top-2 left-2 bg-white/90 text-slate-700 text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-full">${escapeHtml(kind)}</span>` : '')}
+            <span class="absolute inset-x-0 bottom-0 p-3 text-sm font-black text-white leading-tight line-clamp-2">${escapeHtml(item.title)}</span>
+        </li>`;
+}
+
+function collectionSection(card) {
+    const items     = (card.allItems || []).slice(0, 10);
+    const isMonth   = card.type === 'collection_this_month';
+    const monthName = new Date().toLocaleString('default', { month: 'long' });
+    const id        = `feed-col-${_cardKey(card)}`;
+    const title     = isMonth ? `Added in ${monthName}` : card.headline;
+    const sub       = isMonth
+        ? `${_plural(card.allItems.length, 'item', 'items')} from past years`
+        : card.subline;
+    return `
+        <section class="${CARD}" aria-labelledby="${_attr(id)}">
+            ${_head(id, title, sub)}
+            <ul class="${RAIL}" role="list">${items.map(i => itemTileHtml(i, isMonth)).join('')}</ul>
+        </section>`;
+}
+
+// ─── GAME TILE ────────────────────────────────────────────────────────────────
+
+function gameCardHtml(journalData) {
     const canPlayQuiz = journalData.length >= 5;
     let gameType;
     if (!canPlayQuiz) {
@@ -2092,40 +2555,159 @@ function renderGameCard(container, journalData) {
         gameType   = last === 'quiz' ? 'puzzle' : 'quiz';
         sessionStorage.setItem('giglist_feed_last_game', gameType);
     }
+    const isPuzzle = gameType === 'puzzle';
+    const grad     = isPuzzle ? 'from-violet-600 to-fuchsia-600' : 'from-rose-600 to-red-600';
+    const eyebrow  = isPuzzle ? 'Fancy a break?' : 'Test your knowledge';
+    const headline = isPuzzle ? 'Slide puzzle' : 'Gig quiz';
+    const subline  = isPuzzle ? 'Piece together a show from your history' : 'How well do you know your own gig history?';
 
-    const isPuzzle   = gameType === 'puzzle';
-    const eyebrow    = isPuzzle ? 'Fancy a break?' : 'Test your knowledge';
-    const headline   = isPuzzle ? 'Slide Puzzle' : 'Gig Quiz';
-    const subline    = isPuzzle ? 'Piece together a show from your history' : 'How well do you know your own gig history?';
-    const badge      = isPuzzle ? '🧩 Puzzle' : '🎤 Quiz';
-    const badgeColor = isPuzzle ? 'bg-violet-500' : 'bg-rose-500';
-
-    const tile = document.createElement('div');
-    tile.id    = 'feed-game-card';
-    tile.innerHTML = `
-        <div class="relative overflow-hidden rounded-[2rem] bg-slate-900 shadow-xl min-h-[200px] flex flex-col"
-             role="article">
-            <img src="${DEFAULT_IMAGES[1]}"
-                 class="absolute inset-0 w-full h-full object-cover opacity-30"
-                 alt="" aria-hidden="true">
-            <div class="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-900/40 to-transparent"></div>
-            <div class="relative z-10 flex flex-col justify-end flex-1 p-6">
-                <span class="text-[9px] font-black uppercase tracking-widest text-white/60 mb-2">${eyebrow}</span>
-                <h3 class="text-3xl font-black italic uppercase tracking-tighter text-white leading-none mb-1">${headline}</h3>
-                <p class="text-sm font-bold text-white/60">${subline}</p>
-                <div class="flex items-center justify-between mt-4">
-                    <span class="${badgeColor} text-white text-[9px] font-black uppercase tracking-widest px-3 py-1 rounded-full">${badge}</span>
-                    <button onclick="window._openFeedGame('${gameType}')"
-                            class="text-[10px] font-black text-white/50 hover:text-white uppercase tracking-widest transition-colors flex items-center gap-1">
-                        Let's play
-                        <i data-lucide="play" class="w-3.5 h-3.5" aria-hidden="true"></i>
-                    </button>
-                </div>
-            </div>
+    return `
+        <div id="feed-game-card">
+            <button type="button" onclick="window._openFeedGame('${gameType}')"
+                    class="relative w-full overflow-hidden rounded-[2rem] bg-gradient-to-br ${grad} p-5 pr-16 text-left shadow-sm active:scale-[0.99] transition-transform ${FOCUS_DARK}">
+                <i data-lucide="play" class="absolute top-1/2 right-5 -translate-y-1/2 w-8 h-8 text-white/80" aria-hidden="true"></i>
+                <span class="block text-[10px] font-black uppercase tracking-widest text-white/80">${eyebrow}</span>
+                <span class="block mt-1 text-2xl font-black italic uppercase tracking-tighter text-white leading-none">${headline}</span>
+                <span class="block mt-2 text-sm font-bold text-white/90">${subline}</span>
+            </button>
         </div>`;
-    container.appendChild(tile);
+}
+
+// ─── STATES ───────────────────────────────────────────────────────────────────
+
+function skeletonHtml() {
+    return `
+        <div class="space-y-4 animate-pulse" aria-hidden="true">
+            <div class="h-72 rounded-[2rem] bg-slate-200"></div>
+            <div class="${CARD} h-56"></div>
+        </div>`;
+}
+
+function renderEmptyState(container) {
+    container.innerHTML = `
+        <div class="${CARD} text-center space-y-2 py-10">
+            <div class="w-16 h-16 mx-auto bg-slate-100 rounded-[1.5rem] flex items-center justify-center">
+                <i data-lucide="music-2" class="w-8 h-8 text-slate-400" aria-hidden="true"></i>
+            </div>
+            <h3 class="text-base font-black text-slate-900">Nothing yet</h3>
+            <p class="text-sm text-slate-500">Add some shows and come back — your feed will fill up fast.</p>
+        </div>
+        ${renderEmptyStateTips([
+            'feed_on_this_day',
+            'push_notifications',
+            'feed_band_deep_cut',
+        ])}`;
     if (window.lucide) lucide.createIcons();
 }
+
+function _attributionHtml() {
+    for (const m of _media.values()) {
+        if (m.image_url) return 'Artist images and players from Spotify';
+    }
+    return '';
+}
+
+// ─── COMPOSITION ──────────────────────────────────────────────────────────────
+
+const _cardsByKey = new Map();
+
+/**
+ * Turns the selected cards into the page. The top-scoring card becomes the
+ * hero; the rest are grouped by component. Sections keep the old ordering
+ * rule: anything at score 90+ first, then tip discovery cards, then the rest.
+ */
+function composeFeed(scored, tipCards, journalData) {
+    _artJobs  = new Map();
+    _cardsByKey.clear();
+    _hero = null;
+    scored.forEach(c => _cardsByKey.set(_cardKey(c), c));
+
+    const hero = scored[0] || null;
+    const heroHtml = hero ? heroSection(hero) : '';
+
+    // An anniversary hero already swipes through every on-this-day show.
+    const pool = scored.slice(hero ? 1 : 0).filter(c => !(hero?.type === 'on_this_day' && c.type === 'on_this_day'));
+    const groups = { buddy: [], venue: [], history: [], season: [], collection: [] };
+    for (const c of pool) {
+        if (BUDDY_ROW_TYPES.has(c.type))           groups.buddy.push(c);
+        else if (VENUE_TILE_TYPES.has(c.type))     groups.venue.push(c);
+        else if (HISTORY_ROW_TYPES.has(c.type))    groups.history.push(c);
+        else if (c.type === 'season_flashback')    groups.season.push(c);
+        else if (c.type.startsWith('collection_')) groups.collection.push(c);
+    }
+
+    const top = (cards) => Math.max(...cards.map(c => c.score));
+    const sections = [];
+    if (groups.buddy.length)   sections.push({ score: top(groups.buddy),   html: buddySection(groups.buddy) });
+    if (groups.venue.length)   sections.push({ score: top(groups.venue),   html: venueSection(groups.venue) });
+    if (groups.history.length) sections.push({ score: top(groups.history), html: historySection(groups.history) });
+    groups.season.forEach(c     => sections.push({ score: c.score, html: seasonSection(c) }));
+    groups.collection.forEach(c => sections.push({ score: c.score, html: collectionSection(c) }));
+    sections.sort((a, b) => b.score - a.score);
+
+    const pinned = sections.filter(s => s.score >= 90);
+    const rest   = sections.filter(s => s.score < 90);
+    const tips   = tipCards.map(c => `<div>${renderTipDiscoveryCard(c)}</div>`);
+
+    return [
+        heroHtml,
+        ...pinned.map(s => s.html),
+        ...tips,
+        ...rest.map(s => s.html),
+        gameCardHtml(journalData),
+    ].join('');
+}
+
+// ─── CLICK HANDLING ───────────────────────────────────────────────────────────
+
+const FEED_TAP_SELECTOR = [
+    '[data-feed-toggle]', '[data-feed-gig-key]', '[data-feed-buddy-col-id]',
+    '[data-feed-buddy-show-key]', '[data-feed-open]', '[data-feed-play]',
+].join(', ');
+
+function _handleFeedClick(e) {
+    const el = e.target.closest(FEED_TAP_SELECTOR);
+    if (!el || !e.currentTarget.contains(el)) return;
+    const ds = el.dataset;
+    if (ds.feedToggle !== undefined)            window._feedToggleDetail(ds.feedToggle, ds.feedType);
+    else if (ds.feedPlay !== undefined)         _toggleHeroPlayer();
+    else if (ds.feedOpen !== undefined)         _openHeroSlide();
+    else if (ds.feedGigKey !== undefined)       { if (ds.feedGigKey) window.viewGigDetails(ds.feedGigKey); }
+    else if (ds.feedBuddyShowKey !== undefined) window._feedOpenBuddyShow(ds.feedBuddyShowKey, ds.feedBuddyShowIds);
+    else                                        window._feedOpenBuddyCollection(ds.feedBuddyColId, ds.feedBuddyColName);
+}
+
+function _wireFeedClicks(container) {
+    if (!container || container._feedClickWired) return;
+    container._feedClickWired = true;
+    container.addEventListener('click',  _handleFeedClick);
+    container.addEventListener('scroll', _onFeedScroll,   true);
+    container.addEventListener('error',  _onFeedImgError, true);
+    container.addEventListener('load',   _onFeedImgLoad,  true);
+}
+
+// Expand / collapse a show list in place. Content is built from the card
+// itself (not scraped from the DOM), the first time it opens.
+window._feedToggleDetail = (safeKey) => {
+    const card   = _cardsByKey.get(safeKey);
+    const detail = document.getElementById(`feed-detail-${safeKey}`);
+    if (!card || !detail) return;
+
+    const opening = detail.classList.contains('hidden');
+    if (opening && !detail.dataset.filled) {
+        detail.innerHTML = showListHtml(card, detail.dataset.theme);
+        detail.dataset.filled = '1';
+    }
+    detail.classList.toggle('hidden', !opening);
+
+    document.querySelectorAll(`[data-feed-toggle="${safeKey}"]`).forEach(btn => {
+        btn.setAttribute('aria-expanded', String(opening));
+        const chev = btn.querySelector('[data-feed-chevron]');
+        if (chev) chev.style.transform = opening ? 'rotate(180deg)' : '';
+    });
+};
+
+// ─── GAME MODAL ───────────────────────────────────────────────────────────────
 
 window._openFeedGame = (gameType) => {
     if (document.getElementById('feed-game-modal')) return;
@@ -2218,21 +2800,28 @@ window._openFeedGame = (gameType) => {
  * Called when the Feed tab is activated.
  *
  * Fetch order:
- *   1. Collection items       — Supabase, own user
- *   2. Buddy journals         — Supabase, all buddies, 5 fields only
+ *   1. Collection items        — Supabase, own user
+ *   2. Buddy journals          — Supabase, all buddies, 5 fields only
  *   2b. Buddy collection items — Supabase, all buddies, 6 fields only
  *   3. Build + score all card types
  *   4. Seeded selection
- *   5. Render + async image resolution
+ *   5. Compose (hero + sections) and render
+ *   6. Artist media (Spotify image / player id) loads in parallel; images
+ *      resolve after render, hero first, and fade in.
  *
- * SessionStorage cache key includes date + journal length + collection count +
- * buddy count + buddy collection item count so it invalidates correctly when
- * any data set changes.
+ * There is no longer a sessionStorage copy of the rendered HTML: the hero keeps
+ * live state (slide, player), and building the cards is cheap. The expensive
+ * parts (buddy data, reactions, artist media, photo listings) are cached in
+ * memory for the session. Card selection is seeded by date, so the feed is
+ * stable within a day.
  */
 export async function init(journalData, performanceData, _ignored = []) {
     const container = document.getElementById('feed-cards-container');
     if (!container) return;
     _wireFeedClicks(container);
+
+    // Cold start: skeleton so the tab doesn't flash empty.
+    if (!container.childElementCount) container.innerHTML = skeletonHtml();
 
     // 1. Collection items
     let collectionItems = [];
@@ -2254,34 +2843,9 @@ export async function init(journalData, performanceData, _ignored = []) {
     const buddyJournalsByUser        = await fetchBuddyJournals();
     const buddyCollectionItemsByUser = await fetchBuddyCollectionItems();
     const buddyProfiles              = window._following || [];
-    if (buddyProfiles.length) await fetchMyReactions();   // before render: decides whether reaction pills appear
+    if (buddyProfiles.length) await fetchMyReactions();   // before render: decides whether reaction buttons appear
 
-    // 3. Cache check
-    const buddyCollectionCount = Object.values(buddyCollectionItemsByUser).reduce((n, items) => n + items.length, 0);
-    const buddyJournalCount    = Object.values(buddyJournalsByUser).reduce((n, rows) => n + rows.length, 0);
-    const cacheKey   = `giglist_feed_v${FEED_LOGIC_VERSION}_${new Date().toDateString()}_j${journalData.length}_c${collectionItems.length}_b${buddyProfiles.length}_bc${buddyCollectionCount}_bj${buddyJournalCount}_r${window._reactionsAvailable ? 1 : 0}`;
-    // TEMP DEBUG — skip the cache entirely so every load rebuilds from scratch
-    // and actually reaches the window._feedCards / console.table logging below.
-    // Otherwise a same-day reload just replays the cached HTML and skips it.
-    const cachedHtml = sessionStorage.getItem(cacheKey);
-    const cachedJson = sessionStorage.getItem(`${cacheKey}_cards`);
-
-    if (cachedHtml && cachedJson) {
-        container.innerHTML = cachedHtml;
-        if (window.lucide) lucide.createIcons();
-        applyReactionState(container);
-        JSON.parse(cachedJson).forEach((card, i) => {
-            const safeKey = (card.journalKey || `card-${i}`).replace(/[^a-z0-9]/gi, '_');
-            const imgEl   = document.getElementById(`feed-img-${safeKey}`);
-            if (!imgEl) return;
-            if (card.collectionItem) resolveCollectionHeroImage(card.collectionItem, imgEl, i);
-            else if (card.gig)       resolveHeroImage(card.gig, imgEl, i, photoOwnerIds(card));
-        });
-        renderGameCard(container, journalData);
-        return;
-    }
-
-    // 4. Build all card pools
+    // 3. Build all card pools
     const gigCards   = buildCards(journalData, performanceData);
     const colCards   = buildCollectionCards(collectionItems, journalData);
     const buddyCards = [
@@ -2289,65 +2853,43 @@ export async function init(journalData, performanceData, _ignored = []) {
         ...buildBuddyCollectionCards(buddyCollectionItemsByUser, journalData, buddyProfiles),
     ];
 
-    // selectCards() now round-robins one card per type per pass, so every
-    // type — including buddy_on_this_day — already gets a fair shot without
-    // a separate reserved-slot carve-out (the previous approach added extra
-    // cards on top of CARD_LIMIT, which this replaces).
-    const scored = selectCards(gigCards, colCards, buddyCards);
+    // 4. selectCards() round-robins one card per type per pass, so every type
+    // gets a fair shot. Highest score first.
+    const scored   = selectCards(gigCards, colCards, buddyCards);
+    const tipCards = buildTipDiscoveryCards().slice(0, 2);   // at most 2 per render
 
-    // Inject tip_discovery cards — at most 2 per render, after pinned content
-    const tipCards = buildTipDiscoveryCards().slice(0, 2);
-    const cards    = [
-        ...scored.filter(c => c.score >= 90),   // pinned tier first
-        ...tipCards,                              // then tip discovery
-        ...scored.filter(c => c.score < 90),     // then the rest
-    ];
-
-    if (cards.length === 0) {
+    if (scored.length === 0 && tipCards.length === 0) {
         renderEmptyState(container);
         return;
     }
 
-    // Debug aid — full card payload + a type-count breakdown, both inspectable
-    // in devtools via window._feedCards. Left in permanently; cheap and handy
-    // for spot-checking variety/scoring without digging through the DOM.
-    window._feedCards = cards;
-    console.log(`[Feed] built ${cards.length} cards`);
+    // Debug aid — full card payload + a type-count breakdown, inspectable in
+    // devtools via window._feedCards. Cheap and handy for spot-checking
+    // variety/scoring without digging through the DOM.
+    window._feedCards = [...scored, ...tipCards];
+    console.log(`[Feed] built ${window._feedCards.length} cards`);
     console.table(
         Object.entries(
-            cards.reduce((acc, c) => { acc[c.type] = (acc[c.type] || 0) + 1; return acc; }, {})
+            window._feedCards.reduce((acc, c) => { acc[c.type] = (acc[c.type] || 0) + 1; return acc; }, {})
         ).map(([type, count]) => ({ type, count }))
     );
 
-    // 5. Render
-    const html = cards.map((card, i) => renderCard(card, i)).join('');
-    container.innerHTML = html;
-    renderGameCard(container, journalData);
+    // 5. Render. Artist media is requested now and awaited only by the image
+    // step that needs it, so own photos and scrapbook shots aren't held up.
+    _mediaPending = loadArtistMedia(_bandsForMedia(scored));
 
-    // Cache skeleton — exclude tip_discovery cards (state-driven, must re-evaluate each visit)
-    const cacheableCards = cards.filter(c => c.type !== 'tip_discovery');
-    sessionStorage.setItem(cacheKey, cacheableCards.map((card, i) => renderCard(card, i)).join(''));
-    sessionStorage.setItem(`${cacheKey}_cards`, JSON.stringify(
-        cacheableCards.map(c => ({
-            journalKey:     c.journalKey,
-            gig:            c.gig            || null,
-            collectionItem: c.collectionItem || null,
-            buddy:          c.buddy          || null,
-            buddies:        c.buddies        || null,
-            type:           c.type,
-            buddyName:      c.buddyName      || null,
-        }))
-    ));
-
-    // Resolve images async so the card skeletons appear immediately
-    cards.forEach((card, i) => {
-        const safeKey = (card.journalKey || `card-${i}`).replace(/[^a-z0-9]/gi, '_');
-        const imgEl   = document.getElementById(`feed-img-${safeKey}`);
-        if (!imgEl) return;
-        if (card.collectionItem) resolveCollectionHeroImage(card.collectionItem, imgEl, i);
-        else if (card.gig)       resolveHeroImage(card.gig, imgEl, i, photoOwnerIds(card));
-    });
+    container.innerHTML = `
+        <div class="space-y-4">
+            ${composeFeed(scored, tipCards, journalData)}
+            <p data-feed-attribution class="text-center text-[10px] font-bold text-slate-500 pt-1"></p>
+        </div>`;
 
     if (window.lucide) lucide.createIcons();
     applyReactionState(container);
+    hydrateArt(container);
+
+    _mediaPending.then(() => {
+        const el = container.querySelector('[data-feed-attribution]');
+        if (el) el.textContent = _attributionHtml();
+    });
 }

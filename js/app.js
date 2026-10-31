@@ -1,9 +1,8 @@
 /**
  * GigList Core Engine
- * v10.3.4 — 2026-10-30
+ * v10.3.5 — 2026-10-31
  * ------------------------------------------------------------------
- * ✅ Added additional charts to stats for personal and band modes
- * ✅ Added Rivers to the Weezer band map
+ * ✅ Enhanced personal feed to include best elements of community feed
  */
 
 import * as Data from './modules/data.js';
@@ -50,7 +49,7 @@ import './modules/community-fans.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "10.3.4";
+const APP_VERSION = "10.3.5";
 
 // Columns of profiles that the app is allowed to read (see the column grants
 // in Supabase). home_lat / home_lng / home_label are deliberately excluded:
