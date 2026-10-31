@@ -1,9 +1,9 @@
 /**
  * GigList — Stats Share Module
- * v1.2.0 — Sep 2026
+ * v1.3.0 — Oct 2026
  *
  * Generates a shareable 1080×1080 canvas stats card from the user's
- * journal data. Four variants, named to match the existing achievement
+ * journal data (plus, for Collector, their Collection items). Six variants, named to match the existing achievement
  * fan-type labels so the vocabulary stays consistent across the app:
  *
  *   • explorer — shows / venues / cities / countries + flag row, on top
@@ -29,6 +29,15 @@
  *                resolveCompanionTags uses to promote legacy companion
  *                tags to confirmed buddies. No match, or no avatar at all,
  *                just falls back to the flat background.
+ *   • collector — the one Collection-based card: total items, artists,
+ *                formats, top formats row and most-collected artist, over a
+ *                dimmed mosaic of the user's collection photos (the same
+ *                photos collection-collage.js uses, via window._colSignedUrlCache).
+ *                Hidden from the picker when the user has no Collection items.
+ *   • completist — the deep-dive on the single most-collected artist (needs
+ *                2+ items): their name, item count, share of the whole
+ *                collection, top formats and year span, over a mosaic of
+ *                just that artist's photos. Hidden when no artist qualifies.
  *
  * Background images are fetched through a small Cloudflare Worker
  * (see static-map-worker.js) rather than the live Leaflet/OSM map,
@@ -42,7 +51,8 @@
  * signal the whole feature is a keeper — see countryToFlag in utils.js.
  *
  * Public API (window helpers), mirroring collection-collage.js:
- *   window._statsOpenShare(journalData)   — open the modal
+ *   window._statsOpenShare(journalData, collectionItems?)   — open the modal;
+ *                                         collectionItems enables the Collector card
  *   window._statsCloseShare()             — close and clean up
  *   window._statsSetVariant(variant)      — switch variant, re-render
  *   window._statsShareDownload()          — save PNG
@@ -64,7 +74,22 @@ const DARK         = '#111008';
 const OFF_WHITE    = '#f0deb0';
 const FOOTER_H     = 96;
 
-const VARIANTS = ['explorer', 'devotee', 'geek', 'squad'];
+const VARIANTS = ['explorer', 'devotee', 'geek', 'squad', 'collector', 'completist'];
+
+// Collector background mosaic: at most MAX_COLLAGE_SIDE × MAX_COLLAGE_SIDE
+// photo tiles (so at most 64 image requests per open), with a thin gap like
+// collection-collage.js's grid. Tiles sit under a heavy scrim, so they only
+// need to read as "a wall of record sleeves", not be individually legible.
+const MAX_COLLAGE_SIDE = 8;
+const COLLAGE_GAP      = 4;
+
+// Mirrors _SUBTYPE_ICONS in collection-collage.js (itself a mirror of
+// collection-editor.js) — worth lifting into one shared module eventually.
+const FORMAT_ICONS = {
+    cd: '💿', vinyl: '🖤', tape: '📼', minidisc: '💽',
+    apparel: '👕', poster: '🗒', magazine: '🗞', book: '📖',
+    tab_book: '🎸', ticket: '🎟', laminate: '🪪', other: '✦',
+};
 
 const MAP_WORKER_URL = 'https://static-map-worker.richard-lipscombe.workers.dev/';
 
@@ -79,8 +104,9 @@ let _modalEl       = null;
 let _canvasEl      = null;
 let _activeVariant = 'explorer';
 let _journalData   = [];
+let _collectionItems = [];            // collection_items for the Collector card; [] = card hidden
 let _cardStats     = null;              // computed once per open — see _computeCardStats
-let _bgImages      = { explorer: null, devotee: null, geek: null, squad: null };   // cached per open, null = not loaded / failed
+let _bgImages      = { explorer: null, devotee: null, geek: null, squad: null, collector: null, completist: null };   // cached per open, null = not loaded / failed
 
 // ─── MODAL SCAFFOLD ───────────────────────────────────────────────────────────
 
@@ -150,11 +176,11 @@ function _ensureModal() {
             }
             @keyframes stats-spin { to { transform: rotate(360deg); } }
             .stats-variant-btn {
-                flex: 1;
-                padding: 0.5rem 0;
+                flex: 1 1 auto;   /* auto basis + wrap: 4 cards fit one row, 5-6 wrap to two */
+                padding: 0.5rem 0.5rem;
                 font-size: 10px;
                 font-weight: 900;
-                letter-spacing: 0.1em;
+                letter-spacing: 0.06em;   /* tightened from 0.1em so five labels fit the 28rem sheet */
                 text-transform: uppercase;
                 border-radius: 0.625rem;
                 border: 1px solid transparent;
@@ -219,7 +245,7 @@ function _ensureModal() {
                 </div>
             </div>
 
-            <div style="display:flex;gap:0.5rem;padding:0 1.25rem 1rem;">
+            <div style="display:flex;flex-wrap:wrap;gap:0.375rem;padding:0 1.25rem 1rem;">
                 <button class="stats-variant-btn active" id="stats-variant-explorer"
                         onclick="window._statsSetVariant('explorer')">Explorer</button>
                 <button class="stats-variant-btn" id="stats-variant-devotee"
@@ -228,6 +254,10 @@ function _ensureModal() {
                         onclick="window._statsSetVariant('geek')">Geek</button>
                 <button class="stats-variant-btn" id="stats-variant-squad"
                         onclick="window._statsSetVariant('squad')">Squad</button>
+                <button class="stats-variant-btn" id="stats-variant-collector"
+                        onclick="window._statsSetVariant('collector')">Collector</button>
+                <button class="stats-variant-btn" id="stats-variant-completist"
+                        onclick="window._statsSetVariant('completist')">Completist</button>
             </div>
 
             <div style="display:flex;gap:0.75rem;padding:0 1.25rem;">
@@ -284,7 +314,7 @@ function _venueLookup() {
     return window.venueLookup || window.allVenues || {};
 }
 
-function _computeCardStats(journalData) {
+function _computeCardStats(journalData, collectionItems = []) {
     const { statsData } = buildBadgeDefs(journalData);   // totalGigs, topArtist, maxArtistShows, ...
     const lookup = _venueLookup();
 
@@ -323,6 +353,7 @@ function _computeCardStats(journalData) {
     const { topCompanion, topCompanionCount, firstTopCompanionShow, topCompanionUserId } = _computeTopCompanion(journalData);
     const geekArtistUrl  = _computeSecondArtistImage(journalData, statsData.topArtist);
     const squadAvatarUrl = _squadAvatarUrl(topCompanion, topCompanionUserId);
+    const collector      = _computeCollectorStats(collectionItems);
 
     return {
         totalGigs:       statsData.totalGigs,
@@ -343,6 +374,69 @@ function _computeCardStats(journalData) {
         topCompanionCount,
         firstTopCompanionShow,
         squadAvatarUrl,
+        collector,
+    };
+}
+
+/**
+ * Collection summary for the Collector card. Artist identity uses the same
+ * fallback as collection-collage.js's _singleArtist (band_name, else
+ * artist_context, case-insensitive) so "artists" here matches what the
+ * collage footer would call out for the same items.
+ */
+function _computeCollectorStats(items) {
+    const artists  = new Map();   // lowercased name -> { name, count }
+    const formats  = {};          // subtype -> count
+
+    items.forEach(item => {
+        const name = (item.band_name || item.artist_context || '').trim();
+        if (name) {
+            const key = name.toLowerCase();
+            const entry = artists.get(key) || { name, count: 0 };
+            entry.count++;
+            artists.set(key, entry);
+        }
+        if (item.subtype) formats[item.subtype] = (formats[item.subtype] || 0) + 1;
+    });
+
+    const rankedFormats = Object.entries(formats)
+        .sort((a, b) => b[1] - a[1])
+        .map(([subtype, count]) => ({ subtype, count }));
+    const topArtist = [...artists.values()].sort((a, b) => b.count - a.count)[0] || null;
+
+    // Completist: the single most-collected artist, if it's a real run (2+).
+    let completist = null;
+    if (topArtist && topArtist.count >= 2) {
+        const key = topArtist.name.toLowerCase();
+        const artistItems = items.filter(i =>
+            (i.band_name || i.artist_context || '').trim().toLowerCase() === key);
+        const fmt = {};
+        const years = [];
+        artistItems.forEach(i => {
+            if (i.subtype) fmt[i.subtype] = (fmt[i.subtype] || 0) + 1;
+            const y = parseInt(i.item_date);
+            if (!isNaN(y)) years.push(y);
+        });
+        completist = {
+            name:       topArtist.name,
+            count:      artistItems.length,
+            pct:        Math.round((artistItems.length / items.length) * 100),
+            topFormats: Object.entries(fmt).sort((a, b) => b[1] - a[1]).slice(0, 4)
+                              .map(([subtype, count]) => ({ subtype, count })),
+            firstYear:  years.length ? Math.min(...years) : null,
+            lastYear:   years.length ? Math.max(...years) : null,
+            items:      artistItems,
+        };
+    }
+
+    return {
+        completist,
+        totalItems:     items.length,
+        uniqueArtists:  artists.size,
+        uniqueFormats:  rankedFormats.length,
+        topFormats:     rankedFormats.slice(0, 4),
+        topArtist:      topArtist?.name  || null,
+        topArtistCount: topArtist?.count || 0,
     };
 }
 
@@ -587,6 +681,38 @@ async function _loadSquadBackground(stats) {
 }
 
 /**
+ * Collector / Completist background: a square mosaic of the given items' photos
+ * (all owned items for Collector, just the top artist's for Completist).
+ * Uses the signed-URL cache collection.js already populates (same source as
+ * collection-collage.js), so only items whose hero photo URL is in the cache
+ * are candidates — see the note in the hand-off about visiting the Stats tab
+ * before the Collection tab. The tile count is the largest perfect square
+ * (capped at MAX_COLLAGE_SIDE²) the available photos can fill without
+ * repeating any, picked evenly across the list so early and late items both
+ * appear. Resolves { side, imgs } (imgs may hold nulls for failed loads —
+ * drawn as dark tiles), or false when there's nothing to show.
+ */
+async function _loadMosaicBackground(key, items) {
+    if (_bgImages[key] !== null) return _bgImages[key];
+
+    const cache = window._colSignedUrlCache || new Map();
+    const urls  = items
+        .map(item => (item.photos?.[0] ? cache.get(item.photos[0]) : null))
+        .filter(Boolean);
+
+    const side = Math.min(MAX_COLLAGE_SIDE, Math.floor(Math.sqrt(urls.length)));
+    if (side < 1) { _bgImages[key] = false; return false; }
+
+    const count = side * side;
+    const step  = urls.length / count;
+    const picked = Array.from({ length: count }, (_, i) => urls[Math.floor(i * step)]);
+
+    const imgs = await Promise.all(picked.map(_loadImage));
+    _bgImages[key] = imgs.some(Boolean) ? { side, imgs } : false;
+    return _bgImages[key];
+}
+
+/**
  * Cover-fit an image into the full canvas, then lay a dark scrim over it
  * so the gold/off-white text on top stays legible regardless of what's
  * in the photo. Same cover-fit math as collection-collage.js's photo tiles.
@@ -597,13 +723,52 @@ function _drawCoverImage(ctx, img, size, s) {
     const dw = iw * scale, dh = ih * scale;
     const ox = (size - dw) / 2, oy = (size - dh) / 2;
     ctx.drawImage(img, ox * s, oy * s, dw * s, dh * s);
+    _drawScrim(ctx, size, s);
+}
 
+/**
+ * The dark gradient laid over every background so text stays legible.
+ * Split out of _drawCoverImage so the Collector mosaic gets the identical
+ * treatment as the single-image cards.
+ */
+function _drawScrim(ctx, size, s) {
     const gradient = ctx.createLinearGradient(0, 0, 0, size * s);
     gradient.addColorStop(0,   'rgba(17,16,8,0.55)');
     gradient.addColorStop(0.5, 'rgba(17,16,8,0.72)');
     gradient.addColorStop(1,   'rgba(17,16,8,0.92)');
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, size * s, size * s);
+}
+
+/**
+ * Draw the Collector mosaic edge to edge (footer strip included — the
+ * footer bar overlays it at 85% opacity like on the other cards), then the
+ * shared scrim. Each tile is cover-fit and clipped, same maths as
+ * collection-collage.js's _drawTile.
+ */
+function _drawMosaicBackground(ctx, size, s, { side, imgs }) {
+    const tile = (size - COLLAGE_GAP * (side + 1)) / side;
+
+    imgs.forEach((img, idx) => {
+        const tx = COLLAGE_GAP + (idx % side) * (tile + COLLAGE_GAP);
+        const ty = COLLAGE_GAP + Math.floor(idx / side) * (tile + COLLAGE_GAP);
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(tx * s, ty * s, tile * s, tile * s);
+        ctx.clip();
+        if (img) {
+            const fit = Math.max(tile / img.naturalWidth, tile / img.naturalHeight);
+            const dw = img.naturalWidth * fit, dh = img.naturalHeight * fit;
+            ctx.drawImage(img, (tx + (tile - dw) / 2) * s, (ty + (tile - dh) / 2) * s, dw * s, dh * s);
+        } else {
+            ctx.fillStyle = '#1a1808';
+            ctx.fillRect(tx * s, ty * s, tile * s, tile * s);
+        }
+        ctx.restore();
+    });
+
+    _drawScrim(ctx, size, s);
 }
 
 // ─── SHARED DRAW HELPERS ──────────────────────────────────────────────────────
@@ -881,6 +1046,142 @@ function _renderSquad(ctx, size, s, stats) {
     _drawFooterBar(ctx, size, s, 'Squad');
 }
 
+// ─── VARIANT: COLLECTOR ───────────────────────────────────────────────────────
+
+function _renderCollector(ctx, size, s, stats) {
+    const contentH = size - FOOTER_H;
+    const padRight = size - 72;
+    const c        = stats.collector;
+
+    ctx.textAlign    = 'right';
+    ctx.textBaseline = 'alphabetic';
+
+    // --- Headline: Total items (same scale/position as Explorer's shows) ---
+    ctx.fillStyle     = OFF_WHITE;
+    ctx.font          = `900 ${220 * s}px 'Plus Jakarta Sans', sans-serif`;
+    ctx.letterSpacing = '0px';
+    ctx.fillText(String(c.totalItems), padRight * s, (contentH * 0.36) * s);
+
+    ctx.fillStyle     = GOLD;
+    ctx.font          = `800 ${32 * s}px 'Plus Jakarta Sans', sans-serif`;
+    ctx.letterSpacing = `${2.5 * s}px`;
+    ctx.fillText('ITEMS COLLECTED', padRight * s, (contentH * 0.36 + 48) * s);
+
+    // --- Secondary stats: Artists / Formats ---
+    const statY = contentH * 0.60;
+    const cols  = [
+        { label: 'ARTISTS',  value: c.uniqueArtists },
+        { label: 'FORMATS',  value: c.uniqueFormats },
+    ];
+    const colSpacing = 280;
+
+    cols.reverse().forEach((col, i) => {
+        const cx = padRight - (colSpacing * i);
+
+        ctx.fillStyle     = OFF_WHITE;
+        ctx.font          = `900 ${100 * s}px 'Plus Jakarta Sans', sans-serif`;
+        ctx.letterSpacing = '0px';
+        ctx.fillText(String(col.value), cx * s, statY * s);
+
+        ctx.fillStyle     = 'rgba(240,222,176,0.8)';
+        ctx.font          = `800 ${18 * s}px 'Plus Jakarta Sans', sans-serif`;
+        ctx.letterSpacing = `${1.5 * s}px`;
+        ctx.fillText(col.label, cx * s, (statY + 42) * s);
+    });
+
+    _drawFormatsRow(ctx, s, padRight, contentH * 0.79, c.topFormats);
+
+    // --- Most collected artist ---
+    if (c.topArtist) {
+        ctx.fillStyle     = 'rgba(240,222,176,0.85)';
+        ctx.font          = `600 ${24 * s}px 'Plus Jakarta Sans', sans-serif`;
+        ctx.letterSpacing = '0px';
+        ctx.fillText(`Most collected: ${c.topArtist} (${c.topArtistCount})`, padRight * s, (contentH * 0.90) * s);
+    }
+
+    _drawFooterBar(ctx, size, s, 'Collector');
+}
+
+/**
+ * Right-aligned row of "icon count" pairs, biggest format leftmost.
+ * Drawn right-to-left from the margin, so iterate the list reversed.
+ * Icons use the serif/emoji fallback (like Explorer's flags); counts use the
+ * brand font so the numbers match the rest of the card.
+ */
+function _drawFormatsRow(ctx, s, padRight, rowY, formats) {
+    let x = padRight;
+    ctx.textAlign    = 'right';
+    ctx.textBaseline = 'alphabetic';
+    [...formats].reverse().forEach(({ subtype, count }) => {
+        const icon = FORMAT_ICONS[subtype] || FORMAT_ICONS.other;
+
+        ctx.fillStyle     = OFF_WHITE;
+        ctx.font          = `900 ${44 * s}px 'Plus Jakarta Sans', sans-serif`;
+        ctx.letterSpacing = '0px';
+        ctx.fillText(String(count), x * s, rowY * s);
+        const countW = ctx.measureText(String(count)).width / s;
+
+        ctx.font = `${52 * s}px serif`;
+        ctx.fillText(icon, (x - countW - 12) * s, rowY * s);
+        const iconW = ctx.measureText(icon).width / s;
+
+        x -= countW + 12 + iconW + 36;
+    });
+}
+
+// ─── VARIANT: COMPLETIST ──────────────────────────────────────────────────────
+
+function _renderCompletist(ctx, size, s, stats) {
+    const contentH = size - FOOTER_H;
+    const padRight = size - 72;
+    const maxW     = size - 144;
+    const c        = stats.collector.completist;
+
+    ctx.textAlign    = 'right';
+    ctx.textBaseline = 'alphabetic';
+
+    // --- Artist name: shrink to fit the card width (long names, e.g. "Red Hot Chili Peppers") ---
+    ctx.fillStyle     = OFF_WHITE;
+    ctx.letterSpacing = '0px';
+    let fs = 120;
+    ctx.font = `900 ${fs * s}px 'Plus Jakarta Sans', sans-serif`;
+    while (fs > 48 && ctx.measureText(c.name).width / s > maxW) {
+        fs -= 4;
+        ctx.font = `900 ${fs * s}px 'Plus Jakarta Sans', sans-serif`;
+    }
+    ctx.fillText(c.name, padRight * s, (contentH * 0.24) * s);
+
+    ctx.fillStyle     = GOLD;
+    ctx.font          = `800 ${28 * s}px 'Plus Jakarta Sans', sans-serif`;
+    ctx.letterSpacing = `${2.5 * s}px`;
+    ctx.fillText('MOST COLLECTED ARTIST', padRight * s, (contentH * 0.24 + 48) * s);
+
+    // --- Headline: items collected by this artist ---
+    ctx.fillStyle     = OFF_WHITE;
+    ctx.font          = `900 ${220 * s}px 'Plus Jakarta Sans', sans-serif`;
+    ctx.letterSpacing = '0px';
+    ctx.fillText(String(c.count), padRight * s, (contentH * 0.58) * s);
+
+    ctx.fillStyle     = GOLD;
+    ctx.font          = `800 ${32 * s}px 'Plus Jakarta Sans', sans-serif`;
+    ctx.letterSpacing = `${2.5 * s}px`;
+    ctx.fillText('ITEMS', padRight * s, (contentH * 0.58 + 48) * s);
+
+    // --- Formats for this artist ---
+    _drawFormatsRow(ctx, s, padRight, contentH * 0.82, c.topFormats);
+
+    // --- Share of collection + year span ---
+    const bits = [`${c.pct}% of your collection`];
+    if (c.firstYear) bits.push(c.firstYear === c.lastYear ? `${c.firstYear}` : `${c.firstYear}–${c.lastYear}`);
+    ctx.fillStyle     = 'rgba(240,222,176,0.85)';
+    ctx.font          = `600 ${24 * s}px 'Plus Jakarta Sans', sans-serif`;
+    ctx.letterSpacing = '0px';
+    ctx.textAlign     = 'right';
+    ctx.fillText(bits.join(' · '), padRight * s, (contentH * 0.92) * s);
+
+    _drawFooterBar(ctx, size, s, 'Completist');
+}
+
 // ─── CORE RENDER ──────────────────────────────────────────────────────────────
 
 async function _render(variant) {
@@ -901,10 +1202,18 @@ async function _render(variant) {
         ? await _loadGeekBackground(_cardStats)
         : variant === 'squad'
         ? await _loadSquadBackground(_cardStats)
+        : variant === 'collector'
+        ? await _loadMosaicBackground('collector', _collectionItems)
+        : variant === 'completist'
+        ? await _loadMosaicBackground('completist', _cardStats.collector.completist?.items || [])
         : false;
 
     _drawFlatBackground(ctx, size, s);
-    if (bg) _drawCoverImage(ctx, bg, size, s);
+    if (bg) {
+        // Collector's background is a mosaic descriptor, not a single image.
+        if (variant === 'collector' || variant === 'completist') _drawMosaicBackground(ctx, size, s, bg);
+        else _drawCoverImage(ctx, bg, size, s);
+    }
 
     if (variant === 'devotee') {
         _renderDevotee(ctx, size, s, _cardStats);
@@ -912,6 +1221,10 @@ async function _render(variant) {
         _renderGeek(ctx, size, s, _cardStats);
     } else if (variant === 'squad') {
         _renderSquad(ctx, size, s, _cardStats);
+    } else if (variant === 'collector') {
+        _renderCollector(ctx, size, s, _cardStats);
+    } else if (variant === 'completist') {
+        _renderCompletist(ctx, size, s, _cardStats);
     } else {
         _renderExplorer(ctx, size, s, _cardStats);
     }
@@ -922,16 +1235,43 @@ async function _render(variant) {
 
 // ─── PUBLIC API ───────────────────────────────────────────────────────────────
 
-window._statsOpenShare = async (journalData) => {
-    _journalData = journalData || [];
-    _cardStats   = _computeCardStats(_journalData);
-    _bgImages    = { explorer: null, devotee: null, geek: null, squad: null };   // reset cache per open
+/**
+ * Collection items for the Collector card when the caller didn't supply any:
+ * asks collection.js (window._colGetShareItems), which loads the collection
+ * and signs photo URLs if needed. Resolves [] on any failure so the other
+ * four cards are never affected.
+ */
+async function _fetchShareItems() {
+    try {
+        return typeof window._colGetShareItems === 'function'
+            ? await window._colGetShareItems()
+            : [];
+    } catch (e) {
+        console.warn('[StatsShare] collection items unavailable:', e.message);
+        return [];
+    }
+}
+
+window._statsOpenShare = async (journalData, collectionItems) => {
+    _journalData     = journalData || [];
+    _collectionItems = Array.isArray(collectionItems) ? collectionItems : await _fetchShareItems();
+    _cardStats       = _computeCardStats(_journalData, _collectionItems);
+    _bgImages    = { explorer: null, devotee: null, geek: null, squad: null, collector: null, completist: null };   // reset cache per open
 
     const { groups, statsData } = buildBadgeDefs(_journalData);
     const derived = deriveFanType(groups, statsData);
     _activeVariant = (derived && VARIANTS.includes(derived.type)) ? derived.type : 'explorer';
 
     _ensureModal();
+
+    if (!_collectionItems.length) console.info('[StatsShare] no collection items — Collector card hidden');
+
+    // No Collection items → no Collector card (nothing meaningful to show).
+    const collectorBtn = document.getElementById('stats-variant-collector');
+    if (collectorBtn) collectorBtn.style.display = _collectionItems.length ? '' : 'none';
+    // Completist needs an artist with 2+ items.
+    const completistBtn = document.getElementById('stats-variant-completist');
+    if (completistBtn) completistBtn.style.display = _cardStats.collector.completist ? '' : 'none';
 
     VARIANTS.forEach(v => {
         document.getElementById(`stats-variant-${v}`)?.classList.toggle('active', v === _activeVariant);

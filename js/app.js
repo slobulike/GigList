@@ -1,8 +1,8 @@
 /**
  * GigList Core Engine
- * v10.3.6 — 2026-10-31
+ * v10.3.7 — 2026-10-31
  * ------------------------------------------------------------------
- * ✅ Added venue details card to personal feed
+ * ✅ Added Collector and Completist cards to the Stats shareable assets
  */
 
 import * as Data from './modules/data.js';

@@ -1888,6 +1888,36 @@ export function getAllItems() {
 }
 
 /**
+ * Items for the Stats tab's shareable "Collector" card (stats-share.js).
+ * Loads the collection first if Stats was opened before the Collection tab
+ * (same ensureLoaded path the Stats charts use), ignores every Collection-tab
+ * filter/search, keeps owned items only, and waits for their photo URLs to be
+ * signed — _fetchItems signs in the background, so without the await the
+ * card's collage background could render before any URL is in
+ * _signedUrlCache. Signing shares in-flight requests per path, so this adds
+ * no duplicate calls when the Collection tab has already warmed the cache.
+ * Falls back to the auth session for the user id if neither the Collection
+ * tab nor Stats has loaded anything yet.
+ */
+window._colGetShareItems = async () => {
+    try {
+        // _user / _loadedUserId are only set once the Collection tab or the
+        // Stats collection charts have run, so a user who goes straight to
+        // Stats > Share would otherwise get nothing. Fall back to the
+        // current auth session.
+        const uid = _user?.id || _loadedUserId
+            || (await supabase.auth.getSession()).data?.session?.user?.id;
+        if (uid) await ensureLoaded(uid);
+        const owned = _items.filter(i => i.still_owned !== false);
+        await _preloadSignedUrls(owned);
+        return owned;
+    } catch (e) {
+        console.warn('[Collection] share items failed:', e.message);
+        return [];
+    }
+};
+
+/**
  * Called from app.js when the Collection tab is activated.
  * Uses sessionStorage cache keyed by user + item count to avoid
  * re-fetching on every tab switch.
