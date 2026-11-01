@@ -171,6 +171,9 @@ export async function openCommunity() {
 
 
     await _loadSummary();
+    // Left (nav tap, profile, switcher) while the summary loaded: don't put
+    // ?community back in the URL or render a pane nobody can see.
+    if (!_active) return;
     await showCommunityTab(_tab);
 }
 window.openCommunity = openCommunity;

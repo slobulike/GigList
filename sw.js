@@ -2,7 +2,7 @@
 // Gig List — Service Worker
 // ─────────────────────────────────────────────────────────────────────────────
 
-const CACHE_NAME = 'gig-list-v10';
+const CACHE_NAME = 'gig-list-v11';
 const APP_BASE   = '/GigList/';
 const APP_ROOT   = APP_BASE + 'vault.html';
 
@@ -36,6 +36,13 @@ const ASSETS = [
   './js/modules/collection-editor.js',
   './js/modules/collection-import.js',
   './js/modules/collection.js',
+  './js/modules/community-expand.js',
+  './js/modules/community-fans.js',
+  './js/modules/community-feed.js',
+  './js/modules/community-gigs.js',
+  './js/modules/community-shared.js',
+  './js/modules/community-stats.js',
+  './js/modules/community.js',
   './js/modules/data.js',
   './js/modules/deep-link.js',
   './js/modules/editor.js',

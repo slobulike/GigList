@@ -476,8 +476,17 @@ const bandDataKey = (k) => `banddata:${k}`;
 const isBandCacheable = (user, skipPerformances) =>
     user?.Type === 'Band' && !!skipPerformances && !!bandKey(user.UserName);
 
+// Index updates are read-modify-write, and a band page calls rememberBand twice
+// (row + data) without waiting, so they run one at a time on this chain.
+let _bandIndexChain = Promise.resolve();
+
 /** Marks a band as most-recently used and evicts the oldest beyond the cap. Best effort. */
-async function rememberBand(k) {
+function rememberBand(k) {
+    _bandIndexChain = _bandIndexChain.then(() => _rememberBand(k));
+    return _bandIndexChain;
+}
+
+async function _rememberBand(k) {
     try {
         const idx = ((await cacheGet(BAND_INDEX_KEY)) || []).filter(x => x !== k);
         idx.push(k);

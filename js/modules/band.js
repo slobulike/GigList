@@ -958,13 +958,34 @@ function _renderStoryStats() {
 // function in Supabase, which runs as the function owner and bypasses RLS.
 //
 // Current RPCs:
-//   get_band_fans(band_name)       → journals rows for a band, all users
+//   get_band_fan_summary(p_band)   → fan totals (everyone) + named fans (public
+//                                    profiles, you, your buddies); see
+//                                    claude review/community_privacy.sql
 //   get_profiles_by_ids(user_ids)  → public profile fields for an id array
 //
 // Do NOT replace these with direct table queries, even if they look simpler.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ─── FANS TAB ─────────────────────────────────────────────────────────────────
+
+// One request serves both the Fans tab and the header stats when they load
+// together; it isn't cached beyond that, so a refresh after tagging is fresh.
+let _fanSummaryPending = null;   // { band, promise }
+
+function _fetchFanSummary(bandName) {
+    if (_fanSummaryPending?.band === bandName) return _fanSummaryPending.promise;
+    const promise = (async () => {
+        const { data, error } = await supabase
+            .rpc('get_band_fan_summary', { p_band: bandName });
+        if (error) throw error;
+        return data || { total_fans: 0, total_attendance: 0, private_fans: 0, fans: [] };
+    })();
+    _fanSummaryPending = { band: bandName, promise };
+    promise.finally(() => {
+        if (_fanSummaryPending?.promise === promise) _fanSummaryPending = null;
+    }).catch(() => {});
+    return promise;
+}
 
 async function _renderBandFans() {
     const container = document.getElementById('band-fans-list');
@@ -976,72 +997,27 @@ async function _renderBandFans() {
     try {
         const bandName = window.currentArtist;
 
-        // Fetch all journal rows for this band that have a real user_id.
-        // Rows with null user_id are band-archive imports (setlist.fm), not user accounts.
-        const { data: fanRows, error: fanErr } = await supabase
-            .rpc('get_band_fans', { band_name: bandName });
-
-        if (fanErr) throw fanErr;
-        if (!fanRows || !fanRows.length) {
+        // Totals cover every fan; names come back only for public profiles,
+        // the viewer and the viewer's buddies. Signed out: totals only.
+        const summary = await _fetchFanSummary(bandName);
+        if (!summary.total_fans) {
             _renderFansEmpty(container);
             return;
         }
-
-        // Aggregate show counts + earliest show per user
-        const countMap     = {};
-        const firstShowMap = {};
-
-        fanRows.forEach(r => {
-            if (!r.user_id || r.user_id === 'null') return;
-            countMap[r.user_id] = (countMap[r.user_id] || 0) + 1;
-            const d = parseDate(r.date);
-            if (d && (!firstShowMap[r.user_id] || d < firstShowMap[r.user_id])) {
-                firstShowMap[r.user_id] = d;
-            }
-        });
-
-        const userIds = Object.keys(countMap);
-        if (!userIds.length) {
-            _renderFansEmpty(container);
-            return;
-        }
-
-        // Fetch profiles.
-        // Username is not a private fact — users are findable by username to send buddy
-        // requests — so profiles should be publicly readable. If RLS is restricting rows,
-        // the console log below will show the mismatch so it can be diagnosed in Supabase.
-        const { data: profileRows, error: profileErr } = await supabase
-            .rpc('get_profiles_by_ids', { user_ids: userIds });
-
-        if (profileErr) {
-            console.error('band.js: profiles query error', profileErr);
-        }
-
-        console.log(
-            `band.js fans: ${userIds.length} user IDs from journals, ` +
-            `${(profileRows || []).length} profiles returned by query. ` +
-            `Missing: ${userIds.length - (profileRows || []).length}`
-        );
-
-        // Build a lookup of whatever came back
-        const profileMap = {};
-        (profileRows || []).forEach(p => { profileMap[p.id] = p; });
 
         // Ensure buddy status is ready before building CTAs
         if (_currentUser?.isAuthUser) {
             await _loadBuddyStatus();
         }
 
-        // Build fan list. Any uid whose profile was RLS-filtered gets a stub entry
-        // so they still appear as a tile rather than being silently dropped.
-        const fans = userIds.map(uid => {
-            const p = profileMap[uid] || { id: uid, display_name: null, username: null, avatar_url: null };
-            return {
-                ...p,
-                showCount: countMap[uid] || 0,
-                firstShow: firstShowMap[uid] || null,
-            };
-        });
+        const fans = (summary.fans || []).map(f => ({
+            id:           f.id,
+            display_name: f.display_name,
+            username:     f.username,
+            avatar_url:   f.avatar_url,
+            showCount:    f.show_count || 0,
+            firstShow:    f.first_year ? new Date(f.first_year, 0, 1) : null,
+        }));
 
         // Sort: buddies first, then show count desc, then earliest fan on tie
         fans.sort((a, b) => {
@@ -1054,7 +1030,8 @@ async function _renderBandFans() {
         });
 
         if (loadingEl) loadingEl.classList.add('hidden');
-        container.innerHTML = fans.map(fan => _fanTileHTML(fan)).join('');
+        container.innerHTML = fans.map(fan => _fanTileHTML(fan)).join('')
+            + _privateFansTileHTML(summary.private_fans || 0, !fans.length);
         _wireBandFansClicks(container);
 
         if (window.lucide) lucide.createIcons();
@@ -1067,6 +1044,29 @@ async function _renderBandFans() {
                 <p class="text-sm font-bold">Couldn't load fans — try refreshing.</p>
             </div>`;
     }
+}
+
+// Fans who aren't named here (private profiles, or everyone when signed out)
+// are still counted, so the list adds up to the Fans stat.
+function _privateFansTileHTML(n, onlyTile) {
+    if (!n) return '';
+    const signedOut = !_currentUser?.isAuthUser;
+    const title = signedOut
+        ? `${n} GigList fan${n !== 1 ? 's' : ''}`
+        : `${onlyTile ? '' : '+'}${n} private fan${n !== 1 ? 's' : ''}`;
+    const sub = signedOut
+        ? `<a href="index.html" class="text-indigo-500 hover:text-indigo-700">Sign in</a> to see who`
+        : 'Counted here, but their profiles are private';
+    return `
+        <div class="bg-slate-50 rounded-[1.5rem] border border-dashed border-slate-200 p-4 flex items-center gap-4">
+            <div class="w-12 h-12 rounded-full bg-slate-200 text-slate-500 flex items-center justify-center flex-shrink-0">
+                <i data-lucide="${signedOut ? 'users' : 'lock'}" class="w-4 h-4" aria-hidden="true"></i>
+            </div>
+            <div class="flex-1 min-w-0">
+                <p class="text-sm font-black text-slate-700">${title}</p>
+                <p class="text-[10px] font-bold text-slate-400 mt-0.5">${sub}</p>
+            </div>
+        </div>`;
 }
 
 function _fanTileHTML(fan) {
@@ -1199,14 +1199,12 @@ async function _loadBandStats() {
     const bandName = window.currentArtist;
     if (!bandName) return;
 
-    const { data: rows } = await supabase
-        .rpc('get_band_fans', { band_name: bandName });
+    let summary;
+    try { summary = await _fetchFanSummary(bandName); }
+    catch { return; }
 
-    if (!rows) return;
-
-    const fanIds       = new Set(rows.map(r => r.user_id).filter(id => id && id !== 'null'));
-    _fanCount          = fanIds.size;
-    _fanAttendance     = rows.filter(r => r.user_id && r.user_id !== 'null').length;
+    _fanCount          = summary.total_fans || 0;
+    _fanAttendance     = summary.total_attendance || 0;
 
     const rankEl  = document.getElementById('stat-rank');
     const labelEl = document.getElementById('stat-fourth-label');

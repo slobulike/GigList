@@ -1,8 +1,8 @@
 /**
  * GigList Core Engine
- * v10.3.7 — 2026-10-31
+ * v10.3.8 — 2026-11-01
  * ------------------------------------------------------------------
- * ✅ Added Collector and Completist cards to the Stats shareable assets
+ * ✅ Opus 5.5 review
  */
 
 import * as Data from './modules/data.js';
@@ -40,16 +40,13 @@ import './modules/collection-charts.js';
 import './modules/stats-switcher.js';
 import { initMixPlaylistCard } from './modules/mix-playlist.js';
 import { syncPushSubscription, initPushUI } from './modules/push.js';
-import './modules/community.js';
-import './modules/community-gigs.js';
-import './modules/community-stats.js';
-import './modules/community-feed.js';
-import './modules/community-fans.js';
+// Community modules are NOT imported here: switcher.js's window.openCommunity
+// stub loads community.js on first use, and community.js loads each pane lazily.
 
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "10.3.5";
+const APP_VERSION = "10.3.8";
 
 // Columns of profiles that the app is allowed to read (see the column grants
 // in Supabase). home_lat / home_lng / home_label are deliberately excluded:

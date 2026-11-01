@@ -20,6 +20,9 @@
  *     drawer hookup and the cache (shared with the Stats pane). query.args() goes
  *     to every RPC, so the list, calendar, map and headline stats always
  *     describe the same set of gigs.
+ *   - Privacy: a gig is only listed (list, calendar month, map pop-up) when 2+
+ *     people went or one of them has a public profile. Everything still counts
+ *     in the totals; get_community_gigs returns the unlisted count as 'hidden'.
  */
 
 import { escapeHtml } from './utils.js';
@@ -132,6 +135,12 @@ const emptyHtml = (title, body) => `
         <p class="text-[11px] text-slate-400 leading-relaxed max-w-xs mx-auto">${escapeHtml(body)}</p>
     </div>`;
 
+// Unlisted gigs still count in the headline totals, so say why the list is shorter.
+const hiddenNote = (n, dark = false) => n > 0 ? `
+    <p class="text-[11px] ${dark ? 'text-white/50' : 'text-slate-400'} text-center leading-relaxed pt-3">
+        ${escapeHtml(plural(n, 'gig', 'gigs'))} from private profiles ${n === 1 ? "isn't" : "aren't"} listed, but ${n === 1 ? 'still counts' : 'still count'} in the totals.
+    </p>` : '';
+
 const errorHtml = (what, view) => `
     <div class="text-center py-12 space-y-3">
         <p class="text-sm text-slate-500">Couldn't load ${escapeHtml(what)}.</p>
@@ -159,6 +168,7 @@ export function renderGigsPane(el, ctx = {}) {
         sort:   'date_desc',
         rows:   [],
         total:  0,
+        hidden: 0,
     };
     const loaded = { list: false, calendar: false, map: false };
     const seq    = { list: 0, calendar: 0, map: 0, month: 0, stats: 0 };
@@ -214,6 +224,7 @@ export function renderGigsPane(el, ctx = {}) {
         if (reset) {
             state.rows = [];
             state.total = 0;
+            state.hidden = 0;
             pane('list').innerHTML = skeleton();
         }
         try {
@@ -224,6 +235,7 @@ export function renderGigsPane(el, ctx = {}) {
             if (!alive('list', id)) return;
             state.rows  = state.rows.concat(res?.rows || []);
             state.total = res?.total || 0;
+            state.hidden = res?.hidden || 0;
             loaded.list = true;
             renderList();
         } catch (err) {
@@ -245,7 +257,7 @@ export function renderGigsPane(el, ctx = {}) {
         setCount('list', state.total ? plural(state.total, 'gig', 'gigs') : '');
 
         if (!state.rows.length) {
-            host.innerHTML = emptyFor();
+            host.innerHTML = emptyFor() + hiddenNote(state.hidden);
             return;
         }
 
@@ -297,7 +309,7 @@ export function renderGigsPane(el, ctx = {}) {
                         class="bg-slate-100 text-slate-700 text-xs font-black px-5 py-2.5 rounded-full hover:bg-slate-200 active:scale-95 transition-all">
                     Show more (${fmt(state.total - state.rows.length)} left)
                 </button>
-            </div>` : ''}`;
+            </div>` : hiddenNote(state.hidden)}`;
         icons();
     }
 
@@ -454,7 +466,8 @@ export function renderGigsPane(el, ctx = {}) {
                     </div>
                 </div>`).join('')
                 + ((res?.total || 0) > rows.length
-                    ? `<p class="text-[11px] text-white/50 pt-1">Showing the first ${fmt(rows.length)} of ${fmt(res.total)}. Use search or filters to narrow it down.</p>` : '');
+                    ? `<p class="text-[11px] text-white/50 pt-1">Showing the first ${fmt(rows.length)} of ${fmt(res.total)}. Use search or filters to narrow it down.</p>` : '')
+                + hiddenNote(res?.hidden || 0, true);
             icons();
         } catch (err) {
             if (!alive('month', id)) return;
@@ -499,7 +512,7 @@ export function renderGigsPane(el, ctx = {}) {
                     <p class="text-[12px] font-bold text-slate-800 leading-tight">${escapeHtml(r.band || '')}</p>
                 </div>`).join('');
             const more = v.gigs > shown.length
-                ? `<p class="text-[10px] text-slate-400 text-center">+ ${fmt(v.gigs - shown.length)} earlier</p>` : '';
+                ? `<p class="text-[10px] text-slate-400 text-center">+ ${fmt(v.gigs - shown.length)} more</p>` : '';
 
             L.circleMarker([lat, lng], {
                 radius: Math.min(5 + Math.sqrt(v.gigs || 1) * 2.2, 22),

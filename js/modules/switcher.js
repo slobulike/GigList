@@ -153,10 +153,14 @@ function _warmFavouriteBands() {
     const conn = navigator.connection;
     if (conn?.saveData || /(^|-)2g$/.test(conn?.effectiveType || '')) return;
 
+    // A big band is several MB, so only Wi-Fi / wired warms every favourite.
+    // Mobile data, or a browser that doesn't say (iOS), warms just the first.
+    const unmetered = conn?.type === 'wifi' || conn?.type === 'ethernet';
+
     const current = (window.currentArtist || '').toLowerCase();
     const names = (window._switcherFavs || [])
         .filter(n => n && n.toLowerCase() !== current)
-        .slice(0, MAX_FAVS);
+        .slice(0, unmetered ? MAX_FAVS : 1);
     if (!names.length) return;
 
     const run = async () => {
