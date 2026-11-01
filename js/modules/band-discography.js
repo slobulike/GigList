@@ -63,6 +63,7 @@ const S = {
     userId:   null,
     owned:    new Map(),       // masterId -> [collection item rows]
     ownedPressings: new Set(), // discogs_id values the user owns
+    pendingPressings: new Set(), // release ids of the user's items still waiting on Discogs
     itemsByRelease: new Map(), // discogs_id -> collection item row
     wants:    new Set(),       // `${masterId}:${discogsId || 0}`
     sheet:    null,            // see _openMaster
@@ -103,7 +104,7 @@ export async function renderBandDiscography() {
     if (S.bandName !== bandName) {
         Object.assign(S, { bandName, artist: null, masters: [], loaded: false, sheet: null, candidates: null, filters: _defaultFilters() });
         root.dataset.shell = '';
-        S.owned = new Map(); S.ownedPressings = new Set(); S.wants = new Set();
+        S.owned = new Map(); S.ownedPressings = new Set(); S.pendingPressings = new Set(); S.wants = new Set();
     }
 
     _bindOnce(root);
@@ -150,10 +151,10 @@ async function _loadCatalogue() {
 }
 
 async function _loadMine() {
-    S.owned = new Map(); S.ownedPressings = new Set(); S.wants = new Set(); S.itemsByRelease = new Map();
+    S.owned = new Map(); S.ownedPressings = new Set(); S.pendingPressings = new Set(); S.wants = new Set(); S.itemsByRelease = new Map();
     if (!S.artist || !S.userId) return;
 
-    const [itemsRes, wantsRes] = await Promise.all([
+    const [itemsRes, wantsRes, pendingRes] = await Promise.all([
         supabase.from('collection_items')
             .select('id, title, format, label, country, item_date, discogs_id, discogs_releases(master_id)')
             .eq('user_id', S.userId)
@@ -163,6 +164,15 @@ async function _loadMine() {
             .select('discogs_master_id, discogs_id')
             .eq('user_id', S.userId)
             .eq('artist_id', S.artist.id),
+        // Items saved while Discogs was busy have no discogs_id yet (it needs the
+        // worker's cache row), only the release link. Count them too, so a pressing
+        // you've already added can't be added again while it fills in.
+        supabase.from('collection_items')
+            .select('id, title, format, label, country, item_date, discogs_url, discogs_status')
+            .eq('user_id', S.userId)
+            .eq('still_owned', true)
+            .is('discogs_id', null)
+            .not('discogs_url', 'is', null),
     ]);
 
     const byMain = new Map(S.masters.filter(m => m.main_release_id).map(m => [m.main_release_id, m.discogs_master_id]));
@@ -174,6 +184,12 @@ async function _loadMine() {
         if (!masterId) continue;
         if (!S.owned.has(masterId)) S.owned.set(masterId, []);
         S.owned.get(masterId).push(it);
+    }
+    for (const it of (pendingRes.data || [])) {
+        const releaseId = Number((String(it.discogs_url).match(/\/release\/(\d+)/) || [])[1]);
+        if (!releaseId || S.itemsByRelease.has(releaseId)) continue;
+        S.pendingPressings.add(releaseId);
+        S.itemsByRelease.set(releaseId, it);   // joins its master when the pressings list loads
     }
     for (const w of (wantsRes.data || [])) S.wants.add(_wantKey(w.discogs_master_id, w.discogs_id));
 }
@@ -738,6 +754,7 @@ function _masterHtml() {
                     class="w-full text-left rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3">
                 <span class="block text-sm font-bold text-slate-900">${escapeHtml(it.format || it.title || 'Release')}</span>
                 <span class="block text-xs text-slate-500">${escapeHtml([it.label, it.country, it.item_date].filter(Boolean).join(' · '))}</span>
+                ${it.discogs_status === 'pending' ? '<span class="block text-[10px] font-black uppercase tracking-wider text-amber-600 mt-1">Adding details from Discogs\u2026</span>' : ''}
             </button>`).join('')}
         </div>` : ''}
 
@@ -837,26 +854,48 @@ function _fmtCount(n) {
 
 function _pressingsHtml() {
     const sh = S.sheet;
+    const masterTitle = String(sh.m.title || '').trim().toLowerCase();
     const rows = sh.versions.map(v => {
         const owned  = S.ownedPressings.has(v.id);
+        const adding = !owned && S.pendingPressings.has(v.id);
         const wanted = S.wants.has(_wantKey(sh.masterId, v.id));
         const meta   = [v.format, v.country, v.released].filter(Boolean).join(' · ');
         const rarity = (v.have != null || v.want != null)
             ? `${_fmtCount(v.have)} have · ${_fmtCount(v.want)} want` : '';
+        // Collectors identify a pressing by catno, sleeve and cover, so nothing
+        // here is truncated. Details the versions list doesn't carry (sleeve
+        // type, barcode, matrix) are one tap away on the release's Discogs page.
+        const thumb    = safeUrl(v.thumb || '');
+        const ownTitle = v.label && v.title && v.title.trim().toLowerCase() !== masterTitle ? v.title : '';   // no label: the title is already the heading
+        const discogs  = Number(v.id) > 0 ? `https://www.discogs.com/release/${Number(v.id)}` : '';
         return `
-        <li class="py-3 flex items-center gap-3">
-            <div class="min-w-0 flex-1">
-                <div class="text-sm font-bold text-slate-900 truncate">${escapeHtml([v.label, v.catno].filter(Boolean).join(' \u2014 ') || v.title)}</div>
-                <div class="text-xs text-slate-500">${escapeHtml(meta)}</div>
-                ${rarity ? `<div class="text-[11px] text-slate-400">${escapeHtml(rarity)}</div>` : ''}
+        <li class="py-3 space-y-2">
+            <div class="flex gap-3">
+                ${thumb
+                    ? `<img src="${escapeHtml(thumb)}" alt="" loading="lazy" decoding="async" class="shrink-0 w-14 h-14 rounded-xl object-cover bg-slate-100">`
+                    : '<div class="shrink-0 w-14 h-14 rounded-xl bg-slate-100" aria-hidden="true"></div>'}
+                <div class="min-w-0 flex-1">
+                    <div class="text-sm font-bold text-slate-900 break-words">${escapeHtml(v.label || v.title || 'Unknown label')}</div>
+                    ${v.catno ? `<div class="font-mono text-xs font-bold text-slate-700 break-all select-all">${escapeHtml(v.catno)}</div>` : ''}
+                    ${ownTitle ? `<div class="text-xs text-slate-600 break-words">${escapeHtml(ownTitle)}</div>` : ''}
+                    <div class="text-xs text-slate-500 break-words">${escapeHtml(meta)}</div>
+                    ${rarity ? `<div class="text-[11px] text-slate-400">${escapeHtml(rarity)}</div>` : ''}
+                </div>
             </div>
-            ${owned
-                ? '<span class="shrink-0 text-[10px] font-black uppercase tracking-wider px-3 py-2 rounded-full bg-emerald-50 text-emerald-600">Owned</span>'
+            <div class="flex items-center gap-2 pl-[68px]">
+            ${discogs ? `<a href="${escapeHtml(discogs)}" target="_blank" rel="noopener noreferrer"
+                    class="text-[10px] font-black uppercase tracking-wider text-[#189BCC] hover:underline">Check on Discogs &#8599;</a>` : ''}
+            <span class="flex-1"></span>
+            ${owned || adding
+                ? (owned
+                    ? '<span class="shrink-0 text-[10px] font-black uppercase tracking-wider px-3 py-2 rounded-full bg-emerald-50 text-emerald-600">Owned</span>'
+                    : '<span class="shrink-0 text-[10px] font-black uppercase tracking-wider px-3 py-2 rounded-full bg-amber-50 text-amber-600">Adding\u2026</span>')
                 : `<button type="button" data-action="want-pressing" data-id="${v.id}" aria-pressed="${wanted}"
                         aria-label="${wanted ? 'Remove from' : 'Add to'} want list"
                         class="shrink-0 text-[10px] font-black uppercase tracking-wider px-3 py-2 rounded-full border ${wanted ? 'border-amber-300 bg-amber-50 text-amber-600' : 'border-slate-200 text-slate-500'}">${wanted ? 'Wanted' : 'Want'}</button>
                    <button type="button" data-action="own-pressing" data-id="${v.id}"
                         class="shrink-0 text-[10px] font-black uppercase tracking-wider px-3 py-2 rounded-full bg-[#189BCC] text-white">I have this</button>`}
+            </div>
         </li>`;
     }).join('');
 
@@ -877,7 +916,7 @@ function _pressingsHtml() {
             class="w-full text-xs font-black uppercase tracking-wider py-3 rounded-full border border-slate-200 text-slate-600">Show more</button>` : ''}
         ${!sh.loading && !sh.versions.length && !sh.error ? '<p class="text-sm text-slate-500">No pressings match those filters.</p>' : ''}
         ${sh.truncated ? '<p class="text-[10px] text-slate-400">Very long list \u2014 showing the first 1,000 pressings.</p>' : ''}
-        <p class="text-[10px] text-slate-400">Have/want counts are Discogs community numbers \u2014 a rough rarity cue.</p>
+        <p class="text-[10px] text-slate-400">Have/want counts are Discogs community numbers \u2014 a rough rarity cue. Sleeve type, barcode and matrix numbers are on each pressing\u2019s Discogs page.</p>
     </div>`;
 }
 
@@ -909,11 +948,25 @@ function _launchEditor(releaseId) {
         return;
     }
     const bandName = S.bandName;
+    // The pressings list already has the identifying details, so the form opens
+    // filled in. The Discogs lookup still runs for cover, tracklist and genres;
+    // if Discogs is busy the item saves with these and the rest follows.
+    const v = S.sheet?.versions?.find(x => x.id === releaseId);
+    const pressing = v ? {
+        title:   v.title || S.sheet.m?.title || '',
+        label:   v.label || '',
+        catno:   v.catno || '',
+        format:  v.format || '',
+        country: v.country || '',
+        year:    (String(v.released || '').match(/^\d{4}/) || [''])[0],
+        thumb:   safeUrl(v.thumb || ''),   // stand-in cover while Discogs is busy (worker attaches it)
+    } : null;
     _closeSheet();
     // Prefill: the editor fills itself from the pressing's Discogs link through its normal lookup path.
     window.openCollectionEditor(null, null, {
         discogsUrl: `https://www.discogs.com/release/${releaseId}`,
         bandName,
+        pressing,
     });
 }
 

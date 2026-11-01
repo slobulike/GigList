@@ -2,7 +2,7 @@
 // Gig List — Service Worker
 // ─────────────────────────────────────────────────────────────────────────────
 
-const CACHE_NAME = 'gig-list-v11';
+const CACHE_NAME = 'gig-list-v12';
 const APP_BASE   = '/GigList/';
 const APP_ROOT   = APP_BASE + 'vault.html';
 
@@ -51,6 +51,7 @@ const ASSETS = [
   './js/modules/games.js',
   './js/modules/idb-mailbox.js',
   './js/modules/install-prompt.js',
+  './js/modules/map-layers.js',
   './js/modules/mix-playlist.js',
   './js/modules/modal-tips.js',
   './js/modules/notifications.js',

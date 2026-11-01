@@ -789,12 +789,7 @@ window.showSpinner?.('Saving show…');
         // Link the show to its venue row. Only fills an EMPTY venue_id, so a precise
         // setlist.fm link (set by the backfill / cron) is never overwritten by this
         // name-based one.
-        if (venueId) {
-            let q = supabase.from('journals').update({ venue_id: venueId }).eq('journal_key', journalKey).is('venue_id', null);
-            q = writeUserId ? q.eq('user_id', writeUserId) : q.is('user_id', null);
-            const { error: linkErr } = await q;
-            if (linkErr) console.warn('journal venue link failed:', linkErr.message);
-        }
+        if (venueId) await _linkJournalVenue(journalKey, writeUserId, venueId);
 
         // New support acts get an `artists` row (and enrichment) like headliners
         // and festival acts do, so they show up in autocomplete next time.
@@ -912,6 +907,7 @@ window.showSpinner?.('Saving show…');
                                 venueRows.push(buildVenueRow(show.venueRaw));
                             }
                             await Promise.all([upsertVenues(venueRows), upsertPerformances(perfRows)]);
+                            if (!venueId) await _linkJournalToSetlistVenue(journalKey, writeUserId, venueRows[0]);
                             await _linkPerformancesToVenue(journalKey, venueId);
                         }
                     }
@@ -926,11 +922,12 @@ window.showSpinner?.('Saving show…');
                         const mbid = await enrichNewArtist(band);
 
                         // Future shows will never exist on setlist.fm yet — skip the
-                        // setlist lookup entirely. The venue was confirmed by the user
-                        // at entry time so no pending review is needed either.
+                        // setlist lookup entirely. A venue that isn't in our venues
+                        // table still goes to admin review, or it never gets a map pin.
                         const showDate = new Date(y, m - 1, d);
                         if (showDate > new Date()) {
                             console.log('Future show — skipping setlist.fm lookup.');
+                            if (!venueIsKnown) await _submitPendingVenue({ session, journalKey, band, dateStr, venue });
                         } else {
                             // Check once whether this venue is already in our venues table.
                             // If it is, the user picked it from the dropdown and it needs no
@@ -981,6 +978,7 @@ window.showSpinner?.('Saving show…');
                                             venueRows.push(buildVenueRow(show.venueRaw));
                                         }
                                         await Promise.all([upsertVenues(venueRows), upsertPerformances(perfRows)]);
+                                        if (!venueId) await _linkJournalToSetlistVenue(journalKey, writeUserId, venueRows[0]);
                                         await _linkPerformancesToVenue(journalKey, venueId);
                                     } else {
                                         if (!venueIsKnown) await _submitPendingVenue({ session, journalKey, band, dateStr, venue });
@@ -1091,8 +1089,15 @@ window.showSpinner?.('Saving show…');
 async function _lookupVenue(venueName) {
     if (!venueName) return { id: null, known: false };
     try {
-        const { data, error } = await supabase
-            .from('venues').select('id, place_id, latitude, longitude').eq('official_name', venueName).limit(2);
+        const cols = 'id, place_id, latitude, longitude';
+        let { data, error } = await supabase
+            .from('venues').select(cols).eq('official_name', venueName).limit(2);
+        // "The Hawth theatre" is "The Hawth Theatre": retry ignoring case and outer
+        // spaces (ilike with no wildcards; any typed % _ \ are escaped).
+        if (!error && !data?.length && venueName.trim()) {
+            ({ data, error } = await supabase
+                .from('venues').select(cols).ilike('official_name', venueName.trim().replace(/[\\%_]/g, '\\$&')).limit(2));
+        }
         if (error) { console.warn('venue lookup failed:', error.message); return { id: null, known: false }; }
         const rows = data || [];
         // `row` (only when unambiguous) lets callers rank same-day setlists by venue
@@ -1120,8 +1125,35 @@ async function _linkPerformancesToVenue(journalKey, venueId) {
  * Inserts a row into pending_venues when a new show's venue couldn't be
  * matched or confirmed via setlist.fm. Best-effort — never blocks the save.
  */
+/** Link this show's journal row to a venue. Only fills an EMPTY venue_id, never overwrites. */
+async function _linkJournalVenue(journalKey, writeUserId, venueId) {
+    let q = supabase.from('journals').update({ venue_id: venueId }).eq('journal_key', journalKey).is('venue_id', null);
+    q = writeUserId ? q.eq('user_id', writeUserId) : q.is('user_id', null);
+    const { error } = await q;
+    if (error) console.warn('journal venue link failed:', error.message);
+}
+
+/**
+ * setlist.fm found the show, and upsertVenues saved its venue under setlist.fm's
+ * name (keyed by place_id = setlist.fm venue id). The name the user typed can
+ * differ ("Borde Hill" vs "Borde Hill Garden"), so link by that id instead.
+ */
+async function _linkJournalToSetlistVenue(journalKey, writeUserId, venueRow) {
+    if (!venueRow?.place_id) return;
+    try {
+        const { data } = await supabase.from('venues').select('id').eq('place_id', venueRow.place_id).limit(2);
+        if (data?.length === 1) await _linkJournalVenue(journalKey, writeUserId, data[0].id);
+    } catch (err) {
+        console.warn('setlist venue link failed:', err.message);
+    }
+}
+
 async function _submitPendingVenue({ session, journalKey, band, dateStr, venue }) {
     try {
+        // One review per show and venue name: re-saving a show used to queue it again.
+        const { data: queued } = await supabase.from('pending_venues')
+            .select('id').eq('journal_key', journalKey).eq('venue_name', venue).limit(1);
+        if (queued?.length) return;
         const { error } = await supabase.from('pending_venues').insert({
             submitted_by: session.user.id,
             journal_key:  journalKey,

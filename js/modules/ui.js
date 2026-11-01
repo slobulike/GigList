@@ -20,6 +20,7 @@ let markerLayer = null;
 let fullMapInstance = null;
 let fullMarkerLayer = null;
 import * as Data from './data.js';
+import { getMapLayer, addLayerSwitch, removeLayerSwitch, clearLayerLegend, renderEveryonePins, renderBuddyPins } from './map-layers.js';
 
 const defaultImages = [
     "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?auto=format&fit=crop&q=75&w=800",
@@ -1128,7 +1129,96 @@ function _ensureBandLegend(map) {
     map._bandLegend = legend;
 }
 
-export const renderMap = async (data) => {
+// ─── PERSONAL PINS (shared by the Gigs map and the full-screen explorer) ────
+
+// One pin per venue, sized by visits, with a pop-up listing every show there.
+// Returns { venueStats, bounds } for the caller's centring logic.
+function _myVenuePins(data, layer) {
+    const venueStats = {};
+    const bounds = [];
+    data.forEach(gig => {
+        const vKey = _venueKey(gig);
+        (venueStats[vKey] ??= []).push(gig);
+    });
+
+    Object.keys(venueStats).forEach(vKey => {
+        const gigsAtVenue = venueStats[vKey];
+        const venueData = _resolveVenue(gigsAtVenue[0]);
+        if (!venueData || isNaN(venueData.lat)) return;
+        bounds.push([venueData.lat, venueData.lng]);
+        if (!layer) return;
+
+        const vName = gigsAtVenue[0].OfficialVenue || '';
+        const visitCount = gigsAtVenue.length;
+        // Journal Key goes in a data attribute — clicks are handled by the
+        // delegated [data-view-gig-key] listener (see _wireViewGigClicks)
+        const gigListHTML = gigsAtVenue.map(g => `
+            <div data-view-gig-key="${escapeHtml(g['Journal Key'])}"
+                 class="cursor-pointer hover:bg-slate-50 p-2 rounded transition-colors border-b border-slate-100 last:border-0 mb-1">
+                <p class="text-[10px] font-black text-indigo-500 uppercase leading-none">${escapeHtml(g.Date)}</p>
+                <p class="text-[12px] font-bold text-slate-800 leading-tight">${escapeHtml(g.Band)}</p>
+            </div>`).join('');
+
+        L.circleMarker([venueData.lat, venueData.lng], {
+            radius: Math.min(6 + (visitCount * 2), 20),
+            fillColor: "#4f46e5",
+            color: "#fff",
+            weight: 2,
+            fillOpacity: 0.9
+        }).bindPopup(`
+            <div class="p-1 max-h-48 overflow-y-auto custom-scrollbar min-w-[180px]">
+                <h4 class="text-[10px] font-black uppercase text-slate-400 mb-2 tracking-widest border-b pb-1">${escapeHtml(vName)}</h4>
+                ${gigListHTML}
+                <div class="pt-2 text-center">
+                    <span class="bg-indigo-50 text-indigo-600 text-[10px] font-black px-2 py-0.5 rounded-full uppercase">
+                        ${visitCount} ${visitCount > 1 ? 'Shows' : 'Show'}
+                    </span>
+                </div>
+            </div>
+        `, { maxWidth: 250, className: 'gig-map-popup' }).addTo(layer);
+    });
+
+    return { venueStats, bounds };
+}
+
+// Draws the personal layer the switch has selected (Mine / Buddies / Everyone, see
+// map-layers.js) into a fresh layer group and swaps it in only if no newer
+// draw started meanwhile, so a quick Mine → Everyone → Mine can't mix pins.
+// Returns the new layer group, or null if this draw was superseded.
+async function _drawPersonalLayer(map, currentLayer, data) {
+    const seq = map._pinSeq = (map._pinSeq || 0) + 1;
+    const next = L.layerGroup();
+    const mine = _myVenuePins(data, getMapLayer() === 'mine' ? next : null);
+
+    const layerName = getMapLayer();
+    if (layerName !== 'mine') {
+        const render = layerName === 'buddies' ? renderBuddyPins : renderEveryonePins;
+        const ok = await render(map, next, data, _resolveVenue);
+        if (seq !== map._pinSeq) return null;
+        if (!ok) {
+            _myVenuePins(data, next);    // fall back to your own pins
+            window.showToast?.(`Couldn’t load ${layerName === 'buddies' ? 'your buddies’' : 'everyone’s'} venues — showing yours.`, 'error');
+        }
+    } else {
+        clearLayerLegend(map);
+    }
+    if (seq !== map._pinSeq) return null;
+
+    if (currentLayer) map.removeLayer(currentLayer);
+    next.addTo(map);
+    return { layer: next, ...mine };
+}
+
+let _lastMapData = [];
+
+// Redraw both personal maps after the layer switch, without moving either.
+function _onMapLayerChange() {
+    renderMap(_lastMapData, { keepView: true });
+    const modal = document.getElementById('mapModal');
+    if (fullMapInstance && modal && !modal.classList.contains('hidden')) _renderFullMap({ keepView: true });
+}
+
+export const renderMap = async (data, { keepView = false } = {}) => {
     await ensureLeaflet();
 
     const mapCanvas = document.getElementById('map-canvas');
@@ -1148,13 +1238,14 @@ export const renderMap = async (data) => {
     }
 
     _wireViewGigClicks();
-    markerLayer.clearLayers();
-    const bounds = [];
     const venuesLookup = window.venueLookup || {};
-    const venueStats = {};
 
     // Band mode: per-place pins coloured by attendance, always fit to the data
     if (window.isBandMode) {
+        removeLayerSwitch(gigMap);
+        gigMap._pinSeq = (gigMap._pinSeq || 0) + 1;   // drop any personal draw still loading
+        markerLayer.clearLayers();
+        const bounds = [];
         _renderBandPins(markerLayer, data, venuesLookup, bounds);
         _ensureBandLegend(gigMap);
         if (bounds.length) gigMap.fitBounds(bounds, { padding: [40, 40], maxZoom: 6 });
@@ -1163,69 +1254,23 @@ export const renderMap = async (data) => {
         return;
     }
 
-    // 1. Aggregate Gigs
-    data.forEach(gig => {
-        const vKey = _venueKey(gig);
-        if (!venueStats[vKey]) venueStats[vKey] = [];
-        venueStats[vKey].push(gig);
-    });
+    _lastMapData = data;
+    addLayerSwitch(gigMap, _onMapLayerChange);
+    const drawn = await _drawPersonalLayer(gigMap, markerLayer, data);
+    if (!drawn) return;
+    markerLayer = drawn.layer;
 
-    // 2. Re-build Markers with Popups
-    Object.keys(venueStats).forEach(vKey => {
-        const gigsAtVenue = venueStats[vKey];
-        const vName = gigsAtVenue[0].OfficialVenue || '';
-        const venueData = _resolveVenue(gigsAtVenue[0]);
+    // Centering Logic (Keeping our Debugged Version). The layer switch
+    // keeps the current view, like changing map type in Google Maps.
+    if (!keepView) {
+        const homeBase = getHomeBase(drawn.venueStats, venuesLookup);
+        const isFiltered = data.length < (window.journalData?.length || 0);
 
-        if (venueData && !isNaN(venueData.lat)) {
-            const visitCount = gigsAtVenue.length;
-            const radius = Math.min(6 + (visitCount * 2), 20);
-
-            const marker = L.circleMarker([venueData.lat, venueData.lng], {
-                radius: radius,
-                fillColor: "#4f46e5",
-                color: "#fff",
-                weight: 2,
-                fillOpacity: 0.9
-            });
-
-            // 3. GENERATE THE POPUP HTML (Restoring the click functionality)
-            const gigListHTML = gigsAtVenue.map(g => {
-                // Journal Key goes in a data attribute — clicks are handled by the
-                // delegated [data-view-gig-key] listener (see _wireViewGigClicks)
-                return `
-                    <div data-view-gig-key="${escapeHtml(g['Journal Key'])}"
-                         class="cursor-pointer hover:bg-slate-50 p-2 rounded transition-colors border-b border-slate-100 last:border-0 mb-1">
-                        <p class="text-[10px] font-black text-indigo-500 uppercase leading-none">${escapeHtml(g.Date)}</p>
-                        <p class="text-[12px] font-bold text-slate-800 leading-tight">${escapeHtml(g.Band)}</p>
-                    </div>
-                `;
-            }).join('');
-
-            marker.bindPopup(`
-                <div class="p-1 max-h-48 overflow-y-auto custom-scrollbar min-w-[180px]">
-                    <h4 class="text-[10px] font-black uppercase text-slate-400 mb-2 tracking-widest border-b pb-1">${escapeHtml(vName)}</h4>
-                    ${gigListHTML}
-                    <div class="pt-2 text-center">
-                        <span class="bg-indigo-50 text-indigo-600 text-[10px] font-black px-2 py-0.5 rounded-full uppercase">
-                            ${visitCount} ${visitCount > 1 ? 'Shows' : 'Show'}
-                        </span>
-                    </div>
-                </div>
-            `, { maxWidth: 250, className: 'gig-map-popup' });
-
-            marker.addTo(markerLayer);
-            bounds.push([venueData.lat, venueData.lng]);
+        if (isFiltered && drawn.bounds.length > 0) {
+            gigMap.fitBounds(drawn.bounds, { padding: [40, 40] });
+        } else {
+            gigMap.setView(homeBase, 7);
         }
-    });
-
-    // 4. Centering Logic (Keeping our Debugged Version)
-    const homeBase = getHomeBase(venueStats, venuesLookup);
-    const isFiltered = data.length < (window.journalData?.length || 0);
-
-    if (isFiltered && bounds.length > 0) {
-        gigMap.fitBounds(bounds, { padding: [40, 40] });
-    } else {
-        gigMap.setView(homeBase, 7);
     }
 
     setTimeout(() => gigMap.invalidateSize(), 100);
@@ -1255,87 +1300,48 @@ window.openMapModal = () => {
         fullMarkerLayer = L.layerGroup().addTo(fullMapInstance);
     }
 
-    // 2. Fetch data from the global window objects
+    // 2. Render after the modal has laid out (see _renderFullMap)
+    setTimeout(() => _renderFullMap(), 400);
+};
+
+// Mirrors renderMap: one pin per venue (sized by visit count) with a popup
+// listing every show there, or the Buddies / Everyone layer if the switch says so.
+async function _renderFullMap({ keepView = false } = {}) {
+    if (!fullMapInstance) return;
+    fullMapInstance.invalidateSize();
+    _wireViewGigClicks();
+
+    // Fetch data from the global window objects
     const data = window.filteredResults || window.journalData || [];
     const venuesLookup = window.venueLookup || {};
 
-    // 3. Render — mirrors renderMap's aggregation: group by venue first so
-    // each venue gets one pin (sized by visit count) with a popup listing
-    // every show there, rather than one overlapping same-size pin per gig.
-    setTimeout(() => {
-        fullMapInstance.invalidateSize();
-        _wireViewGigClicks();
+    if (window.isBandMode) {
+        removeLayerSwitch(fullMapInstance);
+        fullMapInstance._pinSeq = (fullMapInstance._pinSeq || 0) + 1;
         fullMarkerLayer.clearLayers();
-
         const bounds = [];
+        _renderBandPins(fullMarkerLayer, data, venuesLookup, bounds);
+        _ensureBandLegend(fullMapInstance);
+        if (bounds.length) fullMapInstance.fitBounds(bounds, { padding: [80, 80], maxZoom: 6 });
+        else fullMapInstance.setView([20, 0], 2);
+        return;
+    }
 
-        if (window.isBandMode) {
-            _renderBandPins(fullMarkerLayer, data, venuesLookup, bounds);
-            _ensureBandLegend(fullMapInstance);
-            if (bounds.length) fullMapInstance.fitBounds(bounds, { padding: [80, 80], maxZoom: 6 });
-            else fullMapInstance.setView([20, 0], 2);
-            return;
-        }
+    addLayerSwitch(fullMapInstance, _onMapLayerChange);
+    const drawn = await _drawPersonalLayer(fullMapInstance, fullMarkerLayer, data);
+    if (!drawn) return;
+    fullMarkerLayer = drawn.layer;
 
-        const venueStats = {};
+    console.log(`✅ EXPLORER: Rendered ${drawn.bounds.length} pins.`);
 
-        data.forEach(gig => {
-            const vKey = _venueKey(gig);
-            if (!venueStats[vKey]) venueStats[vKey] = [];
-            venueStats[vKey].push(gig);
-        });
-
-        Object.keys(venueStats).forEach(vKey => {
-            const gigsAtVenue = venueStats[vKey];
-            const vName       = gigsAtVenue[0].OfficialVenue || '';
-            const venueInfo   = _resolveVenue(gigsAtVenue[0]);
-
-            if (venueInfo && !isNaN(venueInfo.lat)) {
-                const visitCount = gigsAtVenue.length;
-                const radius = Math.min(6 + (visitCount * 2), 20);
-
-                const gigListHTML = gigsAtVenue.map(g => {
-                    return `
-                        <div data-view-gig-key="${escapeHtml(g['Journal Key'])}"
-                             class="cursor-pointer hover:bg-slate-50 p-2 rounded transition-colors border-b border-slate-100 last:border-0 mb-1">
-                            <p class="text-[10px] font-black text-indigo-500 uppercase leading-none">${escapeHtml(g.Date)}</p>
-                            <p class="text-[12px] font-bold text-slate-800 leading-tight">${escapeHtml(g.Band)}</p>
-                        </div>
-                    `;
-                }).join('');
-
-                const m = L.circleMarker([venueInfo.lat, venueInfo.lng], {
-                    radius: radius,
-                    fillColor: "#4f46e5",
-                    color: "#fff",
-                    weight: 2,
-                    fillOpacity: 0.9
-                }).bindPopup(`
-                    <div class="p-1 max-h-48 overflow-y-auto custom-scrollbar min-w-[180px]">
-                        <h4 class="text-[10px] font-black uppercase text-slate-400 mb-2 tracking-widest border-b pb-1">${escapeHtml(vName)}</h4>
-                        ${gigListHTML}
-                        <div class="pt-2 text-center">
-                            <span class="bg-indigo-50 text-indigo-600 text-[10px] font-black px-2 py-0.5 rounded-full uppercase">
-                                ${visitCount} ${visitCount > 1 ? 'Shows' : 'Show'}
-                            </span>
-                        </div>
-                    </div>
-                `, { maxWidth: 250, className: 'gig-map-popup' });
-
-                m.addTo(fullMarkerLayer);
-                bounds.push([venueInfo.lat, venueInfo.lng]);
-            }
-        });
-
-        console.log(`✅ EXPLORER: Rendered ${bounds.length} pins.`);
-
-        if (bounds.length > 0) {
-            fullMapInstance.fitBounds(bounds, { padding: [80, 80] });
+    if (!keepView) {
+        if (drawn.bounds.length > 0) {
+            fullMapInstance.fitBounds(drawn.bounds, { padding: [80, 80] });
         } else {
             fullMapInstance.setView([20, 0], 2);
         }
-    }, 400);
-};
+    }
+}
 
 window.closeMapModal = () => {
     const modal = document.getElementById('mapModal');

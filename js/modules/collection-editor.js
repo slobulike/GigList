@@ -9,7 +9,9 @@
  *
  * Window helpers (called from inline HTML / other modules):
  *   window.openCollectionEditor(type?, itemId?, prefill?)
- *                                       prefill = { discogsUrl?, bandName? } (add mode only)
+ *                                       prefill = { discogsUrl?, bandName?, pressing? } (add mode only)
+ *                                       pressing = { title, label, catno, format, country, year, thumb } from
+ *                                       band mode's pressings list, filled in before the Discogs lookup
  *   window.closeCollectionEditor()
  *   window.saveCollectionItem()
  *   window.deleteCollectionItem()
@@ -56,6 +58,8 @@ let _extendedOpen    = false; // Whether the "Extended Details" section is expan
 let _discogsId       = null; // Set once a Discogs lookup has populated this item
 let _prefillBandName = null; // Set when opened from band-mode Discography; keeps Discogs from overwriting the band
 let _discogsData     = null; // { genres, styles, tracklist, discogs_uri } — read-only snapshot
+let _prefilledFromPressing = false; // Form was filled from band mode's pressings list before the Discogs lookup
+let _prefillThumbUrl = null;        // That pressing's Discogs thumbnail, sent to /hydrate as a stand-in cover
 let _pendingDiscogsUrl = null; // A pasted Discogs link whose lookup was rate-limited this session — saved on the item so the Worker can finish the lookup (/hydrate)
 let _heroColor       = null; // Current spine colour (hex) shown in the colour chip
 let _heroColorManual = false; // True once the user picked a colour themselves (always saved)
@@ -427,7 +431,9 @@ window.colEditorLookupDiscogs = async () => {
             // Don't dead-end the user: remember the link and let them save now. The
             // Worker fills the details in (and fetches the cover) once Discogs answers.
             _pendingDiscogsUrl = discogsUrl;
-            _setDiscogsStatus("Discogs is busy right now. You can save now and we'll fill in the details automatically.");
+            _setDiscogsStatus(_prefilledFromPressing
+                ? "Filled in from the pressing. Discogs is busy, so the cover and tracklist will follow after you save."
+                : "Discogs is busy right now. You can save now and we'll fill in the details automatically.");
             return;
         }
 
@@ -694,7 +700,7 @@ window.togglePhotoMenu = (e) => {
 // ".../abc-src-discogs-172938-x9f2k.jpg"). Pure filename convention —
 // no schema/state-shape change — so existing photos with no tag are
 // just untagged user uploads.
-const SOURCE_LABELS = { discogs: 'Discogs', weezerpedia: 'Weezerpedia', coverart: 'Cover Art' };
+const SOURCE_LABELS = { discogs: 'Discogs', discogsthumb: 'Discogs', weezerpedia: 'Weezerpedia', coverart: 'Cover Art' };
 function _photoSource(path) {
     const m = /-src-([a-z]+)-/.exec(path || '');
     return m ? m[1] : null;
@@ -1642,6 +1648,8 @@ export const openCollectionEditor = async (type = null, itemId = null, prefill =
     _colorPanelOpen  = false;
     _coverSwatches   = [];
     _labelCache      = null; // refresh label suggestions on each open
+    _prefilledFromPressing = false;
+    _prefillThumbUrl = null;
     _dismissedSuggestions = new Set();
     _discogsId       = null;
     _discogsData     = null;
@@ -1738,6 +1746,20 @@ export const openCollectionEditor = async (type = null, itemId = null, prefill =
         if (prefill.bandName) {
             const bi = document.getElementById('col-editor-band-input');
             if (bi) bi.value = prefill.bandName;
+        }
+        // Identifying details from the pressings list, so the form is usable
+        // straight away even if the lookup below is rate-limited.
+        const pr = prefill.pressing;
+        if (pr) {
+            _val('col-editor-title',   pr.title   || '');
+            _val('col-editor-date',    pr.year    || '');
+            _val('col-editor-label',   pr.label   || '');
+            _val('col-editor-cat-no',  pr.catno   || '');
+            _val('col-editor-format',  pr.format  || '');
+            _val('col-editor-country', pr.country || '');
+            window.colEditorToggleExtended(true);
+            _prefilledFromPressing = true;
+            _prefillThumbUrl = pr.thumb || null;
         }
         if (prefill.discogsUrl) {
             const di = document.getElementById('col-editor-discogs-input');
@@ -1854,6 +1876,7 @@ window.saveCollectionItem = async () => {
 
         // A link whose lookup was rate-limited this session (and never succeeded since)
         const pendingDiscogsUrl = _discogsId ? null : _pendingDiscogsUrl;
+        const standInThumb = pendingDiscogsUrl ? _prefillThumbUrl : null;
 
         // 2. Include artist_id in the row payload
         const row = {
@@ -1934,7 +1957,7 @@ window.saveCollectionItem = async () => {
 
         // Rate-limited lookup: ask the Worker to finish it now (it queues the work
         // itself if Discogs is still unavailable).
-        if (pendingDiscogsUrl) _hydrateFromDiscogs(itemId);
+        if (pendingDiscogsUrl) _hydrateFromDiscogs(itemId, standInThumb);
 
     } catch (err) {
         console.error('[ColEditor] save failed:', err);
@@ -1953,10 +1976,11 @@ window.saveCollectionItem = async () => {
  * queues the job and finishes it later with no further action from the user.
  * Non-blocking; failures are logged, never shown.
  */
-function _hydrateFromDiscogs(itemId) {
+function _hydrateFromDiscogs(itemId, thumbUrl = null) {
     authedFetch(`${IMPORT_WORKER_URL}/hydrate`, {
         method: 'POST',
-        body: JSON.stringify({ itemId }),
+        // thumbUrl: a pressing thumbnail the Worker shows as the cover until the real one arrives
+        body: JSON.stringify(thumbUrl ? { itemId, thumbUrl } : { itemId }),
     })
         .then(res => res.json())
         .then(data => {
@@ -2044,6 +2068,7 @@ window.deleteCollectionItem = async () => {
         .eq('id', _editingId);
 
     if (error) {
+        console.warn('[ColEditor] delete failed:', error.code, error.message, error.details);
         if (window.showToast) window.showToast('Could not delete item.', 'error');
         return;
     }

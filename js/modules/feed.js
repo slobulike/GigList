@@ -2930,8 +2930,115 @@ function composeFeed(scored, tipCards, journalData) {
         ...pinned.map(s => s.html),
         ...tips,
         ...rest.map(s => s.html),
+        '<div data-feed-across></div>',          // "Across GigList", filled after first paint
         gameCardHtml(journalData),
     ].join('');
+}
+
+// ─── ACROSS GIGLIST ───────────────────────────────────────────────────────────
+// The community view, folded into the personal feed (Community mode is being
+// retired). get_community_feed() returns aggregates only: trending needs 2+
+// people, busy venues 3+, and hot / on-this-day only use gigs that 2+ people
+// went to or a public profile logged (claude review/community_privacy.sql).
+// It loads after the personal feed has drawn, so it never slows that down, and
+// each line says where you fit in.
+
+const ACROSS_TTL_MS = 10 * 60 * 1000;
+let _across = null;   // { at, data }
+
+async function _loadAcross() {
+    if (_across && Date.now() - _across.at < ACROSS_TTL_MS) return _across.data;
+    const { data, error } = await supabase.rpc('get_community_feed');
+    if (error) throw error;
+    _across = { at: Date.now(), data: data || {} };
+    return _across.data;
+}
+
+const _ACROSS_LABEL = 'text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2';
+const _youBadge = (text) =>
+    `<span class="shrink-0 text-[9px] font-black uppercase tracking-wider px-2 py-1 rounded-full bg-indigo-50 text-indigo-600">${escapeHtml(text)}</span>`;
+
+function acrossSection(d, journalData) {
+    const mine = journalData || [];
+    const seen = new Set(mine.map(g => _key(g.Band)));
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const goingTo = new Set(mine.filter(g => (parseDate(g.Date) || 0) >= today).map(g => _key(g.OfficialVenue)));
+    const onThisDayMine = new Set(mine.filter(g => {
+        const dt = parseDate(g.Date);
+        return dt && dt.getDate() === today.getDate() && dt.getMonth() === today.getMonth();
+    }).map(g => `${_key(g.Band)}|${gigYear(g)}`));
+
+    const trending = d.trending || [];
+    const artists  = (trending.length ? trending : (d.hot || [])).slice(0, 5);
+    const venues   = (d.venues_ahead || []).slice(0, 5);
+    const otd      = (d.on_this_day || []).slice(0, 4);
+    if (!artists.length && !venues.length && !otd.length) return '';
+
+    const artistRows = artists.map(r => `
+        <li class="flex items-center gap-3">
+            ${_art(r.band, 'relative shrink-0 w-12 h-12 rounded-2xl', { band: r.band })}
+            <div class="min-w-0 flex-1">
+                <p class="text-sm font-black text-slate-900 truncate">${escapeHtml(r.band)}</p>
+                <p class="text-[11px] font-bold text-slate-500">${escapeHtml(trending.length
+                    ? `${_plural(r.people, 'person', 'people')} · ${_plural(r.shows, 'show', 'shows')}`
+                    : (r.days_ago <= 0 ? 'Seen today' : `Seen ${_plural(r.days_ago, 'day', 'days')} ago`))}</p>
+            </div>
+            ${seen.has(_key(r.band)) ? _youBadge('You\u2019ve seen them') : ''}
+        </li>`).join('');
+
+    const venueTiles = venues.map(r => `
+        <div class="shrink-0 snap-start w-44 rounded-3xl bg-gradient-to-br ${_grad(r.venue)} p-4 text-white">
+            <p class="text-sm font-black leading-tight line-clamp-2">${escapeHtml(r.venue)}</p>
+            <p class="mt-1.5 text-[10px] font-black uppercase tracking-widest text-white/85">${escapeHtml(`${_plural(r.people, 'person', 'people')} going`)}</p>
+            ${goingTo.has(_key(r.venue)) ? '<p class="mt-2 inline-block bg-white/90 text-slate-800 text-[9px] font-black uppercase tracking-wider px-2 py-1 rounded-full">You\u2019re going too</p>' : ''}
+        </div>`).join('');
+
+    const otdRows = otd.map(r => `
+        <li class="flex items-center gap-3">
+            <span class="shrink-0 w-12 text-lg font-black italic tracking-tighter text-slate-300">${escapeHtml(String(r.year))}</span>
+            <p class="min-w-0 flex-1 text-sm font-bold text-slate-800 truncate">${escapeHtml(r.band)}</p>
+            ${onThisDayMine.has(`${_key(r.band)}|${r.year}`) ? _youBadge('You were there') : ''}
+        </li>`).join('');
+
+    return `
+        <section class="${CARD} space-y-5" aria-labelledby="feed-across">
+            <div>${_head('feed-across', 'Across GigList', 'What the GigList community has been seeing, and where you fit in.')}</div>
+            ${artists.length ? `
+            <div>
+                <p class="${_ACROSS_LABEL}">${trending.length ? 'Trending this month' : 'Recently seen'}</p>
+                <ul class="space-y-3">${artistRows}</ul>
+            </div>` : ''}
+            ${venues.length ? `
+            <div>
+                <p class="${_ACROSS_LABEL}">Busy venues, next 30 days</p>
+                <div class="${RAIL}">${venueTiles}</div>
+            </div>` : ''}
+            ${otd.length ? `
+            <div>
+                <p class="${_ACROSS_LABEL}">On this day</p>
+                <ul class="space-y-2">${otdRows}</ul>
+            </div>` : ''}
+        </section>`;
+}
+
+async function _fillAcross(container, journalData) {
+    const slot = container.querySelector('[data-feed-across]');
+    if (!slot) return;
+    let d;
+    try {
+        d = await _loadAcross();
+    } catch (err) {
+        console.warn('[Feed] across GigList failed', err);   // the personal feed is complete without it
+        return;
+    }
+    if (!slot.isConnected) return;                           // the feed re-rendered meanwhile
+    const html = acrossSection(d, journalData);
+    if (!html) return;
+    const bands = [...(d.trending || []), ...(d.hot || [])].map(r => r.band);
+    _mediaPending = Promise.all([_mediaPending, loadArtistMedia(bands)]);
+    slot.innerHTML = html;
+    if (window.lucide) lucide.createIcons();
+    hydrateArt(slot);
 }
 
 // ─── CLICK HANDLING ───────────────────────────────────────────────────────────
@@ -3175,6 +3282,7 @@ export async function init(journalData, performanceData, _ignored = []) {
     if (window.lucide) lucide.createIcons();
     applyReactionState(container);
     hydrateArt(container);
+    _fillAcross(container, journalData);
 
     _mediaPending.then(() => {
         const el = container.querySelector('[data-feed-attribution]');
