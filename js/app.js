@@ -1,8 +1,9 @@
 /**
  * GigList Core Engine
- * v10.3.8 — 2026-11-01
+ * v10.4.1 — 2026-11-02
  * ------------------------------------------------------------------
- * ✅ Opus 5.5 review
+ * ✅ Added buddy photos to personal feed
+ * ✅ Increased cards limits to reflect space created by rails approach
  */
 
 import * as Data from './modules/data.js';
@@ -46,7 +47,7 @@ import { syncPushSubscription, initPushUI } from './modules/push.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "10.3.8";
+const APP_VERSION = "10.4.0";
 
 // Columns of profiles that the app is allowed to read (see the column grants
 // in Supabase). home_lat / home_lng / home_label are deliberately excluded:

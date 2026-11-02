@@ -1,6 +1,6 @@
 /**
  * GigList - Feed Module
- * v3.0.0 — Oct 2026
+ * v3.1.0 — Nov 2026
  *
  * Contextual feed engine. Evaluates card triggers against the user's journal
  * each time the Feed tab is activated, picks the top cards by score, and
@@ -10,6 +10,13 @@
  * unchanged. The top card becomes a swipable Spotlight hero; the rest are
  * grouped into image rows, a poster rail, venue tiles and an item rail, using
  * the same components as community-feed.js. See RENDERING below.
+ *
+ * v3.1 adds, under the hero, the Community "Just seen on GigList" rail. Tapping
+ * an artist swaps the hero (in place) into an artist Spotlight: artwork first,
+ * then fan photos from public profiles (get_community_artist_photos), each
+ * captioned with its own show. "Back to today's pick" restores the hero card.
+ * "Watch live" now searches for the show itself (band + venue + year) whenever
+ * the slide is a specific show.
  *
  * ─── CARD TYPES ───────────────────────────────────────────────────────────────
  *
@@ -92,7 +99,8 @@ import { renderEmptyStateTips } from './tip-nudges.js';
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
-const CARD_LIMIT = 15;   // cap on total cards shown in one feed load
+const CARD_LIMIT = 15;   // cap on total cards shown in one feed load (venue tiles excluded)
+const VENUE_TILE_LIMIT = 6;   // "Rooms you share" is a rail, so it gets its own allowance
 
 const DEFAULT_IMAGES = [
     'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?auto=format&fit=crop&q=75&w=800',
@@ -720,7 +728,6 @@ function buildBuddyCards(buddyJournalsByUser, myJournalData, buddyProfiles) {
     // it, flooding the feed with the lowest-value social card types.
     const nearMissCandidates = [];
     const echoCandidates     = [];
-    const venuesClaimed      = new Set();
 
     // Track which of my journal keys have been claimed by buddy_together so
     // selectCards() can suppress the plain on_this_day duplicate for the same show.
@@ -893,7 +900,6 @@ function buildBuddyCards(buddyJournalsByUser, myJournalData, buddyProfiles) {
         Object.entries(buddyVenueGigsByVenue).forEach(([venueKey, buddyVenueGigsAll]) => {
             const myVenueGigsAll = myVenueMap[venueKey] || [];
             if (!myVenueGigsAll.length) return;
-            if (venuesClaimed.has(venueKey)) return; // feed-wide dedup across both types
             const venueName = window.resolveVenue?.(buddyVenueGigsAll[0])?.name || buddyVenueGigsAll[0].OfficialVenue || '';
             if (!venueName) return;
             const venueId   = gigVenueId(buddyVenueGigsAll[0]);
@@ -925,7 +931,6 @@ function buildBuddyCards(buddyJournalsByUser, myJournalData, buddyProfiles) {
             );
 
             if (nearMissGig) {
-                venuesClaimed.add(venueKey);
                 const monthName = new Date(2000, gigMonth(nearMissGig) - 1, 1)
                     .toLocaleString('default', { month: 'long' });
 
@@ -944,14 +949,14 @@ function buildBuddyCards(buddyJournalsByUser, myJournalData, buddyProfiles) {
                     badge:       'Near Miss',
                     badgeColor:  'bg-cyan-600',
                     journalKey:  `nearmiss_${buddy.id}_${venueSlug}_${gigYear(nearMissGig)}_${gigMonth(nearMissGig)}`,
-                    // used only for ranking candidates below, stripped before render
+                    // used only for ranking / venue dedup below, stripped before render
                     _overlapCount: myGigsHere.length + buddyGigsHere.length,
+                    _venueKey:     venueKey,
                 });
                 return; // don't also throw the looser echo for the same venue/buddy
             }
 
             // VENUE ECHO — loose match: same venue, any month/year in history.
-            venuesClaimed.add(venueKey);
             const heroGig = [...myGigsHere].sort((a, b) =>
                 (parseDate(b.Date) || 0) - (parseDate(a.Date) || 0)
             )[0];
@@ -971,27 +976,37 @@ function buildBuddyCards(buddyJournalsByUser, myJournalData, buddyProfiles) {
                 badge:       'Venue Echo',
                 badgeColor:  'bg-cyan-500',
                 journalKey:  `echo_${buddy.id}_${venueSlug}`,
-                // used only for ranking candidates below, stripped before render
+                // used only for ranking / venue dedup below, stripped before render
                 _overlapCount: myGigsHere.length + buddyGigsHere.length,
+                _venueKey:     venueKey,
             });
         });
     });
 
-    // Cap both types feed-wide, favoring venues with more combined history
-    // between the two of you. Left uncapped, a heavily-shared venue history
-    // (or a very active buddy) could drown out the rest of the buddy cards.
-    const MAX_NEAR_MISS_CARDS = 2;
-    const MAX_ECHO_CARDS      = 2;
+    // The "Rooms you share" tiles live in a swipable rail, so the caps are
+    // generous. Candidates are ranked by combined history (near misses first),
+    // then each venue goes to its best-matching buddy only — so the same room
+    // never appears twice, and a venue isn't handed to whichever buddy happens
+    // to come first in the list.
+    const MAX_NEAR_MISS_CARDS = 3;
+    const MAX_ECHO_CARDS      = 6;
 
-    nearMissCandidates
-        .sort((a, b) => b._overlapCount - a._overlapCount)
-        .slice(0, MAX_NEAR_MISS_CARDS)
-        .forEach(c => { delete c._overlapCount; cards.push(c); });
-
-    echoCandidates
-        .sort((a, b) => b._overlapCount - a._overlapCount)
-        .slice(0, MAX_ECHO_CARDS)
-        .forEach(c => { delete c._overlapCount; cards.push(c); });
+    const claimedVenues = new Set();
+    const takeVenueCards = (list, max) => {
+        list.sort((a, b) => b._overlapCount - a._overlapCount);
+        let taken = 0;
+        for (const c of list) {
+            if (taken >= max) break;
+            if (claimedVenues.has(c._venueKey)) continue;
+            claimedVenues.add(c._venueKey);
+            delete c._overlapCount;
+            delete c._venueKey;
+            cards.push(c);
+            taken++;
+        }
+    };
+    takeVenueCards(nearMissCandidates, MAX_NEAR_MISS_CARDS);
+    takeVenueCards(echoCandidates,     MAX_ECHO_CARDS);
 
     // Expose the set of "claimed" on-this-day keys so selectCards() can filter
     // the plain duplicates.
@@ -1167,9 +1182,18 @@ function selectCards(gigCards, colCards, buddyCards) {
         }
     }
 
+    // Venue tiles sit in a rail, so they skip the round-robin (where each type
+    // gets one slot per pass and the limit is usually spent in the first pass)
+    // and take their own allowance, best score first.
+    const venueCards = [...seen.values()]
+        .filter(c => VENUE_TILE_TYPES.has(c.type))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, VENUE_TILE_LIMIT);
+
     // Group remaining candidates by type, best score first within each group
     const byType = new Map();
     for (const card of seen.values()) {
+        if (VENUE_TILE_TYPES.has(card.type)) continue;
         if (!byType.has(card.type)) byType.set(card.type, []);
         byType.get(card.type).push(card);
     }
@@ -1198,7 +1222,7 @@ function selectCards(gigCards, colCards, buddyCards) {
         }
     }
 
-    return selected.sort((a, b) => b.score - a.score);
+    return [...selected, ...venueCards].sort((a, b) => b.score - a.score);
 }
 
 // ─── IMAGE RESOLUTION ─────────────────────────────────────────────────────────
@@ -1896,7 +1920,28 @@ function _initials(name) {
 const _localArt = (band) => `assets/artists/${String(band ?? '').toLowerCase().replace(/ /g, '_')}_stock_photo.jpg`;
 
 const _cardKey = (card) => String(card.journalKey || card.type).replace(/[^a-z0-9]/gi, '_');
-const _watchUrl = (band) => `https://www.youtube.com/results?search_query=${encodeURIComponent(band + ' live')}`;
+
+// "Watch live" searches for the SHOW when we know which one it is (band + venue
+// + year + "live"), otherwise just the band. Same idea as the gig modal link.
+function _watchUrl(band, show = null) {
+    const parts = [band, show?.venue, show?.year, 'live'].filter(Boolean);
+    return `https://www.youtube.com/results?search_query=${encodeURIComponent(parts.join(' '))}`;
+}
+function _gigWatchUrl(g) {
+    if (!g?.Band) return null;
+    const year = g.Date ? gigYear(g) : NaN;
+    return _watchUrl(g.Band, { venue: g.OfficialVenue, year: Number.isFinite(year) ? year : null });
+}
+const _slideWatch = (s) => s?.watch || (s?.band ? _watchUrl(s.band) : '#');
+
+function _recency(days) {
+    if (days <= 0) return 'today';
+    if (days === 1) return 'yesterday';
+    if (days < 7)  return 'this week';
+    if (days < 14) return 'last week';
+    if (days < 31) return 'this month';
+    return 'a while ago';
+}
 
 function _showLine(g) {
     return [g.OfficialVenue, g.Date].filter(Boolean).join(' · ');
@@ -1956,6 +2001,56 @@ function _bandsForMedia(cards) {
         (c.allItems || []).slice(0, 10).forEach(i => i?.band_name && out.push(i.band_name));
     }
     return out;
+}
+
+// ─── FAN PHOTOS (artist Spotlight) ────────────────────────────────────────────
+// Same RPC + signed URLs as the Community feed. The RPC only returns photos
+// from public profiles (plus that user's display name and avatar); the signed
+// URLs work because of the storage policy for gig-photos on public profiles.
+// Best-effort: any failure just leaves the Spotlight as artwork only.
+
+const FAN_PHOTO_URL_TTL_S = 15 * 60;
+const FAN_PHOTO_CACHE_MS  = 10 * 60 * 1000;   // refetch well before the signed URLs expire
+const _fanPhotos = new Map();                  // lowercase band -> { at, list }
+
+function _cachedFanPhotos(band) {
+    const hit = _fanPhotos.get(_key(band));
+    return hit && Date.now() - hit.at < FAN_PHOTO_CACHE_MS ? hit.list : null;
+}
+
+async function loadFanPhotos(band) {
+    const cached = _cachedFanPhotos(band);
+    if (cached) return cached;
+    try {
+        const { data: rows, error } = await supabase.rpc('get_community_artist_photos', { p_band: band });
+        if (error) throw error;
+        let list = [];
+        if (rows?.length) {
+            const { data: signed, error: signErr } = await supabase.storage
+                .from('gig-photos')
+                .createSignedUrls(rows.map(r => r.photo_path), FAN_PHOTO_URL_TTL_S);
+            if (signErr) throw signErr;
+            const urls  = new Map((signed || []).filter(x => x.signedUrl).map(x => [x.path, x.signedUrl]));
+            const today = new Date().toLocaleDateString('en-CA');   // YYYY-MM-DD, local time
+            list = rows
+                .filter(r => urls.has(r.photo_path) && (!r.show_date || r.show_date <= today))
+                .map(r => ({ ...r, url: urls.get(r.photo_path) }));
+        }
+        _fanPhotos.set(_key(band), { at: Date.now(), list });
+        return list;
+    } catch (err) {
+        console.warn('[Feed] fan photos failed', err);
+        return [];
+    }
+}
+
+// Caption for one fan photo: the show it belongs to, never a relative "this week".
+function _photoCaption(p) {
+    const d = p.show_date ? new Date(`${p.show_date}T00:00:00`) : null;
+    const when = d && !isNaN(d)
+        ? d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+        : '';
+    return [p.venue, when].filter(Boolean).join(' · ');
 }
 
 // ─── ARTWORK ──────────────────────────────────────────────────────────────────
@@ -2057,7 +2152,10 @@ function hydrateArt(root) {
 // <img> error/load events don't bubble, so these are wired in the capture phase.
 function _onFeedImgError(e) {
     const img = e.target;
-    if (!(img instanceof HTMLImageElement) || img.dataset.feedArt === undefined) return;
+    if (!(img instanceof HTMLImageElement)) return;
+    // Fan photo / avatar: just drop the broken image; gradient or initials show through.
+    if (img.hasAttribute('data-feed-photo') || img.hasAttribute('data-feed-avatar')) { img.remove(); return; }
+    if (img.dataset.feedArt === undefined) return;
     if (img.dataset.fallback) {
         const fb = img.dataset.fallback;
         delete img.dataset.fallback;
@@ -2410,7 +2508,8 @@ function showListHtml(card, theme) {
 // cards with more shows behind them (an anniversary run, an artist's story, a
 // room's history) the next slides are those shows, newest first.
 
-let _hero = null;   // { card, slides, idx, playing, playBand }
+let _hero = null;       // { card, slides, idx, playing, playBand, spotlight }
+let _heroBase = null;   // the day's top card, so a Spotlight can hand the hero back
 
 function buildSlides(card) {
     const social    = SOCIAL_TYPES.has(card.type);
@@ -2443,6 +2542,7 @@ function buildSlides(card) {
         kind: 'show', gig, band: gig.Band || '',
         title: card.headline, eyebrow: card.eyebrow, line: card.subline,
         tap: tapDesc(card), owners: photoOwnerIds(card), openLabel,
+        watch: _gigWatchUrl(gig),
     };
     const slides = [anchor];
     if (!MULTI_SLIDE_TYPES.has(card.type)) return slides;
@@ -2468,24 +2568,70 @@ function buildSlides(card) {
                 line:    card.type === 'venue_chapter' ? [g.Band, g.Date].filter(Boolean).join(' · ') : _showLine(g),
                 tap:     tapDesc(card, g),
                 openLabel,
+                watch:   _gigWatchUrl(g),
             });
         });
     return slides;
 }
 
-function heroSection(card) {
-    const slides = buildSlides(card);
-    const key    = _cardKey(card);
-    _hero = { card, slides, idx: 0, playing: false, playBand: null };
+// Spotlight slides for one artist: artwork first, then one slide per fan photo.
+function buildSpotlightSlides(band, photos, line) {
+    const slides = [{
+        kind: 'artist', band, title: band, eyebrow: 'Spotlight', line: line || 'On GigList',
+        tap: null, openLabel: '',
+    }];
+    photos.forEach(p => {
+        if (!safeUrl(p.url || '')) return;
+        slides.push({
+            kind: 'photo', band, title: band, eyebrow: 'Fan photo', line: _photoCaption(p),
+            tap: null, openLabel: '', photo: p,
+            watch: _watchUrl(band, {
+                venue: p.venue,
+                year:  p.show_date ? Number(String(p.show_date).slice(0, 4)) || null : null,
+            }),
+        });
+    });
+    return slides;
+}
+
+function fanPhotoSlideHtml(s, i, n) {
+    const p    = s.photo;
+    const name = String(p.display_name || 'A fan');
+    const av   = safeUrl(p.avatar_url || '');
+    return `
+        <div class="relative shrink-0 w-full h-full snap-center overflow-hidden bg-gradient-to-br ${_grad(s.band)}"
+             role="group" aria-roledescription="slide" aria-label="${_attr(`Fan photo ${i} of ${n - 1}`)}">
+            <img src="${_attr(safeUrl(p.url))}" alt="${_attr(`${s.band} at ${p.venue || 'a show'}, photo by ${name}`)}"
+                 loading="lazy" decoding="async" data-feed-photo
+                 class="absolute inset-0 w-full h-full object-cover">
+            <div class="absolute top-4 left-4 flex items-center gap-2 max-w-[70%] bg-slate-900/60 backdrop-blur-sm rounded-full pl-1 pr-3 py-1">
+                <span class="relative shrink-0 w-7 h-7 rounded-full overflow-hidden bg-indigo-500 flex items-center justify-center text-[10px] font-black text-white">
+                    ${escapeHtml(_initials(name))}
+                    ${av ? `<img src="${_attr(av)}" alt="" data-feed-avatar class="absolute inset-0 w-full h-full object-cover">` : ''}
+                </span>
+                <span class="text-[11px] font-bold text-white truncate">${escapeHtml(name)}</span>
+            </div>
+        </div>`;
+}
+
+/**
+ * The hero. Normally built from the day's top card. With `spot`
+ * ({ band, photos, line }) it becomes an artist Spotlight instead: no buddy
+ * chip, list toggle or reactions, plus a "Back" button that restores the card.
+ */
+function heroSection(card, spot = null) {
+    const slides = spot ? buildSpotlightSlides(spot.band, spot.photos, spot.line) : buildSlides(card);
+    const key    = spot ? 'spotlight' : _cardKey(card);
+    _hero = { card, slides, idx: 0, playing: false, playBand: null, spotlight: spot?.band || null };
 
     const s0     = slides[0];
     const n      = slides.length;
     const multi  = n > 1;
-    const buddies = SOCIAL_TYPES.has(card.type) ? (card.buddies || (card.buddy ? [card.buddy] : [])) : [];
-    const listCount = card.allGigs?.length || 0;
-    const hasList = LIST_TYPES.has(card.type) && listCount > 1;
+    const buddies = (!spot && SOCIAL_TYPES.has(card.type)) ? (card.buddies || (card.buddy ? [card.buddy] : [])) : [];
+    const listCount = spot ? 0 : (card.allGigs?.length || 0);
+    const hasList = !spot && LIST_TYPES.has(card.type) && listCount > 1;
 
-    const slideHtml = slides.map((s, i) => `
+    const slideHtml = slides.map((s, i) => s.kind === 'photo' ? fanPhotoSlideHtml(s, i, n) : `
         <div class="relative shrink-0 w-full h-full snap-center ${s.tap ? 'cursor-pointer' : ''}" ${tapAttrs(s.tap)}
              ${multi ? `role="group" aria-roledescription="slide" aria-label="${_attr(`${i + 1} of ${n}`)}"` : ''}>
             ${_art(s.band || s.title, 'absolute inset-0',
@@ -2508,7 +2654,7 @@ function heroSection(card) {
         </div>` : '';
 
     return `
-    <section data-feed-hero data-card-type="${_attr(card.type)}" class="overflow-hidden rounded-[2rem] bg-slate-900 shadow-sm" aria-labelledby="feed-spot">
+    <section data-feed-hero data-card-type="${_attr(spot ? 'artist_spotlight' : card.type)}" class="overflow-hidden rounded-[2rem] bg-slate-900 shadow-sm" aria-labelledby="feed-spot">
         <div class="relative h-72">
             <div data-feed-rail ${railAttrs}
                  class="absolute inset-0 flex overflow-x-auto overscroll-x-contain snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
@@ -2525,6 +2671,10 @@ function heroSection(card) {
         </div>
 
         <div class="p-4 flex flex-wrap items-center gap-2">
+            ${spot && _heroBase ? `
+            <button type="button" data-feed-spot-back class="${HERO_BTN} px-5 bg-white text-slate-900">
+                <i data-lucide="arrow-left" class="w-4 h-4" aria-hidden="true"></i> Back to today\u2019s pick
+            </button>` : ''}
             <button type="button" data-feed-open class="${HERO_BTN} px-5 bg-white text-slate-900 ${s0.tap ? '' : 'hidden'}">
                 <span data-feed-open-label>${escapeHtml(s0.openLabel)}</span>
             </button>
@@ -2533,7 +2683,7 @@ function heroSection(card) {
                 <span data-feed-ico-stop class="hidden"><i data-lucide="x" class="w-4 h-4" aria-hidden="true"></i></span>
                 <span data-feed-play-label>Listen</span>
             </button>
-            <a data-feed-watch href="${_attr(s0.band ? _watchUrl(s0.band) : '#')}" target="_blank" rel="noopener noreferrer"
+            <a data-feed-watch href="${_attr(s0.band ? _slideWatch(s0) : '#')}" target="_blank" rel="noopener noreferrer"
                aria-label="Watch live videos" title="Watch live videos"
                class="${HERO_BTN} w-11 bg-white/10 text-white ${s0.band ? '' : 'hidden'}">
                 <i data-lucide="video" class="w-4 h-4" aria-hidden="true"></i>
@@ -2545,7 +2695,7 @@ function heroSection(card) {
                     class="${HERO_BTN} px-4 bg-white/10 text-white">
                 <i data-lucide="list" class="w-4 h-4" aria-hidden="true"></i>${listCount}
             </button>` : ''}
-            <div class="ml-auto">${renderReactionRow(card.reactTargets, 'dark', card.reactVariant, 'right')}</div>
+            ${spot ? '' : `<div class="ml-auto">${renderReactionRow(card.reactTargets, 'dark', card.reactVariant, 'right')}</div>`}
         </div>
 
         <div data-feed-player></div>
@@ -2573,7 +2723,7 @@ function applyHeroSlide(host, i) {
     if (open) { open.classList.toggle('hidden', !s.tap); set('[data-feed-open-label]', s.openLabel); }
     host.querySelector('[data-feed-play]')?.classList.toggle('hidden', !s.band);
     const watch = host.querySelector('[data-feed-watch]');
-    if (watch) { watch.classList.toggle('hidden', !s.band); if (s.band) watch.href = _watchUrl(s.band); }
+    if (watch) { watch.classList.toggle('hidden', !s.band); if (s.band) watch.href = _slideWatch(s); }
     if (_hero.playing && _hero.playBand !== s.band) _closePlayer(host);
 }
 
@@ -2635,6 +2785,88 @@ function _onFeedScroll(e) {
         const host = _heroHost();
         if (host) applyHeroSlide(host, i);
     });
+}
+
+// ── Artist Spotlight (from the "Just seen" rail) ─────────────────────────────
+
+let _spotSeq = 0;   // guards late photo loads against a newer tap
+
+// Replace the hero in place and re-hydrate what the new markup needs.
+function _paintHero(html) {
+    const host = _heroHost();
+    if (!host) return null;
+    host.outerHTML = html;
+    const next = _heroHost();
+    if (window.lucide) lucide.createIcons();
+    if (next) hydrateArt(next);
+    return next;
+}
+
+function _markSpotTile(band) {
+    document.querySelectorAll('[data-feed-spot]').forEach(b => {
+        const on = !!band && _key(b.dataset.feedSpot) === _key(band);
+        b.classList.toggle('ring-2', on);
+        b.classList.toggle('ring-indigo-500', on);
+        b.setAttribute('aria-pressed', String(on));
+    });
+}
+
+function openSpotlight(band) {
+    const host = _heroHost();
+    if (!host || !band) return;
+    const seq   = ++_spotSeq;
+    const line  = _spotLines.get(_key(band)) || '';
+    const known = _cachedFanPhotos(band) || [];
+
+    _paintHero(heroSection(_heroBase, { band, photos: known, line }));
+    _markSpotTile(band);
+    // Bring the hero back into view if the tap came from further down the page.
+    const el = _heroHost();
+    if (el && el.getBoundingClientRect().top < 0) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    if (_cachedFanPhotos(band)) return;
+    loadFanPhotos(band).then(list => {
+        // Newer tap, left the Spotlight, or nothing new → leave the hero alone.
+        if (seq !== _spotSeq || _hero?.spotlight !== band || !list.length) return;
+        if (_hero.playing) return;   // don't repaint under a playing Spotify iframe
+        _paintHero(heroSection(_heroBase, { band, photos: list, line }));
+    });
+}
+
+function closeSpotlight() {
+    if (!_heroBase) return;
+    _spotSeq++;
+    _paintHero(heroSection(_heroBase));
+    _markSpotTile(null);
+    applyReactionState(document.getElementById('feed-cards-container') || document);
+}
+
+// ─── JUST SEEN ON GIGLIST (rail under the hero) ───────────────────────────────
+// The Community feed's hot list. Filled after first paint from the same
+// get_community_feed() call as "Across GigList". Tapping a tile opens that
+// artist in the hero (openSpotlight) rather than navigating anywhere.
+
+const _spotLines = new Map();   // lowercase band -> "Seen yesterday"
+
+function hotRailHtml(rows) {
+    if (!rows?.length) return '';
+    rows.forEach(r => _spotLines.set(_key(r.band), `Seen ${_recency(r.days_ago)}`));
+    return `
+        <section class="${CARD}" aria-labelledby="feed-hot">
+            <p class="${_ACROSS_LABEL}">Hot list</p>
+            ${_head('feed-hot', 'Just seen on GigList')}
+            <div class="${RAIL}">
+                ${rows.map(r => `
+                <button type="button" data-feed-spot="${_attr(r.band)}" aria-pressed="false"
+                        aria-label="${_attr(`Open ${r.band} in the spotlight`)}"
+                        class="relative shrink-0 snap-start w-32 h-44 rounded-3xl overflow-hidden text-left active:scale-[0.97] transition-transform ring-offset-2 ${FOCUS}">
+                    ${_art(r.band, 'absolute inset-0', { band: r.band })}
+                    <div class="absolute inset-0 bg-gradient-to-t from-slate-900/90 via-slate-900/20 to-transparent"></div>
+                    <span class="absolute top-2 left-2 bg-white/90 text-slate-700 text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-full">${escapeHtml(_recency(r.days_ago))}</span>
+                    <span class="absolute inset-x-0 bottom-0 p-3 text-sm font-black text-white leading-tight line-clamp-2">${escapeHtml(r.band)}</span>
+                </button>`).join('')}
+            </div>
+        </section>`;
 }
 
 // ─── ROWS ─────────────────────────────────────────────────────────────────────
@@ -2896,9 +3128,12 @@ function composeFeed(scored, tipCards, journalData) {
     _artJobs  = new Map();
     _cardsByKey.clear();
     _hero = null;
+    _heroBase = null;
+    _spotSeq++;
     scored.forEach(c => _cardsByKey.set(_cardKey(c), c));
 
     const hero = scored[0] || null;
+    _heroBase = hero;
     const heroHtml = hero ? heroSection(hero) : '';
 
     // An anniversary hero already swipes through every on-this-day show.
@@ -2927,6 +3162,7 @@ function composeFeed(scored, tipCards, journalData) {
 
     return [
         heroHtml,
+        '<div data-feed-hot></div>',             // "Just seen on GigList", filled after first paint
         ...pinned.map(s => s.html),
         ...tips,
         ...rest.map(s => s.html),
@@ -2969,7 +3205,7 @@ function acrossSection(d, journalData) {
     }).map(g => `${_key(g.Band)}|${gigYear(g)}`));
 
     const trending = d.trending || [];
-    const artists  = (trending.length ? trending : (d.hot || [])).slice(0, 5);
+    const artists  = trending.slice(0, 5);   // "Just seen" (d.hot) has its own rail under the hero
     const venues   = (d.venues_ahead || []).slice(0, 5);
     const otd      = (d.on_this_day || []).slice(0, 4);
     if (!artists.length && !venues.length && !otd.length) return '';
@@ -2979,9 +3215,7 @@ function acrossSection(d, journalData) {
             ${_art(r.band, 'relative shrink-0 w-12 h-12 rounded-2xl', { band: r.band })}
             <div class="min-w-0 flex-1">
                 <p class="text-sm font-black text-slate-900 truncate">${escapeHtml(r.band)}</p>
-                <p class="text-[11px] font-bold text-slate-500">${escapeHtml(trending.length
-                    ? `${_plural(r.people, 'person', 'people')} · ${_plural(r.shows, 'show', 'shows')}`
-                    : (r.days_ago <= 0 ? 'Seen today' : `Seen ${_plural(r.days_ago, 'day', 'days')} ago`))}</p>
+                <p class="text-[11px] font-bold text-slate-500">${escapeHtml(`${_plural(r.people, 'person', 'people')} · ${_plural(r.shows, 'show', 'shows')}`)}</p>
             </div>
             ${seen.has(_key(r.band)) ? _youBadge('You\u2019ve seen them') : ''}
         </li>`).join('');
@@ -3005,7 +3239,7 @@ function acrossSection(d, journalData) {
             <div>${_head('feed-across', 'Across GigList', 'What the GigList community has been seeing, and where you fit in.')}</div>
             ${artists.length ? `
             <div>
-                <p class="${_ACROSS_LABEL}">${trending.length ? 'Trending this month' : 'Recently seen'}</p>
+                <p class="${_ACROSS_LABEL}">Trending this month</p>
                 <ul class="space-y-3">${artistRows}</ul>
             </div>` : ''}
             ${venues.length ? `
@@ -3022,8 +3256,9 @@ function acrossSection(d, journalData) {
 }
 
 async function _fillAcross(container, journalData) {
-    const slot = container.querySelector('[data-feed-across]');
-    if (!slot) return;
+    const slot    = container.querySelector('[data-feed-across]');
+    const hotSlot = container.querySelector('[data-feed-hot]');
+    if (!slot && !hotSlot) return;
     let d;
     try {
         d = await _loadAcross();
@@ -3031,14 +3266,21 @@ async function _fillAcross(container, journalData) {
         console.warn('[Feed] across GigList failed', err);   // the personal feed is complete without it
         return;
     }
-    if (!slot.isConnected) return;                           // the feed re-rendered meanwhile
-    const html = acrossSection(d, journalData);
-    if (!html) return;
     const bands = [...(d.trending || []), ...(d.hot || [])].map(r => r.band);
     _mediaPending = Promise.all([_mediaPending, loadArtistMedia(bands)]);
-    slot.innerHTML = html;
+
+    // Hot rail: only useful when there's a hero to swap into.
+    if (hotSlot?.isConnected && _heroHost()) {
+        hotSlot.innerHTML = hotRailHtml(d.hot);
+        hydrateArt(hotSlot);
+    }
+
+    const html = acrossSection(d, journalData);
+    if (slot?.isConnected && html) {                        // else the feed re-rendered meanwhile
+        slot.innerHTML = html;
+        hydrateArt(slot);
+    }
     if (window.lucide) lucide.createIcons();
-    hydrateArt(slot);
 }
 
 // ─── CLICK HANDLING ───────────────────────────────────────────────────────────
@@ -3046,6 +3288,7 @@ async function _fillAcross(container, journalData) {
 const FEED_TAP_SELECTOR = [
     '[data-feed-toggle]', '[data-feed-gig-key]', '[data-feed-buddy-col-id]',
     '[data-feed-buddy-show-key]', '[data-feed-venue]', '[data-feed-open]', '[data-feed-play]',
+    '[data-feed-spot]', '[data-feed-spot-back]',
 ].join(', ');
 
 function _handleFeedClick(e) {
@@ -3054,6 +3297,8 @@ function _handleFeedClick(e) {
     const ds = el.dataset;
     if (ds.feedToggle !== undefined)            window._feedToggleDetail(ds.feedToggle, ds.feedType);
     else if (ds.feedPlay !== undefined)         _toggleHeroPlayer();
+    else if (ds.feedSpot !== undefined)         openSpotlight(ds.feedSpot);
+    else if (ds.feedSpotBack !== undefined)     closeSpotlight();
     else if (ds.feedOpen !== undefined)         _openHeroSlide();
     else if (ds.feedGigKey !== undefined)       { if (ds.feedGigKey) window.viewGigDetails(ds.feedGigKey); }
     else if (ds.feedBuddyShowKey !== undefined) window._feedOpenBuddyShow(ds.feedBuddyShowKey, ds.feedBuddyShowIds);
