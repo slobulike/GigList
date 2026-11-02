@@ -2803,7 +2803,7 @@ function _paintHero(html) {
 }
 
 function _markSpotTile(band) {
-    document.querySelectorAll('[data-feed-spot]').forEach(b => {
+    document.querySelectorAll('[data-feed-hot] [data-feed-spot]').forEach(b => {
         const on = !!band && _key(b.dataset.feedSpot) === _key(band);
         b.classList.toggle('ring-2', on);
         b.classList.toggle('ring-indigo-500', on);
@@ -2843,14 +2843,16 @@ function closeSpotlight() {
 
 // ─── JUST SEEN ON GIGLIST (rail under the hero) ───────────────────────────────
 // The Community feed's hot list. Filled after first paint from the same
-// get_community_feed() call as "Across GigList". Tapping a tile opens that
+// get_community_feed() call as "Across GigList". (Trending, On this day and
+// Most-shared rows open the Spotlight the same way.) Tapping a tile opens that
 // artist in the hero (openSpotlight) rather than navigating anywhere.
 
 const _spotLines = new Map();   // lowercase band -> "Seen yesterday"
+const _setSpotLine = (band, line) => { if (!_spotLines.has(_key(band))) _spotLines.set(_key(band), line); };
 
 function hotRailHtml(rows) {
     if (!rows?.length) return '';
-    rows.forEach(r => _spotLines.set(_key(r.band), `Seen ${_recency(r.days_ago)}`));
+    rows.forEach(r => _spotLines.set(_key(r.band), `Seen ${_recency(r.days_ago)}`));   // hot rail wins
     return `
         <section class="${CARD}" aria-labelledby="feed-hot">
             <p class="${_ACROSS_LABEL}">Hot list</p>
@@ -3208,17 +3210,31 @@ function acrossSection(d, journalData) {
     const artists  = trending.slice(0, 5);   // "Just seen" (d.hot) has its own rail under the hero
     const venues   = (d.venues_ahead || []).slice(0, 5);
     const otd      = (d.on_this_day || []).slice(0, 4);
-    if (!artists.length && !venues.length && !otd.length) return '';
+    const shared   = (d.shared || []).slice(0, 8);
+    if (!artists.length && !venues.length && !otd.length && !shared.length) return '';
+    const thisYear = today.getFullYear();
+    const mineShows = new Set(mine.map(g => {
+        const dt = parseDate(g.Date);
+        return dt ? `${_key(g.Band)}|${dt.getTime()}` : null;
+    }).filter(Boolean));
 
-    const artistRows = artists.map(r => `
-        <li class="flex items-center gap-3">
-            ${_art(r.band, 'relative shrink-0 w-12 h-12 rounded-2xl', { band: r.band })}
-            <div class="min-w-0 flex-1">
-                <p class="text-sm font-black text-slate-900 truncate">${escapeHtml(r.band)}</p>
-                <p class="text-[11px] font-bold text-slate-500">${escapeHtml(`${_plural(r.people, 'person', 'people')} · ${_plural(r.shows, 'show', 'shows')}`)}</p>
-            </div>
-            ${seen.has(_key(r.band)) ? _youBadge('You\u2019ve seen them') : ''}
-        </li>`).join('');
+    // Rows and tiles that name an artist open it in the hero Spotlight, as the Community feed did.
+    const spotBtn = `type="button" data-feed-spot`;
+    const artistRows = artists.map(r => {
+        _setSpotLine(r.band, 'Trending this month');
+        return `
+        <li>
+            <button ${spotBtn}="${_attr(r.band)}" aria-label="${_attr(`Open ${r.band} in the spotlight`)}"
+                    class="w-full flex items-center gap-3 text-left active:scale-[0.99] transition-transform ${FOCUS}">
+                ${_art(r.band, 'relative shrink-0 w-12 h-12 rounded-2xl', { band: r.band })}
+                <span class="min-w-0 flex-1">
+                    <span class="block text-sm font-black text-slate-900 truncate">${escapeHtml(r.band)}</span>
+                    <span class="block text-[11px] font-bold text-slate-500">${escapeHtml(`${_plural(r.people, 'person', 'people')} · ${_plural(r.shows, 'show', 'shows')}`)}</span>
+                </span>
+                ${seen.has(_key(r.band)) ? _youBadge('You\u2019ve seen them') : ''}
+            </button>
+        </li>`;
+    }).join('');
 
     const venueTiles = venues.map(r => `
         <div class="shrink-0 snap-start w-44 rounded-3xl bg-gradient-to-br ${_grad(r.venue)} p-4 text-white">
@@ -3227,12 +3243,42 @@ function acrossSection(d, journalData) {
             ${goingTo.has(_key(r.venue)) ? '<p class="mt-2 inline-block bg-white/90 text-slate-800 text-[9px] font-black uppercase tracking-wider px-2 py-1 rounded-full">You\u2019re going too</p>' : ''}
         </div>`).join('');
 
-    const otdRows = otd.map(r => `
-        <li class="flex items-center gap-3">
-            <span class="shrink-0 w-12 text-lg font-black italic tracking-tighter text-slate-300">${escapeHtml(String(r.year))}</span>
-            <p class="min-w-0 flex-1 text-sm font-bold text-slate-800 truncate">${escapeHtml(r.band)}</p>
-            ${onThisDayMine.has(`${_key(r.band)}|${r.year}`) ? _youBadge('You were there') : ''}
-        </li>`).join('');
+    const otdRows = otd.map(r => {
+        _setSpotLine(r.band, `${_plural(thisYear - r.year, 'year', 'years')} ago today`);
+        return `
+        <li>
+            <button ${spotBtn}="${_attr(r.band)}" aria-label="${_attr(`Open ${r.band} in the spotlight`)}"
+                    class="w-full flex items-center gap-3 text-left active:scale-[0.99] transition-transform ${FOCUS}">
+                <span class="shrink-0 w-12 text-lg font-black italic tracking-tighter text-slate-300">${escapeHtml(String(r.year))}</span>
+                <span class="min-w-0 flex-1 text-sm font-bold text-slate-800 truncate">${escapeHtml(r.band)}</span>
+                ${onThisDayMine.has(`${_key(r.band)}|${r.year}`) ? _youBadge('You were there') : ''}
+            </button>
+        </li>`;
+    }).join('');
+
+    // Most-shared shows: gigs several GigList users were at. Counts only, no names.
+    const sharedTiles = shared.map(r => {
+        const dt    = parseDate(r.date);
+        const label = dt ? dt.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : (r.date || '');
+        const there = !!dt && mineShows.has(`${_key(r.band)}|${dt.getTime()}`);
+        _setSpotLine(r.band, `${_plural(r.attendees, 'GigList fan', 'GigList fans')} at one show`);
+        return `
+        <button ${spotBtn}="${_attr(r.band)}"
+                aria-label="${_attr(`${r.band}, ${_plural(r.attendees, 'GigList user', 'GigList users')} there. Open in the spotlight`)}"
+                class="relative shrink-0 snap-start w-40 h-52 rounded-3xl overflow-hidden text-left active:scale-[0.97] transition-transform ${FOCUS}">
+            ${_art(r.band, 'absolute inset-0', { band: r.band })}
+            <div class="absolute inset-0 bg-gradient-to-t from-slate-900/90 via-slate-900/20 to-slate-900/30"></div>
+            <span class="absolute top-3 left-3 inline-flex items-center gap-1 bg-white/90 text-indigo-600 text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-full">
+                <i data-lucide="users" class="w-3 h-3" aria-hidden="true"></i>${escapeHtml(String(r.attendees))} there
+            </span>
+            <span class="absolute inset-x-0 bottom-0 p-3">
+                <span class="block text-sm font-black text-white leading-tight line-clamp-2">${escapeHtml(r.band)}</span>
+                <span class="block mt-1 text-[10px] font-bold text-white/80 line-clamp-2">${escapeHtml([label, r.venue].filter(Boolean).join(' · '))}</span>
+                ${r.festival ? '<span class="inline-block mt-1.5 bg-amber-400/90 text-slate-900 text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full">Festival</span>' : ''}
+                ${there ? '<span class="inline-block mt-1.5 ml-1 bg-white/90 text-slate-800 text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full">You were there</span>' : ''}
+            </span>
+        </button>`;
+    }).join('');
 
     return `
         <section class="${CARD} space-y-5" aria-labelledby="feed-across">
@@ -3246,6 +3292,11 @@ function acrossSection(d, journalData) {
             <div>
                 <p class="${_ACROSS_LABEL}">Busy venues, next 30 days</p>
                 <div class="${RAIL}">${venueTiles}</div>
+            </div>` : ''}
+            ${shared.length ? `
+            <div>
+                <p class="${_ACROSS_LABEL}">Most-shared shows</p>
+                <div class="${RAIL}">${sharedTiles}</div>
             </div>` : ''}
             ${otd.length ? `
             <div>
@@ -3266,7 +3317,7 @@ async function _fillAcross(container, journalData) {
         console.warn('[Feed] across GigList failed', err);   // the personal feed is complete without it
         return;
     }
-    const bands = [...(d.trending || []), ...(d.hot || [])].map(r => r.band);
+    const bands = [...(d.trending || []), ...(d.hot || []), ...(d.shared || []).slice(0, 8)].map(r => r.band);
     _mediaPending = Promise.all([_mediaPending, loadArtistMedia(bands)]);
 
     // Hot rail: only useful when there's a hero to swap into.

@@ -1,8 +1,9 @@
 /**
  * GigList Core Engine
- * v10.4.2 — 2026-11-02
+ * v10.4.3 — 2026-11-02
  * ------------------------------------------------------------------
- * ✅ Updated notifications to try to address memory usage at supabase
+ * ✅ Added "Most shared shows" rail to feed.
+ * ✅ Made today's pick clickable, and other cards load into hero tile when clicked
  */
 
 import * as Data from './modules/data.js';
@@ -46,7 +47,7 @@ import { syncPushSubscription, initPushUI } from './modules/push.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "10.4.2";
+const APP_VERSION = "10.4.3";
 
 // Columns of profiles that the app is allowed to read (see the column grants
 // in Supabase). home_lat / home_lng / home_label are deliberately excluded:
