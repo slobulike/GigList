@@ -45,7 +45,8 @@ import { escapeHtml, safeUrl } from './utils.js';
 // ─── STATE ────────────────────────────────────────────────────────────────────
 
 let _uid      = null;
-let _channel  = null;
+let _visHandler = null;   // visibilitychange listener (replaces the Realtime channel)
+let _pollTimer  = null;   // optional gentle poll while the app is visible
 let _handlers = {};
 let _unread   = 0;
 let _refreshTimer = null;
@@ -102,13 +103,26 @@ async function refreshUnread() {
 
 // ─── INIT / TEARDOWN ──────────────────────────────────────────────────────────
 
+// No Realtime subscription on purpose: a standing postgres_changes channel keeps
+// Supabase Realtime polling the WAL for as long as the app is open, which is a
+// real cost on the free-tier instance. The unread dot only needs a cheap indexed
+// count when the app opens, regains focus, or (optionally) every couple of minutes.
+const POLL_INTERVAL_MS = 120000;   // set to 0 to rely on open/focus only
+
+async function refreshAndNotify() {
+    const before = _unread;
+    await refreshUnread();
+    // Same signal the old INSERT event sent, so an open inbox re-renders
+    if (_unread > before) window.dispatchEvent(new CustomEvent(CHANGED_EVENT));
+}
+
 export async function initNotifications(handlers = {}) {
     _handlers = handlers;
     const { data: { session } } = await supabase.auth.getSession();
     const uid = session?.user?.id;
     if (!uid) return;
 
-    if (_uid === uid && _channel) {          // already running for this user
+    if (_uid === uid && _visHandler) {       // already running for this user
         await refreshUnread();
         return;
     }
@@ -117,25 +131,17 @@ export async function initNotifications(handlers = {}) {
 
     await refreshUnread();
 
-    _channel = supabase
-        .channel(`notifications:${uid}`)
-        .on('postgres_changes',
-            { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${uid}` },
-            (payload) => {
-                // A mark-all-read fires one UPDATE event per row; collapse the
-                // burst into a single count query.
-                clearTimeout(_refreshTimer);
-                _refreshTimer = setTimeout(refreshUnread, 300);
-                // Only new rows re-render an open inbox; our own mark-as-read
-                // UPDATEs would otherwise trigger a pointless second render.
-                if (payload.eventType === 'INSERT') window.dispatchEvent(new CustomEvent(CHANGED_EVENT));
-            })
-        .subscribe();
+    _visHandler = () => {
+        if (document.visibilityState === 'visible') refreshAndNotify();
+    };
+    document.addEventListener('visibilitychange', _visHandler);
+    if (POLL_INTERVAL_MS > 0) _pollTimer = setInterval(_visHandler, POLL_INTERVAL_MS);
 }
 
 export function teardownNotifications() {
     clearTimeout(_refreshTimer);
-    if (_channel) { supabase.removeChannel(_channel); _channel = null; }
+    if (_visHandler) { document.removeEventListener('visibilitychange', _visHandler); _visHandler = null; }
+    if (_pollTimer)  { clearInterval(_pollTimer); _pollTimer = null; }
     _uid = null;
     _unread = 0;
     paintDots();
