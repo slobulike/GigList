@@ -1,9 +1,8 @@
 /**
  * GigList Core Engine
- * v10.4.3 — 2026-11-02
+ * v10.4.4 — 2026-11-03
  * ------------------------------------------------------------------
- * ✅ Added "Most shared shows" rail to feed.
- * ✅ Made today's pick clickable, and other cards load into hero tile when clicked
+ * ✅ Updated loadPerformances in data.js to help reduce DB load
  */
 
 import * as Data from './modules/data.js';
@@ -47,7 +46,7 @@ import { syncPushSubscription, initPushUI } from './modules/push.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "10.4.3";
+const APP_VERSION = "10.4.4";
 
 // Columns of profiles that the app is allowed to read (see the column grants
 // in Supabase). home_lat / home_lng / home_label are deliberately excluded:
@@ -575,7 +574,7 @@ if (currentUser?.Type === 'Personal' && params.has('community')) {
             .filter(Boolean);
 
         const perfPromise = journalKeys.length
-            ? Data.loadPerformances(journalKeys, window.allVenues || {})
+            ? Data.loadPerformances(journalKeys, window.allVenues || {}, { cacheKey: Data.perfCacheKey(currentUser) })
                 .then(rows => { window.performanceData = rows; })
                 .catch(err => console.warn('app.js: deferred performances load failed', err))
             : Promise.resolve();
@@ -724,7 +723,7 @@ async function revalidateFromNetwork({ uid, profilePromise, dataPromise, cachedS
             const keysChanged  = newKeys.length !== cachedKeys.length ||
                                  newKeys.some(k => !cachedKeySet.has(k));
             if (keysChanged && newKeys.length) {
-                Data.loadPerformances(newKeys, window.allVenues || {})
+                Data.loadPerformances(newKeys, window.allVenues || {}, { cacheKey: Data.perfCacheKey(currentUser) })
                     .then(rows => { window.performanceData = rows; refreshUI(); })
                     .catch(err => console.warn('app.js: performance reload after revalidate failed', err));
             }
@@ -1349,7 +1348,7 @@ window.syncSetlistFm = async function() {
                         .map(g => g['Journal Key'])
                         .filter(Boolean);
                     if (newKeys.length) {
-                        Data.loadPerformances(newKeys, window.allVenues || {})
+                        Data.loadPerformances(newKeys, window.allVenues || {}, { cacheKey: Data.perfCacheKey(currentUser), refresh: true })
                             .then(rows => { window.performanceData = rows; })
                             .catch(err => console.warn('app.js: post-sync performance reload failed', err));
                     }

@@ -633,6 +633,9 @@ export const cacheStartProfile = (userId, profile, home) =>
 export const refreshAppCache = async (user) => {
     if (!isCacheable(user, true)) return;
     try {
+        // Edits can change performances too (setlist sync, editor saves): drop the cached copy
+        const pk = perfCacheKey(user);
+        if (pk) await cacheDelete(pk);
         const raw = await fetchRawAppData(user, { skipPerformances: true });
         await cachePut(dataCacheKey(user.id), { v: CACHE_VERSION, savedAt: Date.now(), raw });
     } catch (e) {
@@ -650,23 +653,66 @@ export const refreshAppCache = async (user) => {
  * @param {object}   venueLookup  - window.allVenues — used to enrich City/Country on each row
  * @returns {Promise<object[]>}   - Normalised, enriched performance rows
  */
-export const loadPerformances = async (journalKeys, venueLookup = {}) => {
-    if (!journalKeys.length) return [];
+// Performances are fetched on every app open otherwise (4+ parallel queries for a
+// 300-show journal) and they rarely change, so personal-mode loads keep the raw rows
+// in IndexedDB, keyed per user. A cached copy is trusted for PERF_CACHE_TTL_MS; within
+// that window only journal_keys we haven't seen are fetched. Anything that edits
+// journals/performances clears it (see refreshAppCache), and `refresh: true` bypasses it.
+const PERF_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
+export const perfCacheKey = (user) =>
+    user?.Type === 'Personal' && user.id ? `perf:${user.id}` : null;
 
-    const CHUNK_SIZE = 100;
-    const chunks = [];
-    for (let i = 0; i < journalKeys.length; i += CHUNK_SIZE) {
-        chunks.push(journalKeys.slice(i, i + CHUNK_SIZE));
+export const loadPerformances = async (journalKeys, venueLookup = {}, { cacheKey = null, refresh = false } = {}) => {
+    if (!journalKeys.length) return [];
+    const keys = [...new Set(journalKeys)];
+
+    // Cached raw rows, grouped by journal_key (an empty array means "checked, none exist")
+    let byKey = {};
+    let savedAt = 0;
+    let usable = false;
+    if (cacheKey && !refresh) {
+        try {
+            const c = await cacheGet(cacheKey);
+            if (c?.v === CACHE_VERSION && c.byKey && Date.now() - (c.savedAt || 0) < PERF_CACHE_TTL_MS) {
+                byKey = c.byKey;
+                savedAt = c.savedAt;
+                usable = true;
+            }
+        } catch { /* fall through to the network */ }
     }
 
-    const results = await Promise.all(
-        chunks.map(chunk => supabase.from('performances').select('*').in('journal_key', chunk))
-    );
+    const toFetch = usable ? keys.filter(k => !(k in byKey)) : keys;
 
-    const errors = results.filter(r => r.error);
-    if (errors.length) throw new Error(`Failed to load performances: ${errors[0].error.message}`);
+    if (toFetch.length) {
+        const CHUNK_SIZE = 100;
+        const chunks = [];
+        for (let i = 0; i < toFetch.length; i += CHUNK_SIZE) {
+            chunks.push(toFetch.slice(i, i + CHUNK_SIZE));
+        }
 
-    let rows = results.flatMap(r => r.data || []);
+        const results = await Promise.all(
+            chunks.map(chunk => supabase.from('performances').select('*').in('journal_key', chunk))
+        );
+
+        const errors = results.filter(r => r.error);
+        if (errors.length) throw new Error(`Failed to load performances: ${errors[0].error.message}`);
+
+        toFetch.forEach(k => { byKey[k] = []; });
+        results.flatMap(r => r.data || []).forEach(p => {
+            (byKey[p.journal_key] = byKey[p.journal_key] || []).push(p);
+        });
+    }
+
+    // Keep only the keys in use, so the cache can't grow beyond the journal itself
+    const wanted = {};
+    keys.forEach(k => { if (byKey[k]) wanted[k] = byKey[k]; });
+    if (cacheKey && (toFetch.length || !usable)) {
+        // A top-up keeps the original savedAt, so the TTL measures the age of the last full fetch
+        Promise.resolve(cachePut(cacheKey, { v: CACHE_VERSION, savedAt: usable ? savedAt : Date.now(), byKey: wanted }))
+            .catch(() => {});
+    }
+
+    let rows = keys.flatMap(k => wanted[k] || []);
 
     // Normalise snake_case → app-expected casing (mirrors loadAppData)
     rows = rows.map(p => ({
