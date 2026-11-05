@@ -437,6 +437,8 @@ const renderEditorModal = (entry) => {
 
     toggleFestivalFields(isFest);
     if (isFest) refreshLineupPool();
+    _setLabelText(_bandLabel(), 'Artist or Festival Name');
+    refreshDateDependentLabels();
 
     modal.classList.remove('hidden');
     modal.setAttribute('aria-hidden', 'false');
@@ -475,9 +477,68 @@ window.closeEditorModal = closeEditorModal;
 
 // ─── FESTIVAL FIELD TOGGLE ────────────────────────────────────────────────────
 
+// ─── LABEL / FIELD HELPERS ────────────────────────────────────────────────────
+
+// Finds an element in the modal that has a direct text node matching `re`.
+// Used as a fallback when a label has no `for` attribute.
+const _modalLabelByText = (re) => {
+    const modal = document.getElementById('editor-modal');
+    if (!modal) return null;
+    return [...modal.querySelectorAll('label, span, p, h3, h4, div')].find(el =>
+        [...el.childNodes].some(n => n.nodeType === 3 && re.test(n.nodeValue.trim()))
+    ) || null;
+};
+
+// Replaces the visible text of a label while keeping child icons and any
+// trailing required-marker ("*").
+const _setLabelText = (labelEl, text) => {
+    if (!labelEl) return;
+    const node = [...labelEl.childNodes].find(n => n.nodeType === 3 && n.nodeValue.trim());
+    if (!node) { labelEl.textContent = text; return; }
+    const trimmed = node.nodeValue.trim();
+    const suffix  = (trimmed.match(/\s*[*•]$/) || [''])[0];
+    node.nodeValue = node.nodeValue.replace(trimmed, text + suffix);
+};
+
+const _bandLabel     = () => document.querySelector('label[for="editor-band"]')     || _modalLabelByText(/^artist\b/i);
+const _wentWithLabel = () => document.querySelector('label[for="companion-input"]') || _modalLabelByText(/^(went|going) with\b/i);
+const _supportLabel  = () => document.querySelector('label[for="editor-support"]')  || _modalLabelByText(/^notable support\b/i);
+
+// Wrapper around the whole Notable Support field (label + input + pills).
+// Prefer an explicit <div id="editor-support-field"> in the markup; otherwise
+// climb from the label to the first ancestor holding the input and pills.
+const _supportFieldWrap = () => {
+    const explicit = document.getElementById('editor-support-field');
+    if (explicit) return explicit;
+    const input = document.getElementById('editor-support');
+    if (!input) return null;
+    const pills = document.getElementById('editor-support-pills');
+    const label = _supportLabel();
+    let node = label?.parentElement || input.parentElement;
+    while (node && node.id !== 'editor-modal' &&
+           !(node.contains(input) && (!pills || node.contains(pills)))) {
+        node = node.parentElement;
+    }
+    return node && node.id !== 'editor-modal' ? node : input.parentElement;
+};
+
+const _todayInputDate = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+// "Went With" → "Going With" when the show date is in the future.
+const refreshDateDependentLabels = () => {
+    const v = document.getElementById('editor-date')?.value || '';
+    const isFuture = !!v && v > _todayInputDate(); // both YYYY-MM-DD, so string compare is safe
+    _setLabelText(_wentWithLabel(), isFuture ? 'Going With' : 'Went With');
+};
+
 const toggleFestivalFields = (show) => {
     const section = document.getElementById('editor-festival-section');
     if (section) section.classList.toggle('hidden', !show);
+    // A festival has a lineup instead of "notable support"
+    _supportFieldWrap()?.classList.toggle('hidden', !!show);
 };
 
 window.editorToggleFestival = () => {
@@ -699,7 +760,7 @@ window.saveGig = async () => {
 
     // 1. Validation
     if (!dateStr || !band || !venue) {
-        _showError('Date, Artist and Venue are required.');
+        _showError('Date, Artist or Festival Name, and Venue are required.');
         return;
     }
 
@@ -707,7 +768,10 @@ window.saveGig = async () => {
     // decision (e.g. "A / B" typed into a single box) the picker shows its
     // notice and we stop here rather than saving a bad value.
     const festOn = document.getElementById('editor-festival')?.checked;
-    if (!(supportPicker?.commitPending() ?? true) || (festOn && !(lineupPicker?.commitPending() ?? true))) {
+    // Notable Support is hidden for festivals, so don't validate it there.
+    const supportOk = festOn ? true : (supportPicker?.commitPending() ?? true);
+    const lineupOk  = festOn ? (lineupPicker?.commitPending() ?? true) : true;
+    if (!supportOk || !lineupOk) {
         _showError('Check the highlighted artist name before saving.');
         return;
     }
@@ -731,8 +795,9 @@ window.showSpinner?.('Saving show…');
         ? _getLineupSelections()
         : { fullLineup: [], newNames: [] };
 
-    const supportActs = supportPicker ? supportPicker.getValues() : [];
-    const newSupportActs = supportPicker ? supportPicker.getNewNames() : [];
+    // Festivals don't carry Notable Support — the lineup covers it.
+    const supportActs = (!festOn && supportPicker) ? supportPicker.getValues() : [];
+    const newSupportActs = (!festOn && supportPicker) ? supportPicker.getNewNames() : [];
 
     // 2. Auth Check
     const { data: { session } } = await supabase.auth.getSession();
@@ -756,7 +821,7 @@ window.showSpinner?.('Saving show…');
         venue: venue,
         festival: isFest === 'Y',
         festival_lineups: joinActList(fullLineup),
-        notable_support: _sameActs(supportActs, _loadedSupportActs) ? _loadedSupportRaw : joinActList(supportActs),
+        notable_support: festOn ? '' : (_sameActs(supportActs, _loadedSupportActs) ? _loadedSupportRaw : joinActList(supportActs)),
         went_with: _companions.map(c => c.name).join(' / '),
         comments: isBandWrite ? 'Historical Artist Entry' : _get('editor-comments').trim(),
         price: _get('editor-price').trim(),
@@ -873,7 +938,18 @@ window.showSpinner?.('Saving show…');
                     // setlist.fm lookup — ticked ones already have performances
                     // rows for this journal_key, so re-searching them would
                     // just waste API calls (and rate-limit budget) for nothing.
-                    if (newNames.length > 0) {
+                    //
+                    // A festival that hasn't started yet can't be on setlist.fm,
+                    // so skip the lookups entirely (they cost several seconds per
+                    // act in polite delays and are guaranteed to find nothing).
+                    // Same rule as the single-artist path below. Re-saving the
+                    // festival once it has happened runs the lookup then. A venue
+                    // not in our table still goes to admin review for its map pin.
+                    const festIsFuture = new Date(y, m - 1, d) > new Date();
+                    if (festIsFuture) {
+                        console.log('Future festival — skipping setlist.fm lookups.');
+                        if (!venueIsKnown) await _submitPendingVenue({ session, journalKey, band, dateStr, venue });
+                    } else if (newNames.length > 0) {
                         if (saveBtn) saveBtn.textContent = 'Searching Lineup...';
                         const matches = await lookupFestivalSetlists(newNames, dateStr);
                         if (matches.length > 0) {
@@ -1442,6 +1518,8 @@ async function _loadCompanionsForModal(entry) {
  * Searches for companion suggestions.
  * Returns { buddies: [...], others: [...] } — profiles array with match metadata.
  */
+let _companionSearchSeq = 0; // guards against out-of-order responses
+
 async function _searchCompanions(query) {
     const q = query.trim().toLowerCase();
     if (q.length < 2) return { buddies: [], others: [] };
@@ -1451,26 +1529,52 @@ async function _searchCompanions(query) {
 
     const userId = session.user.id;
 
-    // Get accepted buddy ids
-    const { data: buddyRows } = await supabase
+    // Accepted buddy ids
+    const { data: buddyRows, error: buddyErr } = await supabase
         .from('buddies')
         .select('requester_id, addressee_id')
         .eq('status', 'accepted')
         .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`);
+    if (buddyErr) console.error('Companion search: buddies query failed:', buddyErr.message);
 
     const buddyIds = new Set(
         (buddyRows || []).map(r => r.requester_id === userId ? r.addressee_id : r.requester_id)
     );
 
-    // Search profiles by display_name
-    const { data: profiles } = await supabase
+    const cols = 'id, display_name, username, avatar_url';
+    const matches = (p) =>
+        (p.display_name || '').toLowerCase().includes(q) ||
+        (p.username || '').toLowerCase().includes(q);
+
+    // 1) Buddies directly by id — doesn't depend on the general profile search,
+    //    so connected buddies still show up if that query is restricted.
+    let buddyProfiles = [];
+    if (buddyIds.size) {
+        const { data, error } = await supabase
+            .from('profiles').select(cols).in('id', [...buddyIds]);
+        if (error) console.error('Companion search: buddy profiles failed:', error.message);
+        buddyProfiles = (data || []).filter(matches);
+    }
+
+    // 2) Everyone else — match display_name OR username
+    const safe = q.replace(/[%,()*]/g, '');
+    const { data: found, error: profErr } = await supabase
         .from('profiles')
-        .select('id, display_name, username, avatar_url')
-        .ilike('display_name', `%${q}%`)
+        .select(cols)
+        .or(`display_name.ilike.%${safe}%,username.ilike.%${safe}%`)
         .neq('id', userId)
         .limit(10);
+    if (profErr) console.error('Companion search: profiles query failed:', profErr.message);
 
-    const results = (profiles || []).filter(p => p.display_name);
+    // Merge, de-dupe by id, and fall back to username when display_name is empty
+    const byId = new Map();
+    [...buddyProfiles, ...(found || [])].forEach(p => {
+        if (p.id === userId || byId.has(p.id)) return;
+        const name = p.display_name || p.username;
+        if (name) byId.set(p.id, { ...p, display_name: name });
+    });
+
+    const results = [...byId.values()];
     const buddies = results.filter(p => buddyIds.has(p.id));
     const others  = results.filter(p => !buddyIds.has(p.id));
 
@@ -1665,7 +1769,9 @@ function initCompanionSelector() {
 
         clearTimeout(_searchTimer);
         _searchTimer = setTimeout(async () => {
+            const seq = ++_companionSearchSeq;
             const { buddies, others } = await _searchCompanions(val);
+            if (seq !== _companionSearchSeq) return; // a newer search superseded this one
             _renderCompanionDropdown(val, buddies, others, val);
         }, 250);
     });
@@ -1715,6 +1821,15 @@ export const initEditor = () => {
         getOptions: getArtistOptions,
     });
     initCompanionSelector();
+
+    // Mobile: show a "Done" key on the companion input (the act pickers set
+    // their own in act-picker.js and commit typed text on blur).
+    document.getElementById('companion-input')?.setAttribute('enterkeyhint', 'done');
+
+    // "Went With" ↔ "Going With" follows the date
+    const _dateEl = document.getElementById('editor-date');
+    _dateEl?.addEventListener('input',  refreshDateDependentLabels);
+    _dateEl?.addEventListener('change', refreshDateDependentLabels);
 
     // The lineup pool is keyed on date+venue — if either changes while the
     // festival section is open, the journal_key (and therefore the pool)

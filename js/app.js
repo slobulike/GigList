@@ -1,8 +1,9 @@
 /**
  * GigList Core Engine
- * v10.4.4 — 2026-11-03
+ * v10.4.5 — 2026-11-05
  * ------------------------------------------------------------------
- * ✅ Updated loadPerformances in data.js to help reduce DB load
+ * ✅ UI fixes for editor modal to correctly resolve buddies, artist picker on mobile now works, future and past text is dynamic, notable support not shown for festivals
+ * ✅ Gig modal enhanced to show artist avatars in festival lineups, artist collage shown in hero image for festivals
  */
 
 import * as Data from './modules/data.js';
@@ -46,7 +47,7 @@ import { syncPushSubscription, initPushUI } from './modules/push.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "10.4.4";
+const APP_VERSION = "10.4.5";
 
 // Columns of profiles that the app is allowed to read (see the column grants
 // in Supabase). home_lat / home_lng / home_label are deliberately excluded:

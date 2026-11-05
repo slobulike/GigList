@@ -1,7 +1,7 @@
 /**
  * GigList - Data Module
  */
-import { parseDate, isFestivalRow, getOwnFestivalLineup, normalizeArtist, scopeFestivalPerformances } from './utils.js';
+import { parseDate, isFestivalRow, getOwnFestivalLineup, normalizeArtist, scopeFestivalPerformances, parseActList } from './utils.js';
 import { supabase } from './supabase.js';
 import { loadArtistImages, artistImageCandidates } from './artist-images.js';
 import { cacheGet, cachePut, cacheDelete, CACHE_VERSION } from './app-cache.js';
@@ -156,6 +156,47 @@ let _artistLookup = {};
  * re-render needed; anything drawn after it resolves uses the full set.
  * Non-fatal: on failure rows simply keep their first-paint ArtistImages.
  */
+// Lookup keyed by normalised name, so a lineup act typed "weezer" still finds "Weezer".
+// Cached per lookup object (a new one is built on every load).
+const _normLookups = new WeakMap();
+const _lookupByNorm = (lookup) => {
+    let m = _normLookups.get(lookup);
+    if (!m) {
+        m = new Map(Object.entries(lookup).map(([n, a]) => [normalizeArtist(n), a]));
+        _normLookups.set(lookup, m);
+    }
+    return m;
+};
+
+/**
+ * One image per act on a festival's own lineup: [{ name, url }], in lineup
+ * order. Acts with no artist row or no image are left out. First paint uses
+ * each artist's current image; `stable: true` (after hydrateArtistImages has
+ * loaded the full image sets) uses the same per-seed pick as ArtistImages, so
+ * a festival always shows the same photos.
+ */
+const buildLineupImages = (row, lookup, { stable = false } = {}) => {
+    const isFest = row.festival || String(row['Festival?'] || '').toUpperCase() === 'Y';
+    const text = row.festival_lineups || row['Festival Lineups'] || '';
+    if (!isFest || !text || !lookup) return [];
+    const byNorm = _lookupByNorm(lookup);
+    const seen = new Set();
+    const out = [];
+    for (const name of parseActList(text, { splitCommas: false })) {
+        const key = normalizeArtist(name);
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        const a = lookup[name] || byNorm.get(key);
+        if (!a) continue;
+        const seed = `${row.journal_key || row['Journal Key'] || ''}|${key}`;
+        const url = stable
+            ? (artistImageCandidates(a, { strategy: 'stable', seed })[0] || a.spotify_image_url)
+            : a.spotify_image_url;
+        if (url) out.push({ name, url });
+    }
+    return out;
+};
+
 export const hydrateArtistImages = async (rows) => {
     const lookup = _artistLookup;
     const ids = Object.values(lookup).map(a => a.id).filter(Boolean);
@@ -174,6 +215,7 @@ export const hydrateArtistImages = async (rows) => {
                 seed: row.journal_key || row['Journal Key'],
             });
         }
+        if (isFestivalRow(row)) row.LineupImages = buildLineupImages(row, lookup, { stable: true });
     });
 };
 
@@ -240,7 +282,12 @@ const fetchRawAppData = async (user, { skipPerformances = false } = {}) => {
     };
 
     // Artist lookup (spotify IDs for deep links + current artist image)
-    const journalBands = [...new Set(journalData.map(r => r.band).filter(Boolean))];
+    // Headline names plus every act on a festival's own lineup, so lineup photos
+    // can be shown for festivals (the festival's own name has no artist image).
+    const lineupActNames = journalData
+        .filter(r => r.festival && r.festival_lineups)
+        .flatMap(r => parseActList(r.festival_lineups, { splitCommas: false }));
+    const journalBands = [...new Set([...journalData.map(r => r.band), ...lineupActNames].filter(Boolean))];
 
     async function fetchArtistLookup() {
         const lookup = {};
@@ -406,6 +453,8 @@ const buildAppData = (user, raw) => {
         ArtistImages:       artistLookup[row.band]
             ? artistImageCandidates(artistLookup[row.band], { strategy: 'stable', seed: row.journal_key || row['Journal Key'] })
             : [],
+        // Festival only: [{ name, url }] — one photo per lineup act (see buildLineupImages)
+        LineupImages:       buildLineupImages(row, artistLookup),
         // Structured companion tags for this row, if any — see
         // getCompanionsForGig below for how this merges with the legacy
         // free-text 'Went With' field. null (not []) when there's no

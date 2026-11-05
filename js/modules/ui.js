@@ -5,7 +5,7 @@
 /**
  * GigList - UI Module
  */
-import { getGlobalSeenCount, slugify, slugifyArtist, parseDate, isFestivalRow, scopeFestivalPerformances, normalizeArtist, escapeHtml, safeUrl } from './utils.js';
+import { getGlobalSeenCount, slugify, slugifyArtist, parseDate, isFestivalRow, scopeFestivalPerformances, normalizeArtist, escapeHtml, safeUrl, parseActList } from './utils.js';
 import { searchArtists, getArchiveStatus, submitArchiveRequest } from './artist-sync.js';
 import { renderCalendar } from './calendar.js';
 import { sortGigs, deriveType } from './data.js';
@@ -470,6 +470,54 @@ const _countPastSightings = (band, fullData, today) => {
     return { total: seen.size, headline };
 };
 
+// ─── FESTIVAL LINEUP IMAGES ───────────────────────────────────────────────────
+// Festivals have no artist image of their own, so where a gig with no user photo
+// would fall back to one artist image, a festival shows a mosaic of photos from
+// its lineup instead (row.LineupImages, built in data.js).
+
+const _preloadOk = (url, ms = 6000) => new Promise(resolve => {
+    const img = new Image();
+    const t = setTimeout(() => resolve(false), ms);
+    img.onload  = () => { clearTimeout(t); resolve(true); };
+    img.onerror = () => { clearTimeout(t); resolve(false); };
+    img.src = url;
+});
+
+/** Up to `max` lineup images that actually load, in lineup order. */
+const _loadableLineupImages = async (images, max) => {
+    const pool = (images || []).filter(i => i && i.url).slice(0, max + 3);
+    const ok = await Promise.all(pool.map(i => _preloadOk(i.url)));
+    return pool.filter((_, i) => ok[i]).slice(0, max);
+};
+
+// Carousel items may not carry LineupImages themselves — fall back to the journal row.
+const _lineupImagesFor = (item) => {
+    if (item?.LineupImages?.length) return item.LineupImages;
+    const key = (item?.['Journal Key'] || item?.journal_key || '').toString().trim();
+    if (!key) return [];
+    const row = (window.journalData || []).find(g => (g['Journal Key'] || '').toString().trim() === key);
+    return row?.LineupImages || [];
+};
+
+/** layout 'row': one strip (modal hero, ~3:1). 'grid': 2×2, or one tall + two stacked for 3 (cards). */
+const _fillMosaic = (el, imgs, layout) => {
+    const n = imgs.length;
+    el.style.display = 'grid';
+    el.style.gap = '2px';
+    if (layout === 'row') {
+        el.style.gridTemplateColumns = `repeat(${n}, 1fr)`;
+        el.style.gridTemplateRows = '1fr';
+    } else {
+        el.style.gridTemplateColumns = n === 1 ? '1fr' : 'repeat(2, 1fr)';
+        el.style.gridTemplateRows = n <= 2 ? '1fr' : 'repeat(2, 1fr)';
+    }
+    el.innerHTML = imgs.map((im, i) => {
+        const span = (layout === 'grid' && n === 3 && i === 0) ? 'grid-row:span 2;' : '';
+        return `<img src="${escapeHtml(im.url)}" alt="${escapeHtml(im.name)}" loading="lazy"
+                     style="${span}width:100%;height:100%;min-width:0;min-height:0;object-fit:cover;object-position:center top">`;
+    }).join('');
+};
+
 export const renderCarouselItem = (index, carouselData, fullData) => {
     const card = document.getElementById('now-card');
     if (!card || !carouselData || !carouselData[index]) return;
@@ -520,6 +568,7 @@ export const renderCarouselItem = (index, carouselData, fullData) => {
                  src="${item.isCTA ? "https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?auto=format&fit=crop&q=80" : ""}"
                  class="absolute inset-0 w-full h-full object-cover opacity-60 transition-opacity duration-500"
                  alt="">
+            <div id="carousel-mosaic-${index}" class="absolute inset-0 overflow-hidden opacity-60" style="display:none" aria-hidden="true"></div>
 
             <div class="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/40 to-transparent"></div>
 
@@ -607,6 +656,22 @@ export const renderCarouselItem = (index, carouselData, fullData) => {
                         .createSignedUrl(`${userId}/${scrapbookFile}`, 3600);
                     if (!error && data?.signedUrl) storageUrl = data.signedUrl;
                 }
+            }
+        }
+
+        // Festival with no user photo: a mosaic of lineup photos replaces the
+        // single artist image. User photos (storage / scrapbook) still win.
+        const mosaicEl = document.getElementById(`carousel-mosaic-${index}`);
+        const lineup = mosaicEl ? _lineupImagesFor(item) : [];
+        if (lineup.length >= 2) {
+            for (const src of [storageUrl, scrapbookPath].filter(Boolean)) {
+                if (await _preloadOk(src)) { imgEl.src = src; return; }
+            }
+            const loaded = await _loadableLineupImages(lineup, 4);
+            if (loaded.length >= 2) {
+                _fillMosaic(mosaicEl, loaded, 'grid');
+                imgEl.style.display = 'none';
+                return;
             }
         }
 
@@ -1508,7 +1573,32 @@ const gigIsPast = (() => {
         .filter(s => (s.Artist || '').toLowerCase() !== entry.Band.toLowerCase())
         .map(s => (s.Artist || '').trim())
         .filter(a => a && !notableText.toLowerCase().includes(a.toLowerCase()));
-    const supportDisplay = [notableText, ...new Set(trackedSupport)].filter(Boolean).join(', ');
+    // Festival: the acts on the journal row's own Festival Lineups are the bill.
+    // Performance rows only exist once setlist.fm has the show, so a festival
+    // that hasn't happened yet (or an act with no setlist match) has none —
+    // build the list from the lineup text and add any tracked acts it lacks.
+    const _sameAct = (a, b) => {
+        const na = normalizeArtist(a), nb = normalizeArtist(b);
+        return !!na && !!nb && (na === nb || na.startsWith(nb) || nb.startsWith(na));
+    };
+    const lineupRaw = (entry['Festival Lineups'] || '').toString().trim();
+    const lineupNames = (isFestival && lineupRaw && lineupRaw.toLowerCase() !== 'nan')
+        ? parseActList(lineupRaw, { splitCommas: false })
+            .filter((n, i, arr) => arr.findIndex(m => _sameAct(m, n)) === i)
+        : [];
+    const festivalActs = [
+        ...lineupNames,
+        ...sets.map(s => (s.Artist || '').trim())
+            .filter(a => a && !_sameAct(a, entry.Band) && !lineupNames.some(n => _sameAct(n, a))),
+    ];
+    // Header/ticket only preview the bill — the full list is in the Setlist panel.
+    const FEST_PREVIEW = 5;
+    const festivalPreview = festivalActs.length > FEST_PREVIEW
+        ? `${festivalActs.slice(0, FEST_PREVIEW).join(', ')} +${festivalActs.length - FEST_PREVIEW} more`
+        : festivalActs.join(', ');
+    const supportDisplay = (isFestival && festivalActs.length)
+        ? festivalPreview
+        : [notableText, ...new Set(trackedSupport)].filter(Boolean).join(', ');
 
     // PRICE LOGIC: Prioritize journal data, fallback to random if missing
         let displayPrice;
@@ -1570,9 +1660,28 @@ const gigIsPast = (() => {
     // Setlist cards: the performance rows, plus a placeholder card for the
     // headliner when there's no row for them (non-festival), so the panel
     // never opens blank — it names the artist and says no setlist is available.
+    // Festival: also a card for every lineup act that has no performance row
+    // (future festival / no setlist.fm match) so the bill is always listed.
+    const festivalCards = isFestival
+        ? [...sets, ...lineupNames
+            .filter(n => !sets.some(s => _sameAct(s.Artist, n)))
+            .map(n => ({ Artist: n, Role: 'Festival', Setlist: '' }))]
+        : [];
+    // Festival: small circular photo (or initial) beside each act in the Setlist panel
+    const _avatar = (name) => {
+        if (!isFestival) return '';
+        const hit = (entry.LineupImages || []).find(i => _sameAct(i.name, name));
+        const initial = escapeHtml((name || '?').trim().charAt(0).toUpperCase());
+        return hit
+            ? `<img src="${escapeHtml(hit.url)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'"
+                    class="w-6 h-6 rounded-full object-cover flex-shrink-0 bg-indigo-100">`
+            : `<span class="w-6 h-6 rounded-full bg-indigo-100 text-indigo-600 text-[10px] font-black flex items-center justify-center flex-shrink-0" aria-hidden="true">${initial}</span>`;
+    };
     const setlistCards = (!isFestival && !headlineSet)
         ? [{ Artist: entry.Band, Role: 'Headline', Setlist: '' }, ...sets]
-        : (sets.length ? sets : [{ Artist: entry.Band, Role: isFestival ? 'Festival' : 'Headline', Setlist: '' }]);
+        : (isFestival && festivalCards.length)
+            ? festivalCards
+            : (sets.length ? sets : [{ Artist: entry.Band, Role: isFestival ? 'Festival' : 'Headline', Setlist: '' }]);
     modalContent.innerHTML = `
         <div class="bg-white">
             <div class="sticky top-0 z-30 bg-white rounded-t-[2.5rem] overflow-hidden">
@@ -1591,6 +1700,11 @@ const gigIsPast = (() => {
                                      src=""
                                      alt=""
                                      class="absolute inset-0 w-full h-full object-cover object-top z-10 hidden">
+
+                                <div id="h-mosaic"
+                                     class="absolute inset-0 z-10 overflow-hidden"
+                                     style="display:none"
+                                     aria-hidden="true"></div>
 
                                 <div id="h-ticket"
                                      class="absolute inset-0 z-10 items-center justify-center p-6 bg-slate-50 hidden">
@@ -1716,13 +1830,16 @@ const gigIsPast = (() => {
                             ${setlistCards.map(s => `
                                 <div class="bg-white p-5 rounded-[1.5rem] border border-slate-100 shadow-sm">
                                     <div class="flex justify-between items-center mb-3 border-b border-slate-50 pb-2">
-                                        <span class="font-black text-indigo-600 text-xs uppercase italic">${escapeHtml(s.Artist)}</span>
+                                        <span class="flex items-center gap-2 min-w-0">
+                                            ${_avatar(s.Artist)}
+                                            <span class="font-black text-indigo-600 text-xs uppercase italic truncate">${escapeHtml(s.Artist)}</span>
+                                        </span>
                                         <span class="text-[7px] font-black px-2 py-0.5 bg-slate-50 rounded text-slate-400 uppercase">${escapeHtml(s.Role)}</span>
                                     </div>
                                     <div class="text-[11px] text-slate-500 leading-relaxed font-medium">
                                         ${(s.Setlist || '').replace(/^NOT_FOUND$/i, '')
                                             ? (s.Setlist).split('|').map(escapeHtml).join('<br>')
-                                            : '<span class="text-slate-300 italic text-xs">No setlist available</span>'
+                                            : `<span class="text-slate-300 italic text-xs">${gigIsPast ? 'No setlist available' : 'Not played yet'}</span>`
                                         }
                                     </div>
                                 </div>
@@ -1814,6 +1931,7 @@ const gigIsPast = (() => {
     const imgScrapbook = document.getElementById('h-scrapbook');
     const imgArtist    = document.getElementById('h-artist');
     const divTicket    = document.getElementById('h-ticket');
+    const divMosaic    = document.getElementById('h-mosaic');
 
     // Tries each artist image in turn (per-gig pick first); a dead URL falls through to the next.
     const trySpotify = (candidates = (entry.ArtistImages?.length ? entry.ArtistImages : [entry.SpotifyImageUrl]).filter(Boolean)) => {
@@ -1823,6 +1941,22 @@ const gigIsPast = (() => {
                 imgArtist.onerror = () => trySpotify(rest);
                 imgArtist.src     = next;
             };
+
+        // Artist-image tier: a festival with lineup photos gets a mosaic of them;
+        // everything else (and festivals with <2 loadable photos) the single image.
+        const tryArtistTier = async () => {
+            const lineup = (isFestival && divMosaic) ? (entry.LineupImages || []) : [];
+            if (lineup.length >= 2) {
+                const loaded = await _loadableLineupImages(lineup, 5);
+                if (loaded.length >= 2) {
+                    _fillMosaic(divMosaic, loaded, 'row');
+                    // No single image to reframe — camera upload still works
+                    document.getElementById('h-reframe-btn')?.classList.add('hidden');
+                    return;
+                }
+            }
+            trySpotify();
+        };
 
         const tryLocalScrapbook = () => {
                     const jpgProbe = new Image();
@@ -1836,7 +1970,7 @@ const gigIsPast = (() => {
                             imgScrapbook.onload = () => imgScrapbook.classList.remove('hidden');
                             imgScrapbook.src = scrapbookPath.replace('.jpg', '.JPG');
                         };
-                        jpgUpperProbe.onerror = () => trySpotify();
+                        jpgUpperProbe.onerror = () => tryArtistTier();
                         jpgUpperProbe.src = scrapbookPath.replace('.jpg', '.JPG');
                     };
                     jpgProbe.src = scrapbookPath;

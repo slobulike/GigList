@@ -213,6 +213,21 @@ export function createActPicker({ inputId, listId, pillsId, msgId, getOptions })
     input.setAttribute('aria-autocomplete', 'list');
     input.addEventListener('input', () => { clearNotice(); updateList(); });
     input.addEventListener('focus', () => { if (input.value) updateList(); });
+
+    // Mobile: the keyboard's Next key moves focus without a usable Enter
+    // keydown, so typed text was silently dropped. Show a "Done" key, and
+    // commit leftover text when the field loses focus. The short delay lets
+    // a tap on a suggestion / notice button land first; if a notice is already
+    // waiting on a decision we leave it alone so its buttons aren't re-rendered
+    // mid-tap.
+    input.setAttribute('enterkeyhint', 'done');
+    input.addEventListener('blur', () => {
+        setTimeout(() => {
+            if (document.activeElement === input) return;
+            if (notice) return;
+            if (input.value.trim()) commitText();
+        }, 150);
+    });
     input.addEventListener('keydown', (e) => {
         const items = list.querySelectorAll('[data-value]');
         const open = !list.classList.contains('hidden') && items.length;
