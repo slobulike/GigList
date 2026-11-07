@@ -2,11 +2,8 @@
 // OR logic within dimensions, AND logic across dimensions.
 // Companion matching covers both gig_companions rows and legacy went_with text.
 //
-// The drawer is shared between modes. Personal and band mode filter
-// window.journalData client-side (applyFilters). Community can't — its data
-// lives server-side — so it borrows the drawer through attachFilterSource():
-// options come from the source, changes go to the source's onChange, and the
-// personal state is parked and restored on detach.
+// The drawer is shared by personal and band mode, which both filter
+// window.journalData client-side (applyFilters).
 
 import { escapeHtml, normalizeArtist, parseActList } from './utils.js';
 
@@ -26,11 +23,6 @@ const _state = {
   hasSetlist: 'all',         // 'all' | 'yes' | 'no'
 };
 
-// A view that borrows the drawer: { supports, years(), venues(), venueLabel?(value), onChange(state) }
-let _source = null;
-let _saved  = null;          // personal state, parked while a source is attached
-let _hiddenSections = [];    // sections we hid for the source (detach un-hides only these)
-
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -38,43 +30,6 @@ let _hiddenSections = [];    // sections we hid for the source (detach un-hides 
 export function initFilters() {
   _injectDrawerHTML();
   _bindEvents();
-}
-
-/**
- * Lets another view (Community) use the drawer. The drawer is reset to defaults,
- * sections the source doesn't list in `supports` are hidden, year/venue options
- * come from source.years() / source.venues(), and changes call
- * source.onChange(getFilterState()) instead of firing 'filtersChanged' (which
- * would re-render the personal table). Returns a detach function; it only acts
- * if this source is still the one attached, so a late dispose from an old pane
- * can't take the drawer away from a new one.
- */
-export function attachFilterSource(source) {
-  if (_source) _detach();
-  _saved = { ..._state, years: new Set(_state.years) };
-  _resetState();
-  _source = source;
-  _applySectionVisibility();
-  _syncDrawerUI();
-  _populateYearList();
-  _populateLookupSelects();
-  _syncToggleUI();
-  _updateClearButton();
-  return () => { if (_source === source) _detach(); };
-}
-
-function _detach() {
-  _source = null;
-  Object.assign(_state, _saved, { years: new Set(_saved.years), open: false });
-  _saved = null;
-  _hiddenSections.forEach(sec => sec.classList.remove('hidden'));
-  _hiddenSections = [];
-  _syncDrawerUI();
-  _populateYearList();
-  _populateLookupSelects();
-  _syncToggleUI();
-  _updateClearButton();
-  // No change event: nothing personal was touched while the source was attached.
 }
 
 /** Snapshot of the current filter state (years sorted newest first). */
@@ -253,7 +208,7 @@ export function buildSummaryLine(resultCount, totalCount) {
   }
 
   if (_state.artist.trim()) parts.push(_state.artist.trim());
-  if (_state.venue.trim()) parts.push(_source?.venueLabel?.(_state.venue) ?? _state.venue.trim());
+  if (_state.venue.trim()) parts.push(_state.venue.trim());
   if (_state.companion.trim()) parts.push(`with ${_state.companion.trim()}`);
 
   if (_state.festival === 'festival') parts.push('festivals');
@@ -308,17 +263,6 @@ function _resetState() {
   _state.hasPhotos = 'all';
   _state.hasReview = 'all';
   _state.hasSetlist = 'all';
-}
-
-// Hides drawer sections the attached source doesn't support
-function _applySectionVisibility() {
-  const supports = _source?.supports;
-  if (!supports) return;
-  document.querySelectorAll('#filter-drawer [data-filter-section]').forEach(sec => {
-    if (supports.includes(sec.dataset.filterSection) || sec.classList.contains('hidden')) return;
-    sec.classList.add('hidden');
-    _hiddenSections.push(sec);
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -525,12 +469,6 @@ function _handleToggle(group, value, btn) {
 // ---------------------------------------------------------------------------
 
 function _populateLookupSelects() {
-  if (_source) {
-    _fillSelect('filter-venue-input', _source.venues?.() || [], 'All venues', _state.venue);
-    _bindSelectInput('filter-venue-input', 'venue');
-    return;
-  }
-
   const data = window.journalData;
   if (!data?.length) {
     // Nothing to offer (e.g. handing the drawer back with no personal data loaded)
@@ -588,11 +526,9 @@ function _populateYearList() {
   const container = document.getElementById('filter-year-list');
   if (!container) return;
 
-  const years = _source
-    ? (_source.years?.() || [])
-    : [...new Set(
-        (window.journalData || []).map(g => _parseYear(g.date)).filter(Boolean)
-      )].sort((a, b) => b - a);
+  const years = [...new Set(
+    (window.journalData || []).map(g => _parseYear(g.date)).filter(Boolean)
+  )].sort((a, b) => b - a);
 
   container.innerHTML = years.map(year => {
     const active = _state.years.has(year);
@@ -689,14 +625,6 @@ function _updateClearButton() {
 
 function _dispatchChange() {
   _updateClearButton();
-
-  // A borrowed drawer (Community): tell the owner directly. The personal
-  // summary strips and the 'filtersChanged' listener in app.js work from
-  // window.journalData and must not react to someone else's filters.
-  if (_source) {
-    _source.onChange?.(getFilterState());
-    return;
-  }
 
   // Filter-summary strip ("X of Y shows — Clear all") — driven from a
   // shared class rather than a single id, so every view that includes this

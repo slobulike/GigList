@@ -821,7 +821,9 @@ window.showSpinner?.('Saving show…');
         venue: venue,
         festival: isFest === 'Y',
         festival_lineups: joinActList(fullLineup),
-        notable_support: festOn ? '' : (_sameActs(supportActs, _loadedSupportActs) ? _loadedSupportRaw : joinActList(supportActs)),
+        // Festivals hide the field, so keep whatever text the row already had
+        // rather than wiping it on every save (new festivals have none).
+        notable_support: festOn ? _loadedSupportRaw : (_sameActs(supportActs, _loadedSupportActs) ? _loadedSupportRaw : joinActList(supportActs)),
         went_with: _companions.map(c => c.name).join(' / '),
         comments: isBandWrite ? 'Historical Artist Entry' : _get('editor-comments').trim(),
         price: _get('editor-price').trim(),

@@ -683,8 +683,7 @@ export const refreshAppCache = async (user) => {
     if (!isCacheable(user, true)) return;
     try {
         // Edits can change performances too (setlist sync, editor saves): drop the cached copy
-        const pk = perfCacheKey(user);
-        if (pk) await cacheDelete(pk);
+        await dropPerfCache(user);
         const raw = await fetchRawAppData(user, { skipPerformances: true });
         await cachePut(dataCacheKey(user.id), { v: CACHE_VERSION, savedAt: Date.now(), raw });
     } catch (e) {
@@ -710,6 +709,12 @@ export const refreshAppCache = async (user) => {
 const PERF_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 export const perfCacheKey = (user) =>
     user?.Type === 'Personal' && user.id ? `perf:${user.id}` : null;
+
+/** Forget the cached performances for this user (best effort, never throws). */
+export const dropPerfCache = async (user) => {
+    const pk = perfCacheKey(user);
+    if (pk) await cacheDelete(pk);
+};
 
 export const loadPerformances = async (journalKeys, venueLookup = {}, { cacheKey = null, refresh = false } = {}) => {
     if (!journalKeys.length) return [];

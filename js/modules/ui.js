@@ -485,7 +485,7 @@ const _preloadOk = (url, ms = 6000) => new Promise(resolve => {
 
 /** Up to `max` lineup images that actually load, in lineup order. */
 const _loadableLineupImages = async (images, max) => {
-    const pool = (images || []).filter(i => i && i.url).slice(0, max + 3);
+    const pool = (images || []).filter(i => i && safeUrl(i.url)).slice(0, max + 3);
     const ok = await Promise.all(pool.map(i => _preloadOk(i.url)));
     return pool.filter((_, i) => ok[i]).slice(0, max);
 };
@@ -513,7 +513,7 @@ const _fillMosaic = (el, imgs, layout) => {
     }
     el.innerHTML = imgs.map((im, i) => {
         const span = (layout === 'grid' && n === 3 && i === 0) ? 'grid-row:span 2;' : '';
-        return `<img src="${escapeHtml(im.url)}" alt="${escapeHtml(im.name)}" loading="lazy"
+        return `<img src="${escapeHtml(safeUrl(im.url))}" alt="${escapeHtml(im.name)}" loading="lazy"
                      style="${span}width:100%;height:100%;min-width:0;min-height:0;object-fit:cover;object-position:center top">`;
     }).join('');
 };
@@ -1673,7 +1673,7 @@ const gigIsPast = (() => {
         const hit = (entry.LineupImages || []).find(i => _sameAct(i.name, name));
         const initial = escapeHtml((name || '?').trim().charAt(0).toUpperCase());
         return hit
-            ? `<img src="${escapeHtml(hit.url)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'"
+            ? `<img src="${escapeHtml(safeUrl(hit.url))}" alt="" loading="lazy" onerror="this.style.visibility='hidden'"
                     class="w-6 h-6 rounded-full object-cover flex-shrink-0 bg-indigo-100">`
             : `<span class="w-6 h-6 rounded-full bg-indigo-100 text-indigo-600 text-[10px] font-black flex items-center justify-center flex-shrink-0" aria-hidden="true">${initial}</span>`;
     };

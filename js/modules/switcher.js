@@ -1,8 +1,11 @@
 /**
  * GigList — Switcher Module
- * v1.5.0 — 2026-10-26
+ * v1.6.0 — 2026-11-08
  * -------------------------------------------------------------------
  * Mode switcher panel: Personal / Band Pages / Want to See / Clashfinder / Sign Out.
+ *
+ * v1.6.0: Community mode retired — its menu row, lazy loader and
+ * ?community boot are gone (vault.html redirects old links to Personal).
  * Extracted from app.js.
  *
  * v1.2.0: the Band Pages accordion is replaced by your favourite bands
@@ -130,12 +133,6 @@ export async function initModeSwitcher(currentUser) {
         _dataPromise.then(_toggleSwitcher);
     }
 
-    // Shared Community link: vault.html?community=<tab>
-    if (currentUser.Type === 'Personal' &&
-        new URLSearchParams(window.location.search).has('community')) {
-        window.openCommunity({ boot: true });
-    }
-
     await _dataPromise;
 }
 
@@ -237,7 +234,6 @@ function _buildSwitcherPanel() {
     const favs          = window._switcherFavs  || [];
     const currentBand   = isBand ? currentUser.UserName : null;
     const shortlist     = _shortlist(bands, favs, currentBand);
-    const inCommunity   = !!window.isCommunityMode;
 
     const panel = document.createElement('div');
     panel.id        = 'mode-switcher-panel';
@@ -266,8 +262,8 @@ function _buildSwitcherPanel() {
     panel.innerHTML = `
         ${row(window.authDisplayName || 'My Gig List',
               'Personal Archive',
-              isPersonal && !inCommunity,
-              (isPersonal && !inCommunity) ? '' : "window._switchToPersonal()")}
+              isPersonal,
+              isPersonal ? '' : "window._switchToPersonal()")}
 
         <div class="border-t border-slate-100">
             <p class="px-4 pt-3 pb-1 text-sm font-black text-slate-900">Band Pages</p>
@@ -294,19 +290,6 @@ function _buildSwitcherPanel() {
             </button>` : ''}
             ${bands.length && !hasFavs ? `
             <p class="px-4 pb-3 pl-12 text-xs text-slate-400 font-bold">Your favourite bands will appear here once you add one.</p>` : ''}
-        </div>
-
-        <div class="border-t border-slate-100">
-            <button id="menu-community" onclick="${isBand ? 'window._switchToCommunity()' : 'window._closeSwitcher(); window.openCommunity();'}" role="menuitem"
-                    class="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-colors ${inCommunity ? 'opacity-50 cursor-default pointer-events-none' : ''}">
-                <span class="w-5 flex-shrink-0 flex items-center justify-center">
-                    <i data-lucide="${inCommunity ? 'check' : 'globe'}" class="w-4 h-4 ${inCommunity ? 'text-indigo-600' : 'text-indigo-400'}"></i>
-                </span>
-                <span class="flex-1 min-w-0">
-                    <span class="block text-sm font-black text-slate-900">Community</span>
-                    <span class="block text-[10px] text-slate-400 font-bold uppercase tracking-widest">Everyone on GigList</span>
-                </span>
-            </button>
         </div>
 
         <div class="border-t border-slate-100">
@@ -368,31 +351,11 @@ window.openBandBrowser = async () => {
     mod.openBandBrowser();
 };
 
-// ─── COMMUNITY (lazy) ─────────────────────────────────────────────────────────
-// community.js replaces this stub with the real window.openCommunity when it
-// loads. Calls the module's own export, not window, so it can never loop.
-
-if (!window.openCommunity) {
-    window.openCommunity = async (opts) => {
-        const mod = await import('./community.js');
-        mod.initCommunity(window.currentUser);
-        await mod.openCommunity(opts);
-    };
-}
-
 // ─── NAVIGATION ───────────────────────────────────────────────────────────────
 
 window._switchToPersonal = () => {
     closeSwitcher();
-    if (window.isCommunityMode) { window.closeCommunity(); return; }   // in-page, no reload
     window.location.href = 'vault.html';
-};
-
-// From a band page Community lives on the personal page, so this is a page
-// load into it via the ?community deep link.
-window._switchToCommunity = () => {
-    closeSwitcher();
-    window.location.href = 'vault.html?community=feed';
 };
 
 window._switchToBand = (bandName) => {

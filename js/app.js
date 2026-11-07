@@ -1,7 +1,11 @@
 /**
  * GigList Core Engine
- * v10.4.5 — 2026-11-05
+ * v10.4.6 — 2026-11-08
  * ------------------------------------------------------------------
+ * ✅ Community mode retired (its best parts now live in the personal feed, map and stats); old ?community= links open the personal home
+ * ✅ Festival saves keep any existing notable support text; setlist cache cleared as soon as a show is saved
+ * ------------------------------------------------------------------
+ * v10.4.5 — 2026-11-05
  * ✅ UI fixes for editor modal to correctly resolve buddies, artist picker on mobile now works, future and past text is dynamic, notable support not shown for festivals
  * ✅ Gig modal enhanced to show artist avatars in festival lineups, artist collage shown in hero image for festivals
  */
@@ -41,13 +45,11 @@ import './modules/collection-charts.js';
 import './modules/stats-switcher.js';
 import { initMixPlaylistCard } from './modules/mix-playlist.js';
 import { syncPushSubscription, initPushUI } from './modules/push.js';
-// Community modules are NOT imported here: switcher.js's window.openCommunity
-// stub loads community.js on first use, and community.js loads each pane lazily.
 
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "10.4.5";
+const APP_VERSION = "10.4.6";
 
 // Columns of profiles that the app is allowed to read (see the column grants
 // in Supabase). home_lat / home_lng / home_label are deliberately excluded:
@@ -314,11 +316,6 @@ export async function initApp() {
         }
     }
 
-if (currentUser?.Type === 'Personal' && params.has('community')) {
-    window.currentUser = currentUser;
-    window.openCommunity?.();
-}
-
     document.addEventListener('filtersChanged', _applyFiltersAndRender);
 
     // 1. Load Data
@@ -534,8 +531,12 @@ if (currentUser?.Type === 'Personal' && params.has('community')) {
             clearTimeout(cacheRefreshTimer);
             cacheRefreshTimer = setTimeout(() => Data.refreshAppCache(currentUser), 2500);
         };
-        window.addEventListener('giglist:gigSaved', scheduleCacheRefresh);
-        window.addEventListener('giglist:gigDeleted', scheduleCacheRefresh);
+        // The cached setlists go straight away, not after the debounce: if the app
+        // is closed within those 2.5 s, the next open must not trust a copy from
+        // before the save (setlists added to an existing show keep the same key).
+        const dropPerfCacheNow = () => { Data.dropPerfCache(currentUser); scheduleCacheRefresh(); };
+        window.addEventListener('giglist:gigSaved', dropPerfCacheNow);
+        window.addEventListener('giglist:gigDeleted', dropPerfCacheNow);
         window.addEventListener('giglist:collectionItemSaved', scheduleCacheRefresh);
     }
 

@@ -39,10 +39,10 @@
         body.band-mode #header-page-title { color: #fff !important; }
     </style>
     <script>
-        // The mode (band / community / personal) is read from the URL before first
-        // paint, so moving between modes never flashes the wrong one. band.js and
-        // community.js remove their class when the real views take over; the
-        // timeouts are a safety net if boot never gets that far.
+        // The mode (band / personal) is read from the URL before first paint, so
+        // moving between modes never flashes the wrong one. band.js removes its
+        // class when the real views take over; the timeout is a safety net if
+        // boot never gets that far.
         (function () {
             var root = document.documentElement;
             var p    = new URLSearchParams(location.search);
@@ -60,20 +60,16 @@
                 });
                 setTimeout(function () { root.classList.remove('band-boot'); }, 20000);
             } else if (p.has('community')) {
-                root.classList.add('community-boot');
-                setTimeout(function () {
-                    if (!window.isCommunityMode) root.classList.remove('community-boot');
-                }, 20000);
+                // Community mode was retired in v10.4.6. Old shared links open
+                // the personal home: drop the param before anything reads it.
+                // Keep this for a few months.
+                p.delete('community');
+                var qs = p.toString();
+                try { history.replaceState(history.state, '', location.pathname + (qs ? '?' + qs : '') + location.hash); } catch (e) {}
             }
         })();
     </script>
     <style>
-        /* Community: show its shell, not the personal home */
-        .community-boot #view-home,
-        .community-boot #main-nav { display: none !important; }
-        .community-boot #view-community { display: block !important; }
-        .community-boot #community-nav { display: flex !important; }
-
         /* Band page: band header + nav and a skeleton, not the personal home */
         .band-boot header { background-color: var(--band-boot-color, #189BCC) !important; backdrop-filter: none !important; border-bottom-color: rgba(0,0,0,.1) !important; }
         .band-boot #header-page-title { color: #fff !important; }
@@ -657,26 +653,6 @@
             <div class="animate-pulse space-y-4">
                 <div class="h-64 bg-slate-200 rounded-[2rem]"></div>
                 <div class="h-64 bg-slate-200 rounded-[2rem]"></div>
-            </div>
-        </div>
-    </section>
-
-    <!-- ── COMMUNITY VIEW ─────────────────────────────────────────────── -->
-    <section id="view-community" class="view-section hidden space-y-4 pb-4" role="region" aria-label="Community" aria-hidden="true">
-        <div class="flex justify-between items-end mb-2">
-            <div>
-                <h2 class="font-display text-5xl italic tracking-tight text-slate-900">Community</h2>
-                <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-0.5">Everyone on GigList</p>
-            </div>
-            <button type="button" id="community-share-btn"
-                    class="w-10 h-10 rounded-full bg-white border border-slate-100 shadow-sm flex items-center justify-center text-slate-500 hover:text-indigo-600 active:scale-95 transition-all"
-                    aria-label="Share this page">
-                <i data-lucide="share-2" class="w-4 h-4" aria-hidden="true"></i>
-            </button>
-        </div>
-        <div id="community-body" class="space-y-4" aria-live="polite">
-            <div class="animate-pulse space-y-4">
-                <div class="h-40 bg-slate-200 rounded-[2rem]"></div>
             </div>
         </div>
     </section>
@@ -1477,7 +1453,7 @@
                 <div class="flex items-center justify-between gap-4">
                     <div>
                         <p class="text-sm font-black text-slate-800">Public Profile</p>
-                        <p class="text-[10px] text-slate-400 mt-0.5 leading-relaxed">When your profile is public, other GigList users can find you and see your shows, venues and any photos you’ve added to a gig. Your photos may appear in Community. When it’s private, your gigs still count towards Community and band totals anonymously, and only your gig buddies see your name.</p>
+                        <p class="text-[10px] text-slate-400 mt-0.5 leading-relaxed">When your profile is public, other GigList users can find you and see your shows, venues and any photos you’ve added to a gig. Your gig photos may appear in artist spotlights on other users’ feeds. When it’s private, your gigs still count anonymously towards GigList-wide totals (like trending artists, busy venues and the Everyone map) and band totals, and only your gig buddies see your name.</p>
                     </div>
                     <button id="privacy-toggle"
                             onclick="window.togglePrivacy()"
@@ -1651,26 +1627,6 @@
     <button onclick="switchView('feed')" id="nav-feed" class="nav-item text-slate-400 flex flex-col items-center gap-1 flex-1" aria-current="false" aria-label="Feed">
         <i data-lucide="sparkles" class="w-6" aria-hidden="true"></i>
         <span class="text-[9px] font-black uppercase">Feed</span>
-    </button>
-</nav>
-
-<!-- Community nav — hidden unless Community is open -->
-<nav id="community-nav" class="hidden fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-2xl border-t border-slate-100 px-6 pt-3 pb-8 flex justify-between items-center z-50" aria-label="Community navigation">
-    <button type="button" id="community-nav-feed" data-community-tab="feed" class="nav-item text-slate-400 flex flex-col items-center gap-1 flex-1" aria-current="false" aria-label="Feed">
-        <i data-lucide="sparkles" class="w-6" aria-hidden="true"></i>
-        <span class="text-[9px] font-black uppercase">Feed</span>
-    </button>
-    <button type="button" id="community-nav-gigs" data-community-tab="gigs" class="nav-item text-slate-400 flex flex-col items-center gap-1 flex-1" aria-current="false" aria-label="Gigs">
-        <i data-lucide="ticket" class="w-6" aria-hidden="true"></i>
-        <span class="text-[9px] font-black uppercase">Gigs</span>
-    </button>
-    <button type="button" id="community-nav-stats" data-community-tab="stats" class="nav-item text-slate-400 flex flex-col items-center gap-1 flex-1" aria-current="false" aria-label="Stats">
-        <i data-lucide="bar-chart-2" class="w-6" aria-hidden="true"></i>
-        <span class="text-[9px] font-black uppercase">Stats</span>
-    </button>
-    <button type="button" id="community-nav-fans" data-community-tab="fans" class="nav-item text-slate-400 flex flex-col items-center gap-1 flex-1" aria-current="false" aria-label="Fans">
-        <i data-lucide="users" class="w-6" aria-hidden="true"></i>
-        <span class="text-[9px] font-black uppercase">Fans</span>
     </button>
 </nav>
 
