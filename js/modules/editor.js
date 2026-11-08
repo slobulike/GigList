@@ -1591,10 +1591,11 @@ function _renderCompanionDropdown(query, buddies, others, rawName) {
     if (!dropdown) return;
 
     const alreadyAdded = new Set(_companions.map(c => c.name.toLowerCase()));
+    const addedIds     = new Set(_companions.map(c => c.userId).filter(Boolean));
 
     const makeItem = (profile, isBuddy) => {
         const name = profile.display_name;
-        if (alreadyAdded.has(name.toLowerCase())) return '';
+        if (alreadyAdded.has(name.toLowerCase()) || addedIds.has(profile.id)) return '';
         const initial = name[0].toUpperCase();
         const badge = isBuddy
             ? `<span class="text-[9px] font-black uppercase tracking-widest text-emerald-600">Gig Buddy</span>`
@@ -1664,12 +1665,16 @@ function _renderCompanionDropdown(query, buddies, others, rawName) {
  * Adds a companion pill and, if status is 'pending' (GigList user but not buddy),
  * fires a background buddy request.
  */
-function _addCompanion({ name, userId, status }) {
+function _addCompanion({ name, userId, status, skipBuddyRequest = false }) {
     const input = document.getElementById('companion-input');
     const dropdown = document.getElementById('companion-dropdown');
 
-    // Prevent duplicates
-    if (_companions.some(c => c.name.toLowerCase() === name.toLowerCase())) {
+    // Prevent duplicates — by name, and by userId so the same GigList user
+    // can't appear twice under a username and a display name
+    if (_companions.some(c =>
+        c.name.toLowerCase() === name.toLowerCase() ||
+        (userId && c.userId === userId)
+    )) {
         if (input) input.value = '';
         if (dropdown) dropdown.classList.add('hidden');
         return;
@@ -1682,7 +1687,7 @@ function _addCompanion({ name, userId, status }) {
     if (dropdown) dropdown.classList.add('hidden');
 
     // Background buddy request for GigList users who aren't buddies yet
-    if (status === 'pending' && userId) {
+    if (status === 'pending' && userId && !skipBuddyRequest) {
         _requestBuddyInBackground(userId, name);
     }
 }
@@ -1885,7 +1890,7 @@ window.openFestivalPrefillModal = openFestivalPrefillModal;
 export const openCompanionPrefillModal = async (journalId, taggedByUsername) => {
     const { data: row, error } = await supabase
         .from('journals')
-        .select('journal_key, date, band, official_venue, festival, festival_lineups, notable_support')
+        .select('journal_key, user_id, date, band, official_venue, festival, festival_lineups, notable_support')
         .eq('id', journalId)
         .single();
 
@@ -1893,6 +1898,11 @@ export const openCompanionPrefillModal = async (journalId, taggedByUsername) => 
         window.showToast?.('Could not load show details — try again', 'error');
         return;
     }
+
+    // Resolve the tagger to their real GigList profile BEFORE rendering, so the
+    // pill is the same linked companion the typeahead would have produced
+    // (display name + userId + buddy status) rather than a bare username string.
+    const tagger = await _resolveTagger(row.user_id, taggedByUsername);
 
     editingKey = null;
     renderEditorModal({
@@ -1915,10 +1925,53 @@ export const openCompanionPrefillModal = async (journalId, taggedByUsername) => 
     // the venue/date text before saving their own copy.
     _pendingCompanionAckKey = row.journal_key;
 
-    if (taggedByUsername) {
-        _addCompanion({ name: taggedByUsername, userId: null, status: 'legacy' });
-    }
+    if (tagger) _addCompanion(tagger);
 };
+
+/**
+ * Turns the owner of a companion-tagged show into a companion pill.
+ * Linked (display name, userId, 'confirmed' if already gig buddies, else
+ * 'pending') whenever the profile can be found; falls back to the old
+ * unlinked username pill if anything fails, so the flow never breaks.
+ * skipBuddyRequest: clicking "View" shouldn't silently send a buddy request.
+ */
+async function _resolveTagger(ownerUserId, fallbackUsername) {
+    const fallback = fallbackUsername
+        ? { name: fallbackUsername, userId: null, status: 'legacy' }
+        : null;
+    if (!ownerUserId) return fallback;
+
+    try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const me = session?.user?.id;
+        if (!me) return fallback;
+
+        const [profileRes, buddyRes] = await Promise.all([
+            supabase.from('profiles')
+                .select('id, display_name, username')
+                .eq('id', ownerUserId)
+                .maybeSingle(),
+            supabase.from('buddies')
+                .select('status')
+                .eq('status', 'accepted')
+                .or(`and(requester_id.eq.${me},addressee_id.eq.${ownerUserId}),and(requester_id.eq.${ownerUserId},addressee_id.eq.${me})`)
+                .limit(1),
+        ]);
+
+        const profile = profileRes.data;
+        if (!profile) return fallback;
+
+        return {
+            name:   profile.display_name || profile.username || fallbackUsername,
+            userId: profile.id,
+            status: buddyRes.data?.length ? 'confirmed' : 'pending',
+            skipBuddyRequest: true,
+        };
+    } catch (err) {
+        console.warn('tagger lookup failed, using username only:', err.message);
+        return fallback;
+    }
+}
 
 window.openCompanionPrefillModal = openCompanionPrefillModal;
 

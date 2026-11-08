@@ -1,13 +1,8 @@
 /**
  * GigList Core Engine
- * v10.4.6 — 2026-11-08
+ * v10.4.7 — 2026-11-08
  * ------------------------------------------------------------------
- * ✅ Community mode retired (its best parts now live in the personal feed, map and stats); old ?community= links open the personal home
- * ✅ Festival saves keep any existing notable support text; setlist cache cleared as soon as a show is saved
- * ------------------------------------------------------------------
- * v10.4.5 — 2026-11-05
- * ✅ UI fixes for editor modal to correctly resolve buddies, artist picker on mobile now works, future and past text is dynamic, notable support not shown for festivals
- * ✅ Gig modal enhanced to show artist avatars in festival lineups, artist collage shown in hero image for festivals
+ * ✅ Added "Get Festival Ready" to Spotify playlist generation feature
  */
 
 import * as Data from './modules/data.js';

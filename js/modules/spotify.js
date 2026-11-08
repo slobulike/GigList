@@ -4,6 +4,9 @@
  * Relive the Show: creates a Spotify playlist from a past gig's own setlist.
  * Get Gig Ready:   creates a Spotify playlist from an artist's most recent
  *                  setlist.fm setlist, for upcoming shows.
+ * Get Festival Ready: creates a 25-track Spotify playlist sampled from the
+ *                  lineup of an upcoming festival. Refreshable in place for
+ *                  a fresh random cut.
  */
 
 import { supabase, authedFetch } from './supabase.js';
@@ -32,6 +35,33 @@ const NO_SETLIST_SENTINELS = new Set(['NOT_FOUND', 'NO_SONGS_LISTED', 'NO_SETLIS
 const hasUsableSetlist = (setlist) => {
     const trimmed = (setlist || '').trim();
     return trimmed.length > 0 && !NO_SETLIST_SENTINELS.has(trimmed.toUpperCase());
+};
+
+// ─── FESTIVAL HELPERS ─────────────────────────────────────────────────────────
+
+const FESTIVAL_TRACK_COUNT = 25;
+const FESTIVAL_SOURCE      = 'festival_ready';   // spotify_playlists.setlist_source
+
+// data.js spreads the raw journals row into each journalData entry, so the
+// boolean `festival` column is there as-is, and it also adds 'Festival?' ('Y'/'N').
+const isFestivalEntry = (entry) =>
+    entry?.festival === true || String(entry?.['Festival?'] || '').toUpperCase() === 'Y';
+
+// Future festival → Get Festival Ready. Everything else keeps its existing flow.
+const isFutureFestival = (entry, gigIsPast) => !gigIsPast && isFestivalEntry(entry);
+
+// Future shows have no performances rows, so the lineup lives on the journal
+// row itself (journals.festival_lineups). The client only needs to know whether
+// there is one — the worker parses it, resolves each act to a Spotify id via
+// artists, and picks the tracks.
+const festivalHasLineup = async (entry) => {
+    const { data } = await supabase
+        .from('journals')
+        .select('festival_lineups')
+        .eq('id', entry.id)
+        .eq('user_id', window.currentUser.id)
+        .maybeSingle();
+    return (data?.festival_lineups || '').trim().length > 0;
 };
 
 // ─── ARTIST/PLAYLIST EMBED (on demand) ─────────────────────────────────────────
@@ -100,7 +130,10 @@ const slotTheme = (slotId) => {
 const resolveAudioContent = async (entry, gigIsPast, { allowGenericFallback = false } = {}) => {
     if (!entry?.id || !window.currentUser?.isAuthUser) return null;
 
-    const sourceType = gigIsPast ? 'own_setlist' : 'recent_artist_setlist';
+    const festivalReady = isFutureFestival(entry, gigIsPast);
+    const sourceType = gigIsPast
+        ? 'own_setlist'
+        : (festivalReady ? FESTIVAL_SOURCE : 'recent_artist_setlist');
     const { data: existing } = await supabase
         .from('spotify_playlists')
         .select('playlist_url')
@@ -110,7 +143,7 @@ const resolveAudioContent = async (entry, gigIsPast, { allowGenericFallback = fa
         .maybeSingle();
 
     const playlistId = playlistIdFromUrl(existing?.playlist_url);
-    if (playlistId) return { kind: 'embed', playlistId, entry, gigIsPast, allowGenericFallback };
+    if (playlistId) return { kind: 'embed', playlistId, entry, gigIsPast, allowGenericFallback, festivalReady };
 
     // Nothing to generate a playlist from (or no way to generate one): offer
     // the generic artist embed where the caller allows it, otherwise nothing.
@@ -134,7 +167,19 @@ const resolveAudioContent = async (entry, gigIsPast, { allowGenericFallback = fa
         if (!hasUsableSetlist(performance?.Setlist)) return noCta();
     }
 
-    return { kind: 'cta', entry, gigIsPast, allowGenericFallback };
+    // A festival with no lineup yet has nothing to sample from, so don't
+    // invite a tap that's guaranteed to fail (same idea as the no-setlist
+    // check above).
+    if (festivalReady) {
+        try {
+            if (!(await festivalHasLineup(entry))) return noCta();
+        } catch (err) {
+            console.warn('[GigList] Could not read festival lineup:', err);
+            return noCta();
+        }
+    }
+
+    return { kind: 'cta', entry, gigIsPast, allowGenericFallback, festivalReady };
 };
 
 const paintAudioSlot = (slotId, content) => {
@@ -143,9 +188,32 @@ const paintAudioSlot = (slotId, content) => {
     if (!content) { slot.innerHTML = ''; return; }
 
     const theme = slotTheme(slotId);
-    const { kind, entry, gigIsPast, allowGenericFallback } = content;
+    const { kind, entry, gigIsPast, allowGenericFallback, festivalReady } = content;
 
-    if (kind === 'embed') {
+    if (kind === 'embed' && festivalReady) {
+        // The refresh control sits outside the embed wrapper on purpose:
+        // loadSpotifyEmbed replaces the wrapper's innerHTML with the iframe,
+        // which would otherwise wipe the button out.
+        const wrapId = `${slotId}-embed`;
+        slot.innerHTML = `
+            <div class="mt-3">
+                <div id="${escapeHtml(wrapId)}">
+                    <button
+                            class="w-full flex items-center gap-2.5 ${theme.action} rounded-xl px-3 py-2.5 transition-colors text-left">
+                        <i data-lucide="play-circle" class="w-4 h-4 ${theme.icon} flex-shrink-0" aria-hidden="true"></i>
+                        <span class="text-[10px] font-black uppercase tracking-widest">Play get festival ready playlist</span>
+                    </button>
+                </div>
+                <button data-festival-refresh
+                        class="mt-1.5 w-full flex items-center justify-center gap-1.5 ${theme.icon} hover:opacity-80 text-[9px] font-black uppercase tracking-widest py-1.5 transition-opacity">
+                    <i data-lucide="refresh-cw" class="w-3 h-3" aria-hidden="true"></i> Shuffle in fresh tracks
+                </button>
+            </div>`;
+        slot.querySelector('[data-festival-refresh]')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            window.refreshFestivalReadyPlaylist(slotId, entry['Journal Key'] || '', allowGenericFallback);
+        });
+    } else if (kind === 'embed') {
         const wrapId = `${slotId}-embed`;
         slot.innerHTML = `
             <div id="${escapeHtml(wrapId)}" class="mt-3">
@@ -174,8 +242,8 @@ const paintAudioSlot = (slotId, content) => {
         slot.innerHTML = `
             <button
                     class="mt-3 w-full flex items-center justify-center gap-1.5 ${theme.action} text-[10px] font-black uppercase tracking-widest rounded-xl px-3 py-2.5 transition-colors">
-                <i data-lucide="${gigIsPast ? 'list-music' : 'zap'}" class="w-3.5 h-3.5 ${theme.icon}" aria-hidden="true"></i>
-                ${gigIsPast ? 'Generate relive playlist' : 'Get gig ready'}
+                <i data-lucide="${gigIsPast ? 'list-music' : (festivalReady ? 'tent' : 'zap')}" class="w-3.5 h-3.5 ${theme.icon}" aria-hidden="true"></i>
+                ${gigIsPast ? 'Generate relive playlist' : (festivalReady ? 'Get festival ready' : 'Get gig ready')}
             </button>`;
     }
 
@@ -249,13 +317,16 @@ window.generateSlotPlaylist = async (slotId, journalKey, artistName, gigDate, ve
         if (window.lucide) lucide.createIcons();
     }
 
+    const entry = (window.journalData || []).find(g => g['Journal Key'] === journalKey);
+
     if (gigIsPast) {
         await window.createRelivePlaylist(journalKey, artistName, gigDate, venueName, slotId);
+    } else if (entry && isFutureFestival(entry, gigIsPast)) {
+        await window.createFestivalReadyPlaylist(journalKey, slotId);
     } else {
         await window.createGigReadyPlaylist(journalKey, artistName, gigDate, venueName, slotId);
     }
 
-    const entry = (window.journalData || []).find(g => g['Journal Key'] === journalKey);
     if (entry) paintAudioSlot(slotId, await resolveAudioContent(entry, gigIsPast, { allowGenericFallback }));
 };
 
@@ -656,6 +727,119 @@ window.refreshGigReadyPlaylist = async (journalKey, artistName, gigDate, venueNa
         );
         if (window.lucide) lucide.createIcons();
     }
+};
+
+// ─── GET FESTIVAL READY ───────────────────────────────────────────────────────
+// 25 tracks sampled from the lineup of a future festival. The worker
+// (POST /festival) reads journals.festival_lineups, resolves each act through
+// artists, and picks the acts and tracks at random. Refreshing re-runs that
+// and replaces the contents of the SAME Spotify playlist, so the link (and
+// anything the user has done with the playlist in Spotify) stays put.
+
+// Shared by create and refresh. Returns true on success.
+const buildFestivalPlaylist = async (entry, { existingPlaylistId = null } = {}) => {
+    const response = await authedFetch(`${SPOTIFY_WORKER}/festival`, {
+        method: 'POST',
+        body: JSON.stringify({
+            journalId:  entry.id,
+            playlistId: existingPlaylistId,   // set → replace tracks in place
+        }),
+    });
+
+    const result = await response.json();
+    // 404s carry a message worth showing as-is ("no lineup yet", "none of
+    // these artists have Spotify matches yet").
+    if (response.status === 404 && result.error) {
+        window.showToast(result.error, 'error');
+        return false;
+    }
+    if (!result.playlistUrl) throw new Error(result.error || 'No playlist URL returned');
+
+    // spotify_playlists has select/insert/delete RLS but no UPDATE policy, so a
+    // changed playlist (worker had to make a new one because the old one was
+    // deleted in Spotify) is saved as delete + insert rather than an update.
+    const changed = !existingPlaylistId || (result.playlistId && result.playlistId !== existingPlaylistId);
+    if (changed) {
+        if (existingPlaylistId) {
+            await supabase.from('spotify_playlists').delete()
+                .eq('journal_id', entry.id)
+                .eq('user_id', window.currentUser.id)
+                .eq('setlist_source', FESTIVAL_SOURCE);
+        }
+        const { error: dbError } = await supabase.from('spotify_playlists').insert({
+            journal_id:     entry.id,
+            performance_id: null,
+            user_id:        window.currentUser.id,
+            playlist_url:   result.playlistUrl,
+            playlist_id:    result.playlistId,
+            setlist_source: FESTIVAL_SOURCE,
+        });
+        if (dbError) {
+            console.warn('[GigList] Failed to persist festival-ready playlist:', dbError);
+            window.showToast('Playlist created but could not be saved. Try refreshing.', 'warning');
+        }
+    }
+
+    return true;
+};
+
+window.createFestivalReadyPlaylist = async (journalKey, targetId) => {
+    const entry = (window.journalData || []).find(g => g['Journal Key'] === journalKey);
+    if (!entry) return;
+
+    const connected = await checkSpotifyConnection(window.currentUser.id);
+    if (!connected) {
+        renderConnectPrompt(targetId, window.currentUser.id, () =>
+            window.createFestivalReadyPlaylist(journalKey, targetId)
+        );
+        return;
+    }
+
+    try {
+        const ok = await buildFestivalPlaylist(entry);
+        if (ok) window.showToast('Playlist ready — time to get festival ready! 🎪', 'success');
+    } catch (err) {
+        console.error('[GigList] createFestivalReadyPlaylist failed:', err);
+        window.showToast('Could not create playlist. Please try again.', 'error');
+    }
+    // generateSlotPlaylist repaints the slot from Supabase once this resolves.
+};
+
+window.refreshFestivalReadyPlaylist = async (slotId, journalKey, allowGenericFallback = false) => {
+    const entry = (window.journalData || []).find(g => g['Journal Key'] === journalKey);
+    if (!entry) return;
+
+    const slot = document.getElementById(slotId);
+    if (slot) {
+        const theme = slotTheme(slotId);
+        slot.innerHTML = `
+            <div class="mt-3 flex items-center justify-center gap-1.5 ${theme.loading} text-[10px] font-black uppercase tracking-widest py-2.5">
+                <i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin" aria-hidden="true"></i> Shuffling…
+            </div>`;
+        if (window.lucide) lucide.createIcons();
+    }
+
+    try {
+        const { data: existing } = await supabase
+            .from('spotify_playlists')
+            .select('playlist_id, playlist_url')
+            .eq('journal_id', entry.id)
+            .eq('user_id', window.currentUser.id)
+            .eq('setlist_source', FESTIVAL_SOURCE)
+            .maybeSingle();
+
+        const ok = await buildFestivalPlaylist(entry, {
+            existingPlaylistId: existing?.playlist_id || playlistIdFromUrl(existing?.playlist_url),
+        });
+        if (ok) window.showToast('Fresh tracks added 🎪', 'success');
+    } catch (err) {
+        console.error('[GigList] refreshFestivalReadyPlaylist failed:', err);
+        window.showToast('Could not refresh playlist. Please try again.', 'error');
+    }
+
+    // Repaint either way: success shows the (same-URL) embed row again, and a
+    // failure puts the previous playlist back rather than leaving a spinner.
+    paintAudioSlot(slotId, await resolveAudioContent(entry, false, { allowGenericFallback }));
 };
 
 // ─── DISPATCHER ───────────────────────────────────────────────────────────────
