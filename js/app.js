@@ -1,8 +1,8 @@
 /**
  * GigList Core Engine
- * v10.4.7 — 2026-11-08
+ * v10.4.8 — 2026-11-13
  * ------------------------------------------------------------------
- * ✅ Added "Get Festival Ready" to Spotify playlist generation feature
+ * ✅ Physical release filter added to band discography
  */
 
 import * as Data from './modules/data.js';
@@ -44,7 +44,7 @@ import { syncPushSubscription, initPushUI } from './modules/push.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "10.4.6";
+const APP_VERSION = "10.4.8";
 
 // Columns of profiles that the app is allowed to read (see the column grants
 // in Supabase). home_lat / home_lng / home_label are deliberately excluded:

@@ -21,7 +21,7 @@
  * discogs_id set), never in collection_items.
  *
  * Browsing 80+ releases: a search box (title or year) with a Filter button, type chips with
- * counts, and a Filter & sort sheet (collection status, promos, sort). Active sheet filters
+ * counts, and a Filter & sort sheet (collection status, promos, physical-only, sort). Active sheet filters
  * show as removable pills under the chips. Filters live in S.filters and survive
  * opening/closing a release; they reset when the band changes.
  *
@@ -72,7 +72,7 @@ const S = {
 };
 
 function _defaultFilters() {
-    return { q: '', kind: 'all', own: 'all', promo: 'all', sort: 'year-asc' };
+    return { q: '', kind: 'all', own: 'all', promo: 'all', physical: 'all', sort: 'year-asc' };
 }
 
 const _isAdmin = () => window.isReadOnly === false;
@@ -141,7 +141,7 @@ async function _loadCatalogue() {
     if (S.artist) {
         const { data, error: mErr } = await supabase
             .from('discogs_masters')
-            .select('discogs_master_id, title, year, main_release_id, thumb, cover_url, cover_checked_at, kind, classified_at, promo, spotify_album_id, hidden, pinned')
+            .select('discogs_master_id, title, year, main_release_id, thumb, cover_url, cover_checked_at, kind, classified_at, promo, spotify_album_id, hidden, pinned, has_physical')
             .eq('artist_id', S.artist.id)
             .order('year', { ascending: true, nullsFirst: false });
         if (mErr) console.warn('band-discography: masters load failed', mErr.message);
@@ -268,12 +268,14 @@ function _draw() {
 const _SORTS = [['year-asc', 'Oldest first'], ['year-desc', 'Newest first'], ['title', 'A\u2013Z']];
 const _OWN_OPTS = [['all', 'Everything'], ['owned', 'In collection'], ['not-owned', 'Not in collection'], ['wanted', 'Wanted']];
 const _PROMO_OPTS = [['all', 'Include'], ['hide', 'Hide'], ['only', 'Only']];
+const _PHYSICAL_OPTS = [['all', 'Everything'], ['only', 'Physical only']];
 // Labels for the removable pills under the chips (defaults get none).
 const _PILL_LABELS = {
     own:   { owned: 'In collection', 'not-owned': 'Not in collection', wanted: 'Wanted' },
     promo: { hide: 'No promos', only: 'Promos only' },
+    physical: { only: 'Physical only' },
 };
-const _SHEET_KEYS = new Set(['own', 'promo', 'sort']);
+const _SHEET_KEYS = new Set(['own', 'promo', 'physical', 'sort']);
 
 function _baseMasters() {
     const admin = _isAdmin();
@@ -298,18 +300,21 @@ function _passes(m, skipKind = false) {
 
     if (f.promo === 'hide' && m.promo) return false;
     if (f.promo === 'only' && !m.promo) return false;
+
+    // Only a release known to be digital-only is hidden; null (not checked yet) stays visible.
+    if (f.physical === 'only' && m.has_physical === false) return false;
     return true;
 }
 
 function _filtersActive() {
     const f = S.filters;
-    return !!f.q || f.kind !== 'all' || f.own !== 'all' || f.promo !== 'all';
+    return !!f.q || f.kind !== 'all' || f.own !== 'all' || f.promo !== 'all' || f.physical !== 'all';
 }
 
 // How many of the sheet's filters differ from their defaults (search and type are visible inline).
 function _sheetFilterCount() {
     const f = S.filters, d = _defaultFilters();
-    return (f.own !== d.own) + (f.promo !== d.promo) + (f.sort !== d.sort);
+    return (f.own !== d.own) + (f.promo !== d.promo) + (f.physical !== d.physical) + (f.sort !== d.sort);
 }
 
 function _countMatching() {
@@ -375,7 +380,7 @@ function _drawFilters() {
     if (badge) { badge.textContent = String(n); badge.classList.toggle('hidden', !n); }
     if (btn) btn.setAttribute('aria-label', n ? `Filter and sort, ${n} applied` : 'Filter and sort');
 
-    const pills = ['own', 'promo']
+    const pills = ['own', 'promo', 'physical']
         .map(key => ({ key, label: _PILL_LABELS[key][S.filters[key]] }))
         .filter(p => p.label)
         .map(({ key, label }) => `<button type="button" data-action="reset-filter" data-filter="${key}" aria-label="Remove filter: ${escapeHtml(label)}"
@@ -426,6 +431,7 @@ function _drawFilterSheet() {
         </div>`;
 
     const hasPromo = S.masters.some(m => m.promo);   // only offer the promo filter once one is known
+    const hasDigital = f.physical !== 'all' || S.masters.some(m => m.has_physical === false);   // likewise for physical-only
     const n = _countMatching();
     body.innerHTML = `
     <div class="relative space-y-6">
@@ -434,6 +440,7 @@ function _drawFilterSheet() {
         <h3 class="font-display text-2xl italic text-slate-900 pr-10">Filter &amp; sort</h3>
         ${group('Show', 'own', _OWN_OPTS)}
         ${hasPromo ? group('Promos', 'promo', _PROMO_OPTS) : ''}
+        ${hasDigital ? group('Format', 'physical', _PHYSICAL_OPTS) : ''}
         ${group('Sort by', 'sort', _SORTS)}
         <div class="flex items-center gap-3 pt-2">
             <button type="button" data-action="reset-sheet-filters" class="shrink-0 text-xs font-black uppercase tracking-wider text-slate-500 px-2 py-3">Reset</button>
@@ -532,7 +539,7 @@ function _tile(m) {
         <div class="p-3 flex-1 flex flex-col gap-1">
             <button type="button" data-action="open-master" data-id="${id}" class="text-left">
                 <span class="block text-sm font-bold text-slate-900 leading-snug line-clamp-2">${escapeHtml(m.title)}</span>
-                <span class="block text-xs text-slate-400">${[m.year, m.promo ? 'Promo' : ''].filter(Boolean).join(' · ')}</span>
+                <span class="block text-xs text-slate-400">${[m.year, m.promo ? 'Promo' : '', m.has_physical === false ? 'Digital' : ''].filter(Boolean).join(' · ')}</span>
             </button>
             <div class="mt-auto pt-2 flex items-center gap-3">
                 ${spotify ? `<a href="${spotify}" target="_blank" rel="noopener noreferrer"
@@ -548,7 +555,7 @@ function _tile(m) {
 // ─── ADMIN: SETUP + CURATION ──────────────────────────────────────────────────
 
 function _adminToolbar() {
-    const pending = S.masters.filter(m => !m.classified_at || m.promo == null || !m.cover_checked_at).length;
+    const pending = S.masters.filter(m => !m.classified_at || m.promo == null || !m.cover_checked_at || m.has_physical == null).length;
     return `
     <div class="rounded-[1.5rem] bg-slate-50 border border-slate-100 p-4 flex items-center justify-between gap-3 mb-6">
         <div class="text-xs text-slate-500">
@@ -1033,7 +1040,7 @@ function _onClick(e) {
         }
         case 'reset-sheet-filters': {
             const d = _defaultFilters();
-            Object.assign(S.filters, { own: d.own, promo: d.promo, sort: d.sort });
+            Object.assign(S.filters, { own: d.own, promo: d.promo, physical: d.physical, sort: d.sort });
             return void _drawFilterSheet();
         }
         case 'reset-filter': {
