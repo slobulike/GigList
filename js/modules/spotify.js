@@ -53,16 +53,10 @@ const isFutureFestival = (entry, gigIsPast) => !gigIsPast && isFestivalEntry(ent
 // Future shows have no performances rows, so the lineup lives on the journal
 // row itself (journals.festival_lineups). The client only needs to know whether
 // there is one — the worker parses it, resolves each act to a Spotify id via
-// artists, and picks the tracks.
-const festivalHasLineup = async (entry) => {
-    const { data } = await supabase
-        .from('journals')
-        .select('festival_lineups')
-        .eq('id', entry.id)
-        .eq('user_id', window.currentUser.id)
-        .maybeSingle();
-    return (data?.festival_lineups || '').trim().length > 0;
-};
+// artists, and picks the tracks. data.js already loads the column into each
+// journalData entry (and the editor sets it on save), so no query is needed.
+const festivalHasLineup = (entry) =>
+    String(entry?.['Festival Lineups'] || entry?.festival_lineups || '').trim().length > 0;
 
 // ─── ARTIST/PLAYLIST EMBED (on demand) ─────────────────────────────────────────
 // Home and the gig modal both render a tap-to-load row rather than mounting
@@ -170,14 +164,7 @@ const resolveAudioContent = async (entry, gigIsPast, { allowGenericFallback = fa
     // A festival with no lineup yet has nothing to sample from, so don't
     // invite a tap that's guaranteed to fail (same idea as the no-setlist
     // check above).
-    if (festivalReady) {
-        try {
-            if (!(await festivalHasLineup(entry))) return noCta();
-        } catch (err) {
-            console.warn('[GigList] Could not read festival lineup:', err);
-            return noCta();
-        }
-    }
+    if (festivalReady && !festivalHasLineup(entry)) return noCta();
 
     return { kind: 'cta', entry, gigIsPast, allowGenericFallback, festivalReady };
 };
@@ -195,6 +182,9 @@ const paintAudioSlot = (slotId, content) => {
         // loadSpotifyEmbed replaces the wrapper's innerHTML with the iframe,
         // which would otherwise wipe the button out.
         const wrapId = `${slotId}-embed`;
+        // Shuffling regenerates through the Spotify connection, so only
+        // spotify_access users get the button (same rule as the generate CTA).
+        const canShuffle = window.currentUser?.spotify_access === true;
         slot.innerHTML = `
             <div class="mt-3">
                 <div id="${escapeHtml(wrapId)}">
@@ -204,10 +194,10 @@ const paintAudioSlot = (slotId, content) => {
                         <span class="text-[10px] font-black uppercase tracking-widest">Play get festival ready playlist</span>
                     </button>
                 </div>
-                <button data-festival-refresh
+                ${canShuffle ? `<button data-festival-refresh
                         class="mt-1.5 w-full flex items-center justify-center gap-1.5 ${theme.icon} hover:opacity-80 text-[9px] font-black uppercase tracking-widest py-1.5 transition-opacity">
                     <i data-lucide="refresh-cw" class="w-3 h-3" aria-hidden="true"></i> Shuffle in fresh tracks
-                </button>
+                </button>` : ''}
             </div>`;
         slot.querySelector('[data-festival-refresh]')?.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -807,7 +797,23 @@ window.createFestivalReadyPlaylist = async (journalKey, targetId) => {
 
 window.refreshFestivalReadyPlaylist = async (slotId, journalKey, allowGenericFallback = false) => {
     const entry = (window.journalData || []).find(g => g['Journal Key'] === journalKey);
-    if (!entry) return;
+    if (!entry || window.currentUser?.spotify_access !== true) return;
+
+    // Disconnected (or token revoked): offer to reconnect, then shuffle,
+    // rather than letting the worker fail with a generic error.
+    // The prompt replaces the element it's given, so give it a placeholder
+    // inside the slot — the slot itself must survive for the repaint.
+    const connected = await checkSpotifyConnection(window.currentUser.id);
+    if (!connected) {
+        const slotEl = document.getElementById(slotId);
+        if (!slotEl) return;
+        const promptHostId = `${slotId}-connect`;
+        slotEl.innerHTML = `<div class="mt-3 flex justify-center"><div id="${escapeHtml(promptHostId)}"></div></div>`;
+        renderConnectPrompt(promptHostId, window.currentUser.id, () =>
+            window.refreshFestivalReadyPlaylist(slotId, journalKey, allowGenericFallback)
+        );
+        return;
+    }
 
     const slot = document.getElementById(slotId);
     if (slot) {

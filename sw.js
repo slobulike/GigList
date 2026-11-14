@@ -2,7 +2,7 @@
 // Gig List — Service Worker
 // ─────────────────────────────────────────────────────────────────────────────
 
-const CACHE_NAME = 'gig-list-v13';
+const CACHE_NAME = 'gig-list-v14';
 const APP_BASE   = '/GigList/';
 const APP_ROOT   = APP_BASE + 'vault.html';
 
@@ -54,6 +54,7 @@ const ASSETS = [
   './js/modules/push.js',
   './js/modules/puzzle.js',
   './js/modules/quiz.js',
+  './js/modules/setlist-catchup.js',
   './js/modules/setlist-sync.js',
   './js/modules/social.js',
   './js/modules/spotify-auth.js',

@@ -45,6 +45,13 @@
  *   upsertPerformances(perfRows)
  *   upsertJournals(journalRows)
  *
+ * ─── One show (shared by editor.js and setlist-catchup.js) ────────────────
+ *   findArtistMbid(name)                 — artist-search → MBID | null
+ *   findShowSetlist(mbid, dateUK, venue) — find-show for one date → setlist | null
+ *   findFestivalSetlists(lineup, dateUK) — each act over a 3-day window
+ *   saveShowSetlists(setlists, opts)     — performances + venue + links for ONE journal
+ *   linkJournalVenue / linkJournalToSetlistVenue / linkPerformancesToVenue
+ *
  * ─── Full user sync ───────────────────────────────────────────────────────
  *   runSetlistSync(username, { onProgress, onComplete, onError })
  *
@@ -56,6 +63,7 @@
 
 
 import { supabase, authedFetch } from './supabase.js';
+import { parseActList } from './utils.js';
 
 
 export const WORKER_URL = 'https://setlistfm-proxy.richard-lipscombe.workers.dev';
@@ -460,10 +468,12 @@ export async function upsertVenues(venueRows) {
 /**
  * Upserts performances. Uses upsert on (journal_key, artist) so that
  * re-running the sync enriches setlist data without duplicating rows.
+ * Returns how many rows were written (failed batches are logged, not thrown).
  */
 export async function upsertPerformances(perfRows) {
-    if (!perfRows.length) return;
+    if (!perfRows.length) return 0;
 
+    let written = 0;
     // Batch into 100s to stay within Supabase request limits
     for (let i = 0; i < perfRows.length; i += 100) {
         const batch = perfRows.slice(i, i + 100);
@@ -471,7 +481,9 @@ export async function upsertPerformances(perfRows) {
             .from('performances')
             .upsert(batch, { onConflict: 'journal_key,artist', ignoreDuplicates: false });
         if (error) console.warn('performances upsert error:', error.message);
+        else written += batch.length;
     }
+    return written;
 }
 
 
@@ -503,6 +515,197 @@ export async function upsertJournals(journalRows) {
     }
 
     return { inserted, skipped };
+}
+
+
+// ─── One show: lookup + save ──────────────────────────────────────────────────
+// Used by the editor when a past show is saved, and by setlist-catchup.js when a
+// show logged in advance has since happened. Both write the same rows the same way.
+
+
+const _rateLimited = () => Object.assign(new Error('Rate limited by setlist.fm'), { code: 'rate_limited' });
+
+/** Polite gap between setlist.fm calls (the API allows ~2/s per key, shared by everyone). */
+export const politePause = (ms = 1100) => new Promise(r => setTimeout(r, ms));
+
+
+/**
+ * setlist.fm artist search → the best MBID, or null.
+ * Throws { code: 'rate_limited' } on 429.
+ */
+export async function findArtistMbid(artistName) {
+    const name = (artistName || '').trim();
+    if (!name) return null;
+    const res = await authedFetch(`${WORKER_URL}/?endpoint=artist-search&name=${encodeURIComponent(name)}`);
+    if (res.status === 429) throw _rateLimited();
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.artist?.[0]?.mbid || null;
+}
+
+
+/**
+ * The setlist for one artist (MBID) on one date, via the proxy's find-show
+ * endpoint. dateUK is DD/MM/YYYY. When the artist played twice that day,
+ * pickSetlist chooses by venue, then by song count.
+ *
+ * Returns the setlist, or null when setlist.fm has nothing for that date.
+ * Throws { code: 'rate_limited' } on 429 and { code: 'proxy_error' } on any
+ * other failure, so callers can tell "not there" from "couldn't check".
+ */
+export async function findShowSetlist(mbid, dateUK, venue = null) {
+    if (!mbid || !dateUK) return null;
+    const fmDate = dateUK.replace(/\//g, '-'); // DD/MM/YYYY → DD-MM-YYYY
+    const res = await authedFetch(`${WORKER_URL}/?endpoint=find-show&mbid=${encodeURIComponent(mbid)}&eventDate=${encodeURIComponent(fmDate)}`);
+
+    if (res.status === 404) return null;
+    if (res.status === 429) throw _rateLimited();
+    if (!res.ok) throw Object.assign(new Error(`setlist.fm proxy returned ${res.status}`), { code: 'proxy_error' });
+
+    const data = await res.json();
+    return pickSetlist(data.setlist, venue);
+}
+
+
+/**
+ * The start date plus the next (windowDays - 1) days, as DD/MM/YYYY strings.
+ * A festival journal only records its first day; acts play across all of them.
+ */
+export function festivalDateWindow(dateStr, windowDays = 3) {
+    const [d, m, y] = dateStr.split('/').map(Number);
+    const base = new Date(y, m - 1, d);
+    const dates = [];
+    for (let i = 0; i < windowDays; i++) {
+        const dt = new Date(base);
+        dt.setDate(base.getDate() + i);
+        dates.push(`${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}/${dt.getFullYear()}`);
+    }
+    return dates;
+}
+
+
+/**
+ * For a festival: look each act up on setlist.fm across a 3-day window from
+ * the start date and return every setlist found (one per act at most).
+ * A failure for one act is logged and skipped — except a rate limit, which
+ * stops the run (the remaining acts would fail too) unless swallowRateLimit.
+ *
+ * @param lineup  array of names, or a stored "A / B" string
+ * @param opts.mbidFor  optional async (name) => mbid, to reuse stored MBIDs
+ *                      before falling back to an artist search
+ */
+export async function findFestivalSetlists(lineup, dateStr, { mbidFor = null, swallowRateLimit = true } = {}) {
+    const bands = Array.isArray(lineup)
+        ? lineup.map(b => (b || '').trim()).filter(Boolean)
+        : parseActList(lineup, { splitCommas: false });
+
+    const dateWindow = festivalDateWindow(dateStr, 3);
+    const allMatches = [];
+
+    for (const bandName of bands) {
+        try {
+            const mbid = (mbidFor && await mbidFor(bandName)) || await findArtistMbid(bandName);
+            if (!mbid) continue;
+
+            await politePause();
+
+            let match = null;
+            for (const tryDate of dateWindow) {
+                match = await findShowSetlist(mbid, tryDate);
+                if (match) break;
+                await politePause();
+            }
+
+            if (match) allMatches.push(match);
+        } catch (e) {
+            if (e.code === 'rate_limited' && !swallowRateLimit) throw e;
+            console.warn(`Festival setlist lookup failed for ${bandName}:`, e.message);
+        }
+        await politePause();
+    }
+
+    return allMatches;
+}
+
+
+/** Link a journal row to a venue. Only fills an EMPTY venue_id, never overwrites. */
+export async function linkJournalVenue(journalKey, writeUserId, venueId) {
+    let q = supabase.from('journals').update({ venue_id: venueId }).eq('journal_key', journalKey).is('venue_id', null);
+    q = writeUserId ? q.eq('user_id', writeUserId) : q.is('user_id', null);
+    const { error } = await q;
+    if (error) console.warn('journal venue link failed:', error.message);
+}
+
+
+/**
+ * setlist.fm found the show, and upsertVenues saved its venue under setlist.fm's
+ * name (keyed by place_id = setlist.fm venue id). The name the user typed can
+ * differ ("Borde Hill" vs "Borde Hill Garden"), so link by that id instead.
+ */
+export async function linkJournalToSetlistVenue(journalKey, writeUserId, venueRow) {
+    if (!venueRow?.place_id) return;
+    try {
+        const { data } = await supabase.from('venues').select('id').eq('place_id', venueRow.place_id).limit(2);
+        if (data?.length === 1) await linkJournalVenue(journalKey, writeUserId, data[0].id);
+    } catch (err) {
+        console.warn('setlist venue link failed:', err.message);
+    }
+}
+
+
+/** Fill venue_id on this show's performances that don't have one yet (never overwrites). */
+export async function linkPerformancesToVenue(journalKey, venueId) {
+    if (!venueId) return;
+    try {
+        const { error } = await supabase
+            .from('performances').update({ venue_id: venueId })
+            .eq('journal_key', journalKey).is('venue_id', null);
+        if (error) console.warn('performance venue link failed:', error.message);
+    } catch (err) {
+        console.warn('performance venue link error:', err.message);
+    }
+}
+
+
+/**
+ * Saves setlists found for ONE journal row.
+ *
+ * Performances are written under THIS journal's key and venue name, not
+ * setlist.fm's: data.js loads performances by exact journal_key, so when the
+ * journal names the venue differently ("Wembley Arena" vs "The SSE Arena,
+ * Wembley") a setlist.fm-keyed row would never be seen. For a festival every
+ * act's row also takes the festival's key, even when that act played on day 2.
+ *
+ * @param setlists         raw setlist.fm setlist objects
+ * @param opts.journalKey  the journal's key
+ * @param opts.venue       the journal's official_venue
+ * @param opts.writeUserId journal owner (null for band-archive rows)
+ * @param opts.venueId     the journal's venue_id, if it has one
+ * @param opts.role        override the role groupByShow assigns ('Festival')
+ * @param opts.artistIdFor (setlistFmArtistName) => artists.id | null
+ * @returns number of performance rows written
+ */
+export async function saveShowSetlists(setlists, { journalKey, venue, writeUserId, venueId = null, role = null, artistIdFor = () => null }) {
+    const list = (setlists || []).filter(Boolean);
+    if (!list.length) return 0;
+
+    const perfRows = [];
+    const venueRows = [];
+    for (const show of groupByShow(list).values()) {
+        perfRows.push(...show.performances.map(p => ({
+            ...p,
+            journal_key:    journalKey,
+            official_venue: venue,
+            ...(role ? { role } : {}),
+            artist_id:      artistIdFor(p.artist) ?? null,
+        })));
+        venueRows.push(buildVenueRow(show.venueRaw));
+    }
+
+    const [, written] = await Promise.all([upsertVenues(venueRows), upsertPerformances(perfRows)]);
+    if (!venueId) await linkJournalToSetlistVenue(journalKey, writeUserId, venueRows[0]);
+    await linkPerformancesToVenue(journalKey, venueId);
+    return written;
 }
 
 

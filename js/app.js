@@ -1,7 +1,11 @@
 /**
  * GigList Core Engine
- * v10.4.8 — 2026-11-13
+ * v10.4.9 — 2026-11-14
  * ------------------------------------------------------------------
+ * ✅ Setlist catch-up: shows logged in advance get their setlists automatically once they've happened
+ * ✅ Get Festival Ready: no extra lineup query; shuffle only offered to Spotify-enabled users and asks to reconnect if needed
+ * ------------------------------------------------------------------
+ * v10.4.8 — 2026-11-13
  * ✅ Physical release filter added to band discography
  */
 
@@ -44,7 +48,7 @@ import { syncPushSubscription, initPushUI } from './modules/push.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "10.4.8";
+const APP_VERSION = "10.4.9";
 
 // Columns of profiles that the app is allowed to read (see the column grants
 // in Supabase). home_lat / home_lng / home_label are deliberately excluded:
@@ -582,6 +586,17 @@ export async function initApp() {
                 renderDashboardCharts(results, window.performanceData || []);
             })
             .catch(err => console.warn('app.js: chart/performance load failed:', err));
+
+        // Setlist catch-up: shows logged in advance get their setlists once they've
+        // happened (see setlist-catchup.js). Background, a few seconds after the
+        // performances are in, and loaded on demand so it adds nothing to boot.
+        if (currentUser?.isAuthUser && currentUser?.Type === 'Personal') {
+            perfPromise.then(() => setTimeout(() => {
+                import('./modules/setlist-catchup.js')
+                    .then(m => m.startSetlistCatchup(currentUser))
+                    .catch(err => console.warn('app.js: setlist catch-up failed', err));
+            }, 5000));
+        }
     }
 
     // Load social data FIRST so _following is ready when the switcher panel builds
