@@ -143,7 +143,7 @@
                 <h2 id="festival-title" class="font-display text-4xl italic tracking-tight text-white leading-tight uppercase mb-1">—</h2>
                 <p id="festival-meta" class="text-xs font-bold text-slate-300 mb-6">—</p>
                 <div id="festival-lineup" class="flex flex-wrap items-center justify-center gap-x-2.5 gap-y-2 max-w-sm mx-auto"></div>
-                <p class="text-[10px] font-bold text-slate-400 mt-6 uppercase tracking-widest">Gig List users saw these bands here</p>
+                <p id="festival-footnote" class="text-[10px] font-bold text-slate-400 mt-6 uppercase tracking-widest">Gig List users saw these bands here</p>
             </div>
         </div>
 
@@ -155,7 +155,7 @@
                 <div id="artist-hero-bg" class="absolute inset-0 bg-cover bg-center" style="background-image: linear-gradient(160deg, #312e81, #1e1b4b 60%, #0f172a);"></div>
                 <div class="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-slate-950/35 to-slate-950/10"></div>
                 <div class="relative px-6 pt-10 pb-5">
-                    <p class="text-[10px] font-black uppercase tracking-widest text-indigo-300 mb-2">Live Show</p>
+                    <p id="hero-eyebrow" class="text-[10px] font-black uppercase tracking-widest text-indigo-300 mb-2">Live Show</p>
                     <h2 id="band-name" class="font-display text-5xl italic tracking-tight text-white leading-none uppercase">—</h2>
                     <p id="support-acts" class="hidden text-sm font-bold text-slate-300 mt-1.5">—</p>
                 </div>
@@ -173,11 +173,55 @@
             </div>
         </div>
 
+        <!-- ── UPCOMING: COUNTDOWN (future shows only) ─────────────────────── -->
+        <div id="upcoming-card" class="hidden fade-up delay-1 bg-white rounded-[2rem] border border-slate-100 shadow-sm p-6">
+            <div class="flex items-center justify-between mb-4">
+                <p class="text-[10px] font-black uppercase tracking-widest text-slate-400">Coming up</p>
+                <div id="upcoming-badge" class="bg-amber-50 text-amber-600 text-[10px] font-black px-2.5 py-1 rounded-full">—</div>
+            </div>
+
+            <div id="countdown" class="grid grid-cols-4 gap-2 text-center" role="timer" aria-live="off">
+                <div class="bg-slate-50 rounded-2xl py-3">
+                    <p id="cd-days"  class="font-display text-4xl text-slate-800 leading-none tabular-nums">0</p>
+                    <p id="cd-days-label" class="text-[9px] font-black uppercase tracking-widest text-slate-400 mt-1.5">Days</p>
+                </div>
+                <div class="bg-slate-50 rounded-2xl py-3">
+                    <p id="cd-hours" class="font-display text-4xl text-slate-800 leading-none tabular-nums">00</p>
+                    <p class="text-[9px] font-black uppercase tracking-widest text-slate-400 mt-1.5">Hours</p>
+                </div>
+                <div class="bg-slate-50 rounded-2xl py-3">
+                    <p id="cd-mins"  class="font-display text-4xl text-slate-800 leading-none tabular-nums">00</p>
+                    <p class="text-[9px] font-black uppercase tracking-widest text-slate-400 mt-1.5">Mins</p>
+                </div>
+                <div class="bg-slate-50 rounded-2xl py-3">
+                    <p id="cd-secs"  class="font-display text-4xl text-indigo-600 leading-none tabular-nums">00</p>
+                    <p class="text-[9px] font-black uppercase tracking-widest text-slate-400 mt-1.5">Secs</p>
+                </div>
+            </div>
+            <p id="countdown-caption" class="text-center text-[10px] font-bold text-slate-400 mt-3">until show day</p>
+
+            <!-- Shown instead of the tiles on the day itself -->
+            <div id="showday-message" class="hidden text-center py-3">
+                <p class="font-display text-4xl italic text-indigo-600 uppercase leading-none">It's show day</p>
+                <p class="text-xs font-bold text-slate-400 mt-2">Have an amazing night 🤘</p>
+            </div>
+
+            <div class="mt-5 pt-5 border-t border-slate-100 flex items-start gap-3">
+                <div class="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center flex-shrink-0">
+                    <i data-lucide="list-music" class="w-5 h-5 text-indigo-500" aria-hidden="true"></i>
+                </div>
+                <div class="min-w-0">
+                    <p class="text-xs font-black text-slate-700">Setlist unlocks after the show</p>
+                    <p id="upcoming-setlist-note" class="text-xs text-slate-500 mt-0.5 leading-relaxed">The setlist can't be known until the band has played. Check back after the show.</p>
+                </div>
+            </div>
+        </div>
+
         <!-- ── SOCIAL PROOF ────────────────────────────────────────────────── -->
         <div id="social-proof-card"
              class="fade-up delay-1 bg-indigo-600 rounded-[2rem] px-5 py-4 flex items-center justify-between shadow-md shadow-indigo-100">
             <div>
-                <p class="text-[9px] font-black uppercase tracking-widest text-indigo-300 mb-1">Also tracked this</p>
+                <p id="social-label" class="text-[9px] font-black uppercase tracking-widest text-indigo-300 mb-1">Also tracked this</p>
                 <p class="text-sm font-black text-white">
                     <span id="attendee-count">1</span> Gig List user<span id="attendee-plural">s</span>
                 </p>
@@ -283,19 +327,29 @@
 
     // ── Helpers ────────────────────────────────────────────────────────────
 
-    function fmt(dateStr) {
-        if (!dateStr || dateStr === 'nan') return 'Date TBC';
-        let d;
-        const parts = dateStr.split('/');
-        if (parts.length === 3) {
-            // DD/MM/YYYY — legacy format used in the CSV import pipeline
-            d = new Date(parts[2], parts[1] - 1, parts[0]);
-        } else {
-            // ISO YYYY-MM-DD (Supabase default) — append noon to avoid UTC midnight rollback
-            d = new Date(dateStr + 'T12:00:00');
-        }
-        if (!d || isNaN(d)) return 'Date TBC';
+    // Parses either DD/MM/YYYY (journals / legacy CSV pipeline) or ISO YYYY-MM-DD
+    // (Supabase default). ISO is read at noon to avoid UTC-midnight rollback.
+    function parseShowDate(dateStr) {
+        if (!dateStr || dateStr === 'nan') return null;
+        const str   = String(dateStr).trim();
+        const parts = str.split('/');
+        const d = parts.length === 3
+            ? new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0]))
+            : new Date(str.slice(0, 10) + 'T12:00:00');
+        return (d && !isNaN(d)) ? d : null;
+    }
+
+    function fmtDate(d) {
         return d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    }
+
+    function fmt(dateStr) {
+        const d = parseShowDate(dateStr);
+        return d ? fmtDate(d) : 'Date TBC';
+    }
+
+    function startOfDay(d) {
+        return new Date(d.getFullYear(), d.getMonth(), d.getDate());
     }
 
     function hostnameOf(url) {
@@ -395,15 +449,20 @@
                 .order('artist', { ascending: true });
 
             if (perfErr) throw perfErr;
-            if (!perfRows || !perfRows.length) throw new Error('Show not found.');
+
+            // No performances rows yet = the show hasn't happened (or hasn't been
+            // synced). Fall back to the sharer's journal entry, exposed via a
+            // SECURITY DEFINER RPC that returns only public-safe fields.
+            const upcoming = (!perfRows || !perfRows.length) ? await fetchUpcomingShow(rawKey) : null;
+            if ((!perfRows || !perfRows.length) && !upcoming) throw new Error('Show not found.');
 
             // TODO: Festival journal_keys can have 10-20 rows (one per act on the
             // bill), handled below via the dedicated poster view (renderFestivalPoster).
-            const festivalRows = perfRows.filter(p => p.role === 'Festival');
+            const festivalRows = upcoming ? [] : perfRows.filter(p => p.role === 'Festival');
             const isFestival   = festivalRows.length > 0;
 
-            const perf = perfRows.find(p => p.role === 'Headline') || perfRows[0];
-            const supportActs = perfRows
+            const perf = upcoming ? null : (perfRows.find(p => p.role === 'Headline') || perfRows[0]);
+            const supportActs = upcoming ? [] : perfRows
                 .filter(p => p.role === 'Support' && p.artist !== perf.artist)
                 .map(p => p.artist);
 
@@ -413,7 +472,9 @@
             const attendeeCount = Math.max(countData ?? 1, 1);
 
             // 3. Populate hero — festival poster vs. standard headliner card
-            if (isFestival) {
+            if (upcoming) {
+                await renderUpcomingShow(upcoming, rawKey);
+            } else if (isFestival) {
                 await renderFestivalPoster(festivalRows, rawKey);
             } else {
                 await renderStandardShow(perf, supportActs);
@@ -584,6 +645,182 @@
         document.querySelector('meta[property="og:title"]')?.setAttribute('content', pageTitle);
         document.querySelector('meta[property="og:description"]')?.setAttribute('content', pageDesc);
 
+        setupShare(pageTitle, pageDesc, window.location.href);
+    }
+
+    // ── Upcoming (future-dated) shows ─────────────────────────────────────────
+    // Future shows only exist in `journals` (no performances rows until the
+    // show has happened and been synced), so the data comes from the
+    // get_public_upcoming_show RPC rather than the performances table.
+
+    async function fetchUpcomingShow(rawKey) {
+        const { data, error } = await supabase.rpc('get_public_upcoming_show', { p_journal_key: rawKey });
+        if (error) { console.error('get_public_upcoming_show failed:', error); return null; }
+        return (Array.isArray(data) ? data[0] : data) || null;
+    }
+
+    function splitNames(raw, separator) {
+        return [...new Set(String(raw || '').split(separator).map(n => n.trim()).filter(Boolean))];
+    }
+
+    function fillFestivalLineup(names) {
+        const lineupEl = document.getElementById('festival-lineup');
+        lineupEl.innerHTML = '';
+        names.forEach((name, i) => {
+            if (i > 0) {
+                const dot = document.createElement('span');
+                dot.className = 'text-slate-500 text-sm';
+                dot.textContent = '·';
+                lineupEl.appendChild(dot);
+            }
+            const span = document.createElement('span');
+            span.className = `font-display italic uppercase text-white leading-none ${posterSizeClass(name)}`;
+            span.textContent = name;
+            lineupEl.appendChild(span);
+        });
+    }
+
+    function startCountdown(target, onDone) {
+        const $ = id => document.getElementById(id);
+        const pad = n => String(n).padStart(2, '0');
+        let timer = null;
+
+        const tick = () => {
+            const ms = target.getTime() - Date.now();
+            if (ms <= 0) {
+                if (timer) clearInterval(timer);
+                onDone();
+                return;
+            }
+            const total = Math.floor(ms / 1000);
+            const days  = Math.floor(total / 86400);
+            $('cd-days').textContent  = days;
+            $('cd-days-label').textContent = days === 1 ? 'Day' : 'Days';
+            $('cd-hours').textContent = pad(Math.floor((total % 86400) / 3600));
+            $('cd-mins').textContent  = pad(Math.floor((total % 3600) / 60));
+            $('cd-secs').textContent  = pad(total % 60);
+        };
+
+        tick();
+        timer = setInterval(tick, 1000);
+    }
+
+    function showDayState() {
+        document.getElementById('countdown').classList.add('hidden');
+        document.getElementById('countdown-caption').classList.add('hidden');
+        document.getElementById('showday-message').classList.remove('hidden');
+        const badge = document.getElementById('upcoming-badge');
+        badge.textContent = 'Today';
+        document.getElementById('upcoming-setlist-note').textContent =
+            'The setlist will appear here once the show has happened and been synced.';
+    }
+
+    async function renderUpcomingShow(show, rawKey) {
+        // The journal_key starts with DD/MM/YYYY, so it doubles as a date fallback.
+        const showDate = parseShowDate(show.show_date) || parseShowDate(rawKey.slice(0, 10));
+        const dateText = showDate ? fmtDate(showDate) : 'Date TBC';
+        const venue    = show.venue || 'Venue unknown';
+        const band     = show.band  || 'Live Show';
+
+        // future | today | past (past = happened, but no performances synced yet)
+        const today0 = startOfDay(new Date());
+        const day0   = showDate ? startOfDay(showDate) : null;
+        const mode   = !day0 ? 'past'
+                     : day0 > today0 ? 'future'
+                     : day0.getTime() === today0.getTime() ? 'today'
+                     : 'past';
+        const isUpcoming = mode !== 'past';
+
+        let pageTitle, pageDesc;
+
+        if (show.is_festival) {
+            // ── Festival poster, reusing the past-festival hero ─────────────
+            document.getElementById('standard-hero').classList.add('hidden');
+            document.getElementById('setlist-card').classList.add('hidden');
+            document.getElementById('festival-hero').classList.remove('hidden');
+
+            const lineupNames = splitNames(show.festival_lineups, '/').sort((a, b) => a.localeCompare(b));
+
+            document.getElementById('festival-title').textContent = band;
+            document.getElementById('festival-meta').textContent  = `${venue} · ${dateText}`;
+            document.getElementById('festival-footnote').textContent = isUpcoming
+                ? 'Gig List users are heading here'
+                : 'Gig List users saw these bands here';
+            fillFestivalLineup(lineupNames);
+
+            if (lineupNames.length) {
+                const { data: artistRows } = await supabase
+                    .from('artists')
+                    .select('name, spotify_image_url')
+                    .in('name', lineupNames);
+                const withImages = (artistRows || [])
+                    .filter(a => a.spotify_image_url)
+                    .sort((a, b) => a.name.localeCompare(b.name));
+                const festBg = withImages.length ? cssBgUrl(withImages[0].spotify_image_url) : '';
+                if (festBg) document.getElementById('festival-bg').style.backgroundImage = festBg;
+            }
+
+            pageTitle = isUpcoming ? `${band} — Coming up` : `${band} — Lineup`;
+            pageDesc  = `${lineupNames.length ? lineupNames.length + ' bands at ' : ''}${venue}, ${dateText} — tracked on Gig List`;
+
+        } else {
+            // ── Standard show hero ──────────────────────────────────────────
+            document.getElementById('band-name').textContent  = band;
+            document.getElementById('venue-name').textContent = venue;
+            document.getElementById('show-date').textContent  = dateText;
+
+            if (isUpcoming) {
+                const eyebrow = document.getElementById('hero-eyebrow');
+                eyebrow.textContent = 'Coming Up';
+                eyebrow.classList.replace('text-indigo-300', 'text-amber-300');
+            }
+
+            const supportActs = splitNames(show.notable_support, /[\/,]/);
+            if (supportActs.length) {
+                const supportEl = document.getElementById('support-acts');
+                supportEl.textContent = `with ${supportActs.join(', ')}`;
+                supportEl.classList.remove('hidden');
+            }
+
+            // Artist image: by artist_id when the journal row has one, else by name.
+            let imageUrl = null;
+            if (show.artist_id) {
+                const { data: a } = await supabase.from('artists')
+                    .select('spotify_image_url').eq('id', show.artist_id).maybeSingle();
+                imageUrl = a?.spotify_image_url;
+            }
+            if (!imageUrl && show.band) {
+                const { data: a } = await supabase.from('artists')
+                    .select('spotify_image_url').eq('name', show.band).limit(1).maybeSingle();
+                imageUrl = a?.spotify_image_url;
+            }
+            const heroBg = cssBgUrl(imageUrl);
+            if (heroBg) document.getElementById('artist-hero-bg').style.backgroundImage = heroBg;
+
+            pageTitle = `${band} at ${venue}`;
+            pageDesc  = `${dateText} · ${venue} — ${isUpcoming ? 'coming up, ' : ''}tracked on Gig List`;
+        }
+
+        // ── Countdown card (replaces the setlist for shows yet to happen) ──
+        if (isUpcoming) {
+            document.getElementById('setlist-card').classList.add('hidden');
+            document.getElementById('upcoming-card').classList.remove('hidden');
+            document.getElementById('social-label').textContent = 'Also going';
+
+            if (mode === 'today') {
+                showDayState();
+            } else {
+                const days  = Math.round((day0 - today0) / 86400000);
+                document.getElementById('upcoming-badge').textContent =
+                    days === 1 ? 'Tomorrow' : `${days} days to go`;
+                startCountdown(day0, showDayState);
+            }
+        }
+
+        // ── Page meta + share ──
+        document.title = `${pageTitle} | Gig List`;
+        document.querySelector('meta[property="og:title"]')?.setAttribute('content', pageTitle);
+        document.querySelector('meta[property="og:description"]')?.setAttribute('content', pageDesc);
         setupShare(pageTitle, pageDesc, window.location.href);
     }
 

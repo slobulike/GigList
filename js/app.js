@@ -1,12 +1,8 @@
 /**
  * GigList Core Engine
- * v10.4.9 — 2026-11-14
+ * v10.5.0 — 2026-11-19
  * ------------------------------------------------------------------
- * ✅ Setlist catch-up: shows logged in advance get their setlists automatically once they've happened
- * ✅ Get Festival Ready: no extra lineup query; shuffle only offered to Spotify-enabled users and asks to reconnect if needed
- * ------------------------------------------------------------------
- * v10.4.8 — 2026-11-13
- * ✅ Physical release filter added to band discography
+ * ✅ Fixed sharing of future shows to load page correctly and included show count down
  */
 
 import * as Data from './modules/data.js';
@@ -48,7 +44,7 @@ import { syncPushSubscription, initPushUI } from './modules/push.js';
 // Expose on window so profile.js can call it without a direct import
 window.checkNudgeTrigger = checkNudgeTrigger;
 
-const APP_VERSION = "10.4.9";
+const APP_VERSION = "10.5.0";
 
 // Columns of profiles that the app is allowed to read (see the column grants
 // in Supabase). home_lat / home_lng / home_label are deliberately excluded:
